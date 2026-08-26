@@ -1,0 +1,195 @@
+﻿
+> restaurantnative@1.0.0 lint
+> expo lint
+
+env: load .env
+env: export GEMINI_API_KEY VITE_API_TIMEOUT VITE_API_URL VITE_APP_NAME
+
+D:\TECH WIZARD FOLDER-INTERN\Restaurant-mobile\Frontend\src\app\invoice.tsx
+  12:10  warning  'downloading' is assigned a value but never used                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         @typescript-eslint/no-unused-vars
+  15:5   error    Error: Cannot access variable before it is declared
+
+`generatePDF` is accessed before it is declared, which prevents the earlier access from updating when this value changes over time.
+
+D:\TECH WIZARD FOLDER-INTERN\Restaurant-mobile\Frontend\src\app\invoice.tsx:15:5
+  13 |
+  14 |   useEffect(() => {
+> 15 |     generatePDF();
+     |     ^^^^^^^^^^^ `generatePDF` accessed before it is declared
+  16 |   }, []);
+  17 |
+  18 |   const generatePDF = async () => {
+
+D:\TECH WIZARD FOLDER-INTERN\Restaurant-mobile\Frontend\src\app\invoice.tsx:18:3
+   16 |   }, []);
+   17 |
+>  18 |   const generatePDF = async () => {
+      |   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+>  19 |     try {
+      | ^^^^^^^^^
+>  20 |       const orderId = params.orderId as string || 'DU104-100034372TE';
+      ΓÇª
+      | ^^^^^^^^^
+> 264 |     }
+      | ^^^^^^^^^
+> 265 |   };
+      | ^^^^^ `generatePDF` is declared here
+  266 |
+  267 |   return (
+  268 |     <SafeAreaView style={styles.container}>  react-hooks/immutability
+  16:6   warning  React Hook useEffect has a missing dependency: 'generatePDF'. Either include it or remove the dependency array                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           react-hooks/exhaustive-deps
+
+D:\TECH WIZARD FOLDER-INTERN\Restaurant-mobile\Frontend\src\app\menu.tsx
+    1:85  warning  'Platform' is defined but never used                             @typescript-eslint/no-unused-vars
+    1:95  warning  'StatusBar' is defined but never used                            @typescript-eslint/no-unused-vars
+   15:23  warning  'setTableNumber' is assigned a value but never used              @typescript-eslint/no-unused-vars
+  400:72  error    `'` can be escaped with `&apos;`, `&lsquo;`, `&#39;`, `&rsquo;`  react/no-unescaped-entities
+
+D:\TECH WIZARD FOLDER-INTERN\Restaurant-mobile\Frontend\src\app\order-completed.tsx
+   3:10  warning  'SafeAreaView' is defined but never used                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          @typescript-eslint/no-unused-vars
+   7:9   warning  'width' is assigned a value but never used                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        @typescript-eslint/no-unused-vars
+  27:67  error    Error: Cannot call impure function during render
+
+`Math.random` is an impure function. Calling an impure function can produce unstable results that update unpredictably when the component happens to re-render. (https://react.dev/reference/rules/components-and-hooks-must-be-pure#components-and-hooks-must-be-idempotent).
+
+D:\TECH WIZARD FOLDER-INTERN\Restaurant-mobile\Frontend\src\app\order-completed.tsx:27:67
+  25 |
+  26 |   // Parsed Data
+> 27 |   const rawOrderId = params.orderId || `UDP-${Math.floor(100000 + Math.random() * 900000)}`;
+     |                                                                   ^^^^^^^^^^^^^ Cannot call impure function
+  28 |   const totalAmount = params.totalAmount || '0.00';
+  29 |   const paymentMethod = params.paymentMethod || 'UPI';
+  30 |   const phone = params.phone || '82166432250';  react-hooks/purity
+  52:6   warning  React Hook useEffect has missing dependencies: 'cardOpacity', 'cardTranslateY', and 'checkScale'. Either include them or remove the dependency array                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              react-hooks/exhaustive-deps
+
+D:\TECH WIZARD FOLDER-INTERN\Restaurant-mobile\Frontend\src\app\order-success.tsx
+   2:59  warning  'Platform' is defined but never used                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                @typescript-eslint/no-unused-vars
+   2:69  warning  'StatusBar' is defined but never used                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               @typescript-eslint/no-unused-vars
+  23:22  error    Error: Cannot access refs during render
+
+React refs are values that are not needed for rendering. Refs should only be accessed outside of render, such as in event handlers or effects. Accessing a ref value (the `current` property) during render can cause your component not to update as expected (https://react.dev/reference/react/useRef).
+
+D:\TECH WIZARD FOLDER-INTERN\Restaurant-mobile\Frontend\src\app\order-success.tsx:23:22
+  21 |
+  22 |   // Animation values
+> 23 |   const scaleValue = useRef(new Animated.Value(0)).current;
+     |                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ Cannot access ref value during render
+  24 |   const opacityValue = useRef(new Animated.Value(0)).current;
+  25 |
+  26 |   useEffect(() => {                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  react-hooks/refs
+  23:22  error    Error: Cannot access refs during render
+
+React refs are values that are not needed for rendering. Refs should only be accessed outside of render, such as in event handlers or effects. Accessing a ref value (the `current` property) during render can cause your component not to update as expected (https://react.dev/reference/react/useRef).
+
+D:\TECH WIZARD FOLDER-INTERN\Restaurant-mobile\Frontend\src\app\order-success.tsx:23:22
+  21 |
+  22 |   // Animation values
+> 23 |   const scaleValue = useRef(new Animated.Value(0)).current;
+     |                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ Cannot access ref value during render
+  24 |   const opacityValue = useRef(new Animated.Value(0)).current;
+  25 |
+  26 |   useEffect(() => {                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  react-hooks/refs
+  23:22  error    Error: Cannot access refs during render
+
+React refs are values that are not needed for rendering. Refs should only be accessed outside of render, such as in event handlers or effects. Accessing a ref value (the `current` property) during render can cause your component not to update as expected (https://react.dev/reference/react/useRef).
+
+D:\TECH WIZARD FOLDER-INTERN\Restaurant-mobile\Frontend\src\app\order-success.tsx:23:22
+  21 |
+  22 |   // Animation values
+> 23 |   const scaleValue = useRef(new Animated.Value(0)).current;
+     |                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ Cannot access ref value during render
+  24 |   const opacityValue = useRef(new Animated.Value(0)).current;
+  25 |
+  26 |   useEffect(() => {                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  react-hooks/refs
+  24:24  error    Error: Cannot access refs during render
+
+React refs are values that are not needed for rendering. Refs should only be accessed outside of render, such as in event handlers or effects. Accessing a ref value (the `current` property) during render can cause your component not to update as expected (https://react.dev/reference/react/useRef).
+
+D:\TECH WIZARD FOLDER-INTERN\Restaurant-mobile\Frontend\src\app\order-success.tsx:24:24
+  22 |   // Animation values
+  23 |   const scaleValue = useRef(new Animated.Value(0)).current;
+> 24 |   const opacityValue = useRef(new Animated.Value(0)).current;
+     |                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ Cannot access ref value during render
+  25 |
+  26 |   useEffect(() => {
+  27 |     // Sequence: fade in and spring scale up the tick                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          react-hooks/refs
+  41:6   warning  React Hook useEffect has missing dependencies: 'opacityValue' and 'scaleValue'. Either include them or remove the dependency array                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  react-hooks/exhaustive-deps
+  95:35  error    Error: Cannot access refs during render
+
+React refs are values that are not needed for rendering. Refs should only be accessed outside of render, such as in event handlers or effects. Accessing a ref value (the `current` property) during render can cause your component not to update as expected (https://react.dev/reference/react/useRef).
+
+D:\TECH WIZARD FOLDER-INTERN\Restaurant-mobile\Frontend\src\app\order-success.tsx:95:35
+   93 |           <View style={styles.animationWrapper}>
+   94 |             {/* Animated Tick Icon */}
+>  95 |             <Animated.View style={[
+      |                                   ^
+>  96 |               styles.outerCircle, 
+      | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+>  97 |               { 
+      | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+>  98 |                 opacity: opacityValue,
+      | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+>  99 |                 transform: [{ scale: scaleValue }] 
+      | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+> 100 |               }
+      | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+> 101 |             ]}>
+      | ^^^^^^^^^^^^^^ Cannot access ref value during render
+  102 |               <View style={styles.innerCircle}>
+  103 |                 <Ionicons name="checkmark" size={32} color="#fff" />
+  104 |               </View>  react-hooks/refs
+  97:15  error    Error: Cannot access refs during render
+
+React refs are values that are not needed for rendering. Refs should only be accessed outside of render, such as in event handlers or effects. Accessing a ref value (the `current` property) during render can cause your component not to update as expected (https://react.dev/reference/react/useRef).
+
+D:\TECH WIZARD FOLDER-INTERN\Restaurant-mobile\Frontend\src\app\order-success.tsx:97:15
+   95 |             <Animated.View style={[
+   96 |               styles.outerCircle, 
+>  97 |               { 
+      |               ^^
+>  98 |                 opacity: opacityValue,
+      | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+>  99 |                 transform: [{ scale: scaleValue }] 
+      | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+> 100 |               }
+      | ^^^^^^^^^^^^^^^^ Cannot access ref value during render
+  101 |             ]}>
+  102 |               <View style={styles.innerCircle}>
+  103 |                 <Ionicons name="checkmark" size={32} color="#fff" />                                                                                                                                                                                                                                                                                  react-hooks/refs
+
+D:\TECH WIZARD FOLDER-INTERN\Restaurant-mobile\Frontend\src\app\payment.tsx
+    2:71  warning  'Platform' is defined but never used                             @typescript-eslint/no-unused-vars
+    2:81  warning  'StatusBar' is defined but never used                            @typescript-eslint/no-unused-vars
+    3:24  warning  'useSafeAreaInsets' is defined but never used                    @typescript-eslint/no-unused-vars
+   31:10  warning  'paymentFailedReason' is assigned a value but never used         @typescript-eslint/no-unused-vars
+  350:28  error    `"` can be escaped with `&quot;`, `&ldquo;`, `&#34;`, `&rdquo;`  react/no-unescaped-entities
+  350:38  error    `"` can be escaped with `&quot;`, `&ldquo;`, `&#34;`, `&rdquo;`  react/no-unescaped-entities
+
+D:\TECH WIZARD FOLDER-INTERN\Restaurant-mobile\Frontend\src\app\track-order.tsx
+   1:19  warning  'D:\TECH WIZARD FOLDER-INTERN\Restaurant-mobile\Frontend\node_modules\react\index.js' imported multiple times                                          import/no-duplicates
+   2:71  warning  'Platform' is defined but never used                                                                                                                   @typescript-eslint/no-unused-vars
+   2:81  warning  'StatusBar' is defined but never used                                                                                                                  @typescript-eslint/no-unused-vars
+   6:37  warning  'D:\TECH WIZARD FOLDER-INTERN\Restaurant-mobile\Frontend\node_modules\react\index.js' imported multiple times                                          import/no-duplicates
+  77:6   warning  React Hook useEffect has missing dependencies: 'params.phone', 'params.tableNumber', and 'router'. Either include them or remove the dependency array  react-hooks/exhaustive-deps
+
+D:\TECH WIZARD FOLDER-INTERN\Restaurant-mobile\Frontend\src\hooks\use-color-scheme.web.ts
+  11:5  error  Error: Calling setState synchronously within an effect can trigger cascading renders
+
+Effects are intended to synchronize state between React and external systems such as manually updating the DOM, state management libraries, or other platform APIs. In general, the body of an effect should do one or both of the following:
+* Update external systems with the latest state from React.
+* Subscribe for updates from some external system, calling setState in a callback function when external state changes.
+
+Calling setState synchronously within an effect body causes cascading renders that can hurt performance, and is not recommended. (https://react.dev/learn/you-might-not-need-an-effect).
+
+D:\TECH WIZARD FOLDER-INTERN\Restaurant-mobile\Frontend\src\hooks\use-color-scheme.web.ts:11:5
+   9 |
+  10 |   useEffect(() => {
+> 11 |     setHasHydrated(true);
+     |     ^^^^^^^^^^^^^^ Avoid calling setState() directly within an effect
+  12 |   }, []);
+  13 |
+  14 |   const colorScheme = useRNColorScheme();  react-hooks/set-state-in-effect
+
+Γ£û 32 problems (12 errors, 20 warnings)
+  0 errors and 1 warning potentially fixable with the `--fix` option.
+

@@ -1,0 +1,54 @@
+=========================================
+      FRONTEND ENDPOINTS STATUS
+=========================================
+
+1. CONNECTED ENDPOINTS (Currently implemented in the app)
+---------------------------------------------------------
+Menu & Items:
+- GET /api/v1/public/menu/categories?restaurant_id={id}
+- GET /api/v1/public/menu/items?restaurant_id={id} (Returns item details including description and image_url)
+  * Note on Images: Images are served statically by the backend based on the image_url field (e.g., prepending API_BASE_URL to relative paths).
+
+Customer Profile:
+- GET /api/customer/profile/{phone} (Fetching user details on login, profile, home, etc.)
+- POST /api/customer/profile (Creating profile on signup)
+- PUT/POST /api/customer/profile (Updating profile details)
+- POST /api/customer/profile/picture (Uploading profile picture)
+
+Addresses:
+- GET /api/customer/{id}/addresses (Listing saved addresses)
+- POST /api/customer/{id}/addresses (Adding a new address)
+- DELETE /api/customer/{id}/addresses/{id} (Removing an address)
+
+Orders:
+- POST /api/orders?restaurant_id={id} (Creating a new order)
+- GET /api/orders/{id}?restaurant_id={id} (Fetching order details / status)
+  * Note on Live Status: The frontend achieves live order tracking by polling this endpoint every 5 seconds (e.g., in track-order.tsx).
+- POST /api/orders/{id}/cancel (Canceling an order)
+- GET /api/customer/orders/{phone} (Fetching order history for a user)
+
+Tables (Dine-In):
+- GET /api/tables/{num}/status?restaurant_id={id} (Check table availability)
+- POST /api/tables/{num}/occupy?restaurant_id={id} (Occupy a table)
+- POST /api/tables/{num}/vacate?restaurant_id={id} (Vacate a table)
+
+
+2. MISSING / NEED TO BE CONNECTED ENDPOINTS (Mocked or absent)
+--------------------------------------------------------------
+Authentication (OTP):
+- POST /api/auth/send-otp (Login currently relies on just checking if phone exists)
+- POST /api/auth/verify-otp 
+
+Rewards & Loyalty:
+- GET /api/customer/{id}/rewards (The rewards.tsx screen lacks API integration for showing/redeeming points)
+
+Favorites / Wishlist:
+- GET /api/customer/{id}/favorites (The favourites.tsx screen is empty/not connected)
+- POST /api/customer/{id}/favorites (Adding/removing favorites)
+
+Checkout & Validation:
+- POST /api/orders/validate-promo (Promo code logic seems to be handled locally in the frontend store instead of validating via the backend)
+- POST /api/orders/verify-payment (Payment currently relies on the frontend redirecting to razorpay.html without robust backend verification webhooks visible in the frontend flow)
+
+Reviews & Ratings:
+- POST /api/orders/{id}/review (Submitting a rating after order completion)
