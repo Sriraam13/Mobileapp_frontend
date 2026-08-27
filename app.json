@@ -42,7 +42,6 @@
           }
         }
       ],
-      "expo-sharing",
       [
         "expo-camera",
         {
@@ -56,10 +55,6 @@
           "cameraPermission": "Allow Data Udipi App to access your camera to take profile pictures."
         }
       ],
-      "expo-font",
-      "expo-image",
-      "expo-status-bar",
-      "expo-web-browser",
       [
         "expo-location",
         {

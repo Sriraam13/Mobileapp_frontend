@@ -181,7 +181,7 @@ export default function Home() {
           desc: item.description,
           price: item.price,
           available: item.is_available ?? true,
-          image: getFullImageUrl(item.image_url),
+          image: getFullImageUrl(item.image_url, item.name),
         }));
         setPopularDishes(formattedItems);
 

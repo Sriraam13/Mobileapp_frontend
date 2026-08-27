@@ -60,7 +60,7 @@ export default function App() {
                 desc: item.description,
                 price: item.price,
                 available: item.is_available,
-                image: getFullImageUrl(item.image_url),
+                image: getFullImageUrl(item.image_url, item.name),
                 category: item.category_id.toString(),
             }));
             

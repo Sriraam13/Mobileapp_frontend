@@ -46,7 +46,7 @@ export default function ForYou() {
             id: item.id.toString(),
             name: item.name,
             price: item.price,
-            image: getFullImageUrl(item.image_url),
+            image: getFullImageUrl(item.image_url, item.name),
         }));
 
         // 2. Use Local Orders (backend does not support order history by phone)
