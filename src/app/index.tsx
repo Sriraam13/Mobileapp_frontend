@@ -217,7 +217,7 @@ const styles = StyleSheet.create({
     height: '100%',
   },
   overlay: {
-    ...StyleSheet.absoluteFill,
+    ...StyleSheet.absoluteFillObject,
     backgroundColor: 'rgba(0, 0, 0, 0.84)', // Sleek, dark transparent overlay to resolve brightness
   },
   container: {

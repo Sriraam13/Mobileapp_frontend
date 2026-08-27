@@ -12,22 +12,22 @@ import { useCartStore, useRestaurantStore, usePaymentStore, useAuthStore, useLiv
 
 WebBrowser.maybeCompleteAuthSession();
 
-type PaymentMethod = 'UPI' | 'Cash' | 'Card' | 'Wallet';
+type PaymentMethod = 'UPI' | 'Cash' | 'Card' | 'Wallet' | 'Card' | 'Wallet' | 'Card' | 'Wallet';
 
 export default function PaymentScreen() {
   const router = useRouter();
   const params = useLocalSearchParams();
   const tipAmount = params.tipAmount ? Number(params.tipAmount) : 0;
-  
+
   const { items, orderType, tableNumber, getSubtotal, getGst, getServiceCharge, getGrandTotal, clearCart, getItemCount, getDiscountAmount, discountCode } = useCartStore();
-  
+
   React.useEffect(() => {
     if (getItemCount() === 0) {
       router.replace('/home');
     }
   }, [getItemCount, router]);
   const { selectedOutlet } = useRestaurantStore();
-    const { phone } = useAuthStore();
+  const { phone } = useAuthStore();
   const { setPaymentMethod, setPaymentSuccess, setPaymentFailed } = usePaymentStore();
   const { setLiveOrder } = useLiveOrderStore();
   const { setCurrentOrder, addPastOrder } = useOrderStore();
@@ -36,15 +36,15 @@ export default function PaymentScreen() {
   const [loading, setLoading] = useState(false);
   const [isPollingCash, setIsPollingCash] = useState(false);
   const [paymentFailedReason, setPaymentFailedReason] = useState('');
-  const pollIntervalRef = React.useRef<NodeJS.Timeout | null>(null);
+  const pollIntervalRef = React.useRef<ReturnType<typeof setInterval> | null>(null);
   const [currentDbOrderId, setCurrentDbOrderId] = useState<string | null>(null);
-  
+
   const subtotal = getSubtotal();
   const discountAmount = getDiscountAmount();
 
   const gst = getGst();
   const serviceCharge = getServiceCharge();
-  
+
   let totalVal = getGrandTotal();
   let baseDeliveryTotal = 0;
   if (orderType === 'Delivery') {
@@ -53,7 +53,7 @@ export default function PaymentScreen() {
     baseDeliveryTotal = subtotal + deliveryFee + packagingCharges + gst - discountAmount;
     totalVal = baseDeliveryTotal + tipAmount;
   }
-  
+
   const userPhone = phone || '+919876543210';
 
   // Handle Razorpay return params
@@ -134,13 +134,13 @@ export default function PaymentScreen() {
 
   const handleConfirm = async () => {
     setLoading(true);
-    setPaymentMethod(selectedMethod);
+    setPaymentMethod(selectedMethod as any);
 
     let restId = 1;
     if (selectedOutlet?.restaurant_id) {
       restId = Number(selectedOutlet.restaurant_id);
     }
-    
+
     const formattedCartItems = Object.values(items).map(item => ({
       id: item.id,
       name: item.name,
@@ -171,7 +171,7 @@ export default function PaymentScreen() {
               contact: userPhone || '+919876543210'
             },
             theme: { color: '#ff3400' },
-            handler: function(response: any) {
+            handler: function (response: any) {
               // Direct success callback for Web
               router.replace({
                 pathname: '/(checkout)/payment',
@@ -182,14 +182,14 @@ export default function PaymentScreen() {
               });
             },
             modal: {
-              ondismiss: function() {
+              ondismiss: function () {
                 setLoading(false);
               }
             }
           };
           try {
             const rzp = new (window as any).Razorpay(options);
-            rzp.on('payment.failed', function(response: any) {
+            rzp.on('payment.failed', function (response: any) {
               setLoading(false);
               router.replace({
                 pathname: '/(checkout)/payment',
@@ -227,7 +227,7 @@ export default function PaymentScreen() {
     }
 
     // Cash Payment (Pay at counter) Flow
-    
+
     let deliveryAddressId = null;
     if (orderType === 'Delivery') {
       const addressStoreState = useAddressStore.getState();
@@ -264,7 +264,7 @@ export default function PaymentScreen() {
     } catch (e) {
       console.error("Failed to post order", e);
     }
-    
+
     if (dbOrderId) {
       setCurrentDbOrderId(dbOrderId);
       setIsPollingCash(true);
@@ -276,7 +276,7 @@ export default function PaymentScreen() {
             pollIntervalRef.current = null;
             setIsPollingCash(false);
             setPaymentSuccess('cash_payment');
-            
+
             const finalOrder = {
               orderId: generatedOrderId,
               dbOrderId: dbOrderId,
@@ -353,7 +353,7 @@ export default function PaymentScreen() {
       <SafeAreaView style={[styles.safeArea, { backgroundColor: '#f9f9f9' }]}>
         <StatusBar barStyle="dark-content" backgroundColor="#fff" />
         <View style={styles.delHeader}>
-          <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
+          <TouchableOpacity onPress={() => router.back()} style={(styles as any).backBtn}>
             <Ionicons name="chevron-back" size={24} color="#000" />
           </TouchableOpacity>
           <Text style={styles.delHeaderTitle}>Payment</Text>
@@ -364,11 +364,11 @@ export default function PaymentScreen() {
           {/* Delivery Info Card */}
           <View style={styles.delInfoCard}>
             <View style={styles.delInfoTop}>
-               <Text style={styles.delInfoTitle}>Delivery to Home</Text>
-               <Text style={styles.delInfoPrice}>Rs. {baseDeliveryTotal.toFixed(0)}</Text>
+              <Text style={styles.delInfoTitle}>Delivery to Home</Text>
+              <Text style={styles.delInfoPrice}>Rs. {baseDeliveryTotal.toFixed(0)}</Text>
             </View>
             <Text style={styles.delInfoAddress} numberOfLines={1}>
-              {selectedDeliveryAddress || 'Flat 402, Green Glen Layout, Bellandur'} • ETA: 35 mins
+              {selectedDeliveryAddress && <Text style={(styles as any).delHeaderAddressText}>{selectedDeliveryAddress || 'Flat 402, Green Glen Layout, Bellandur, Bengaluru'}</Text>} 402, Green Glen Layout, Bellandur'} • ETA: 35 mins
             </Text>
           </View>
 
@@ -384,48 +384,48 @@ export default function PaymentScreen() {
           </View>
 
           <Text style={styles.delMethodsTitle}>UPI Methods</Text>
-          
+
           <View style={styles.delMethodsList}>
-             <TouchableOpacity style={[styles.delMethodItem, selectedMethod === 'UPI' && styles.delMethodItemActive]} onPress={() => setSelectedMethod('UPI')} activeOpacity={0.8}>
-               <View style={styles.delMethodIcon}>
-                 <Ionicons name="card-outline" size={24} color="#ff3400" />
-               </View>
-               <View style={{ flex: 1 }}>
-                 <Text style={styles.delMethodName}>Google Pay / PhonePe</Text>
-                 <Text style={styles.delMethodDesc}>Instant secure direct bank transfer</Text>
-               </View>
-               <View style={[styles.radioCircle, selectedMethod === 'UPI' ? styles.radioSelected : styles.radioUnselected]}>
-                 {selectedMethod === 'UPI' && <Ionicons name="checkmark" size={14} color="#fff" />}
-               </View>
-             </TouchableOpacity>
+            <TouchableOpacity style={[styles.delMethodItem, selectedMethod === 'UPI' && styles.delMethodItemActive]} onPress={() => setSelectedMethod('UPI')} activeOpacity={0.8}>
+              <View style={styles.delMethodIcon}>
+                <Ionicons name="card-outline" size={24} color="#ff3400" />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.delMethodName}>Google Pay / PhonePe</Text>
+                <Text style={styles.delMethodDesc}>Instant secure direct bank transfer</Text>
+              </View>
+              <View style={[styles.radioCircle, selectedMethod === 'UPI' ? styles.radioSelected : styles.radioUnselected]}>
+                {selectedMethod === 'UPI' && <Ionicons name="checkmark" size={14} color="#fff" />}
+              </View>
+            </TouchableOpacity>
 
-             <TouchableOpacity style={[styles.delMethodItem, selectedMethod === 'Card' && styles.delMethodItemActive]} onPress={() => setSelectedMethod('Card')} activeOpacity={0.8}>
-               <View style={styles.delMethodIcon}><Ionicons name="card" size={20} color="#666" /></View>
-               <Text style={[styles.delMethodName, { flex: 1 }]}>Credit or Debit Cards</Text>
-               <View style={[styles.radioCircle, selectedMethod === 'Card' ? styles.radioSelected : styles.radioUnselected]}>
-                 {selectedMethod === 'Card' && <Ionicons name="checkmark" size={14} color="#fff" />}
-               </View>
-             </TouchableOpacity>
+            <TouchableOpacity style={[styles.delMethodItem, selectedMethod === 'Card' && styles.delMethodItemActive]} onPress={() => setSelectedMethod('Card')} activeOpacity={0.8}>
+              <View style={styles.delMethodIcon}><Ionicons name="card" size={20} color="#666" /></View>
+              <Text style={[styles.delMethodName, { flex: 1 }]}>Credit or Debit Cards</Text>
+              <View style={[styles.radioCircle, selectedMethod === 'Card' ? styles.radioSelected : styles.radioUnselected]}>
+                {selectedMethod === 'Card' && <Ionicons name="checkmark" size={14} color="#fff" />}
+              </View>
+            </TouchableOpacity>
 
-             <TouchableOpacity style={[styles.delMethodItem, selectedMethod === 'Wallet' && styles.delMethodItemActive]} onPress={() => setSelectedMethod('Wallet')} activeOpacity={0.8}>
-               <View style={styles.delMethodIcon}><Ionicons name="wallet-outline" size={20} color="#666" /></View>
-               <Text style={[styles.delMethodName, { flex: 1 }]}>Wallets (Paytm, Mobikwik)</Text>
-               <View style={[styles.radioCircle, selectedMethod === 'Wallet' ? styles.radioSelected : styles.radioUnselected]}>
-                 {selectedMethod === 'Wallet' && <Ionicons name="checkmark" size={14} color="#fff" />}
-               </View>
-             </TouchableOpacity>
+            <TouchableOpacity style={[styles.delMethodItem, selectedMethod === 'Wallet' && styles.delMethodItemActive]} onPress={() => setSelectedMethod('Wallet')} activeOpacity={0.8}>
+              <View style={styles.delMethodIcon}><Ionicons name="wallet-outline" size={20} color="#666" /></View>
+              <Text style={[styles.delMethodName, { flex: 1 }]}>Wallets (Paytm, Mobikwik)</Text>
+              <View style={[styles.radioCircle, selectedMethod === 'Wallet' ? styles.radioSelected : styles.radioUnselected]}>
+                {selectedMethod === 'Wallet' && <Ionicons name="checkmark" size={14} color="#fff" />}
+              </View>
+            </TouchableOpacity>
 
-             <TouchableOpacity style={[styles.delMethodItem, selectedMethod === 'Cash' && styles.delMethodItemActive]} onPress={() => setSelectedMethod('Cash')} activeOpacity={0.8}>
-               <View style={styles.delMethodIcon}>
-                 <Ionicons name="cash-outline" size={24} color="#666" />
-               </View>
-               <View style={{ flex: 1 }}>
-                 <Text style={styles.delMethodName}>Cash on Delivery (COD)</Text>
-               </View>
-               <View style={[styles.radioCircle, selectedMethod === 'Cash' ? styles.radioSelected : styles.radioUnselected]}>
-                 {selectedMethod === 'Cash' && <Ionicons name="checkmark" size={14} color="#fff" />}
-               </View>
-             </TouchableOpacity>
+            <TouchableOpacity style={[styles.delMethodItem, selectedMethod === 'Cash' && styles.delMethodItemActive]} onPress={() => setSelectedMethod('Cash')} activeOpacity={0.8}>
+              <View style={styles.delMethodIcon}>
+                <Ionicons name="cash-outline" size={24} color="#666" />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.delMethodName}>Cash on Delivery (COD)</Text>
+              </View>
+              <View style={[styles.radioCircle, selectedMethod === 'Cash' ? styles.radioSelected : styles.radioUnselected]}>
+                {selectedMethod === 'Cash' && <Ionicons name="checkmark" size={14} color="#fff" />}
+              </View>
+            </TouchableOpacity>
           </View>
         </ScrollView>
 
@@ -455,11 +455,11 @@ export default function PaymentScreen() {
             </View>
           </View>
         )}
-        
+
         <View style={styles.logoContainer}>
-          <Image 
-            source={require('../../../assets/images/Dataudupi.png')} 
-            style={styles.logoImageFull} 
+          <Image
+            source={require('../../../assets/images/Dataudupi.png')}
+            style={styles.logoImageFull}
             resizeMode="contain"
           />
         </View>
@@ -474,11 +474,11 @@ export default function PaymentScreen() {
           <Text style={styles.subtitle}>Choose a payment method to complete your order.</Text>
 
           <View style={styles.methodsContainer}>
-            
+
             {/* UPI Option */}
             <View>
-              <TouchableOpacity 
-                style={[styles.methodCard, selectedMethod === 'UPI' ? styles.methodSelected : styles.methodUnselected]} 
+              <TouchableOpacity
+                style={[styles.methodCard, selectedMethod === 'UPI' ? styles.methodSelected : styles.methodUnselected]}
                 onPress={() => setSelectedMethod('UPI')}
                 activeOpacity={0.8}
               >
@@ -493,7 +493,7 @@ export default function PaymentScreen() {
                   {selectedMethod === 'UPI' && <Ionicons name="checkmark" size={14} color="#fff" />}
                 </View>
               </TouchableOpacity>
-              
+
               {/* Info Box rendered if UPI is selected */}
               {selectedMethod === 'UPI' && (
                 <View style={styles.paymentInfoBox}>
@@ -520,12 +520,12 @@ export default function PaymentScreen() {
               ? `Order for Table ${tableNumber?.replace('T-', '') ?? '06'}. Dine in`
               : 'Take Away Order'}
           </Text>
-          
+
           <View style={styles.summaryRow}>
             <Text style={styles.summaryLabel}>Subtotal </Text>
             <Text style={[styles.summaryAmount, { color: '#333' }]}>Rs. {subtotal.toFixed(2)}</Text>
           </View>
-          
+
           {discountAmount > 0 && (
             <View style={styles.summaryRow}>
               <Text style={styles.summaryLabel}>Discount ({discountCode}) </Text>
@@ -540,8 +540,8 @@ export default function PaymentScreen() {
         </View>
 
         {/* Secure Pay Button */}
-        <TouchableOpacity 
-          style={[styles.payBtn, loading && styles.btnDisabled]} 
+        <TouchableOpacity
+          style={[styles.payBtn, loading && styles.btnDisabled]}
           onPress={handleConfirm}
           disabled={loading}
         >
@@ -567,18 +567,18 @@ export default function PaymentScreen() {
             <Text style={{ fontSize: 40, marginBottom: 10 }}>⏳</Text>
             <Text style={styles.failedTitle}>Waiting for Payment...</Text>
             <Text style={styles.failedDesc}>Please pay at the counter. The order will be placed once payment is confirmed.</Text>
-            
+
             <View style={{ flexDirection: 'row', width: '100%', justifyContent: 'space-between', marginTop: 20 }}>
-              <TouchableOpacity 
-                style={[styles.backHomeBtn, { flex: 1, backgroundColor: '#7a7a7a', marginRight: 8 }]} 
+              <TouchableOpacity
+                style={[styles.backHomeBtn, { flex: 1, backgroundColor: '#7a7a7a', marginRight: 8 }]}
                 onPress={() => setIsPollingCash(false)}
               >
                 <Ionicons name="arrow-back" size={18} color="#fff" style={{ marginRight: 6 }} />
                 <Text style={styles.backHomeText}>Go Back</Text>
               </TouchableOpacity>
 
-              <TouchableOpacity 
-                style={[styles.backHomeBtn, { flex: 1, backgroundColor: '#ff3400', marginLeft: 8 }]} 
+              <TouchableOpacity
+                style={[styles.backHomeBtn, { flex: 1, backgroundColor: '#ff3400', marginLeft: 8 }]}
                 onPress={handleCancelOrder}
               >
                 <Ionicons name="close" size={18} color="#fff" style={{ marginRight: 6 }} />

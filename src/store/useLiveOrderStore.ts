@@ -56,7 +56,7 @@ export const useLiveOrderStore = create<LiveOrderState>()(
       orderType: null,
       orderId: null,
       dbOrderId: null,
-      status: null,
+      status: null as any,
       restaurantStatus: null,
       estimatedTime: null,
       pollingActive: false,
@@ -72,7 +72,7 @@ export const useLiveOrderStore = create<LiveOrderState>()(
         orderType: null, 
         orderId: null, 
         dbOrderId: null, 
-        status: null, 
+        status: null as any, 
         restaurantStatus: null,
         estimatedTime: null,
         pollingActive: false

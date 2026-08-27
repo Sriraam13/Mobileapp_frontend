@@ -33,6 +33,7 @@ export interface PastOrder {
   total: number;
   itemsCount: number;
   status: string;
+  items?: any[];
 }
 
 interface OrderState {

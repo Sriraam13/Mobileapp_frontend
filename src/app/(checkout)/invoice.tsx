@@ -75,7 +75,7 @@ export default function InvoiceScreen() {
       const mimeType = isPng ? 'image/png' : 'image/jpeg';
 
       if (uri.startsWith('http://') || uri.startsWith('https://')) {
-        const cacheDir = FileSystem.cacheDirectory || FileSystem.documentDirectory;
+        const cacheDir = FileSystem.FileSystem.cacheDirectory || FileSystem.FileSystem.documentDirectory;
         const ext = isPng ? 'png' : 'jpg';
         const localPath = `${cacheDir}temp_asset_${Math.random().toString(36).substring(7)}.${ext}`;
         const result = await FileSystem.downloadAsync(uri, localPath);
@@ -101,7 +101,7 @@ export default function InvoiceScreen() {
   const generatePDF = async () => {
     setDownloading(true);
     try {
-      const bannerBase64 = await getAssetBase64(require('../../../assets/images/banner_bg_invoice.png'));
+      const bannerBase64 = await getAssetBase64(require('../../../assets/images/frontpage_bg.png'));
       const logoBase64 = await getAssetBase64(require('../../../assets/images/udupi-banner.png'));
       const qrCodeUrl = paymentMethod.toUpperCase() === 'UPI'
         ? `https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=upi://pay?pa=dataudipi@upi%26pn=DataUdipi%26am=${finalTotal}%26cu=INR`
@@ -355,7 +355,6 @@ export default function InvoiceScreen() {
               <div>Invoice No : ${orderId}</div>
               <div>Order Type : ${orderType}</div>
               <div>Counter : 4</div>
-              <div>Customer : ${customerName}</div>
               <div>Mobile No : ${mobileNumber}</div>
             </div>
             <div class="meta-right">
@@ -428,7 +427,7 @@ export default function InvoiceScreen() {
         await Print.printAsync({ html: htmlContent });
       } else {
         const { uri } = await Print.printToFileAsync({ html: htmlContent });
-        const safeUri = FileSystem.documentDirectory + `DataUdipi_Bill_${orderId}.pdf`;
+        const safeUri = FileSystem.FileSystem.documentDirectory + `DataUdipi_Bill_${orderId}.pdf`;
         await FileSystem.moveAsync({ from: uri, to: safeUri });
         await Sharing.shareAsync(safeUri, { UTI: '.pdf', mimeType: 'application/pdf' });
       }
@@ -457,7 +456,7 @@ export default function InvoiceScreen() {
       <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
         <View style={styles.invoiceCard}>
           <View style={styles.banner}>
-            <Image source={require('../../../assets/images/banner_bg_invoice.png')} style={styles.bannerImg} />
+            <Image source={require('../../../assets/images/frontpage_bg.png')} style={styles.bannerImg} />
             <Text style={styles.bannerText}>40 YEARS OF EXCELLENCE</Text>
           </View>
 
@@ -466,14 +465,7 @@ export default function InvoiceScreen() {
           </View>
 
           <View style={styles.brandRow}>
-            <Text style={styles.brandName}>{branchName.split(' — ')[0]} :</Text>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.brandAddress}>{branchAddress}</Text>
-              <View style={{ flexDirection: 'row', justifyContent: 'flex-end', alignItems: 'center', marginTop: 4 }}>
-                <Ionicons name="location" size={14} color="#ff4500" />
-                <Text style={{ color: '#ff4500', fontSize: 11, marginLeft: 2, fontWeight: 'bold' }}>location</Text>
-              </View>
-            </View>
+            <Text style={styles.brandName}>{branchName.split(' — ')[0]} : {branchAddress}</Text>
           </View>
 
           <View style={styles.companyInfo}>
@@ -626,7 +618,7 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: 'bold',
     letterSpacing: 2,
-    textShadow: '1px 1px 3px rgba(0,0,0,0.8)',
+    textShadowColor: 'rgba(0,0,0,0.8)', textShadowOffset: { width: 1, height: 1 }, textShadowRadius: 3,
   },
   logoContainer: {
     alignItems: 'center',

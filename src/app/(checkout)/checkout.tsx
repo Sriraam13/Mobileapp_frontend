@@ -82,11 +82,11 @@ export default function CheckoutScreen() {
                 <Text style={styles.itemPrice}>Rs. {item.price}</Text>
                 
                 <View style={styles.stepper}>
-                  <TouchableOpacity style={styles.stepBtnMinus} onPress={() => decrementQuantity(item.id)}>
+                  <TouchableOpacity style={styles.stepBtnMinus} onPress={() => decrementQuantity(item.id as any)}>
                     <Ionicons name="remove" size={16} color="#ff3400" />
                   </TouchableOpacity>
                   <Text style={styles.stepVal}>{item.quantity}</Text>
-                  <TouchableOpacity style={styles.stepBtnPlus} onPress={() => incrementQuantity(item.id)}>
+                  <TouchableOpacity style={styles.stepBtnPlus} onPress={() => incrementQuantity(item.id as any)}>
                     <Ionicons name="add" size={16} color="#ff3400" />
                   </TouchableOpacity>
                 </View>
