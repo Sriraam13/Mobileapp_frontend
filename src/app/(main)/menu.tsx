@@ -10,7 +10,7 @@ import { useCartStore } from '../../store/useCartStore';
 
 export default function App() {
   const router = useRouter();
-  const params = useLocalSearchParams<{ orderType?: string; tableNumber?: string; categoryId?: string }>();
+  const params = useLocalSearchParams<{ orderType?: string; tableNumber?: string; categoryId?: string; search?: string }>();
   const insets = useSafeAreaInsets();
   const { items: cart, addItem, removeItem, incrementQuantity, decrementQuantity, orderType, setOrderType, tableNumber, setTableNumber, getItemCount, getSubtotal } = useCartStore();
   
@@ -32,14 +32,15 @@ export default function App() {
     const mappedOrderType = initialOrderType === "Takeaway" ? "Take Away" : (initialOrderType === "Dine-in" ? "Dine In" : initialOrderType) as "Dine In" | "Take Away";
     if (mappedOrderType) setOrderType(mappedOrderType);
     if (params.tableNumber) setTableNumber(params.tableNumber as string);
-  }, [params.orderType, params.tableNumber, setOrderType, setTableNumber]);
+    if (params.search !== undefined) setSearchQuery(params.search as string);
+  }, [params.orderType, params.tableNumber, params.search, setOrderType, setTableNumber]);
 
   const [allCategories, setAllCategories] = useState<any[]>([]);
   const [menuItems, setMenuItems] = useState<any[]>([]);
   const [regions, setRegions] = useState<string[]>(["All Regions"]);
   const [activeRegion, setActiveRegion] = useState("All Regions");
   const [activeCat, setActiveCat] = useState((params.categoryId as string) || "all");
-  const [searchQuery, setSearchQuery] = useState("");
+  const [searchQuery, setSearchQuery] = useState((params.search as string) || "");
   const [isCartModalVisible, setIsCartModalVisible] = useState(false);
   const [selectedItem, setSelectedItem] = useState<any>(null);
   const [isFilterModalVisible, setIsFilterModalVisible] = useState(false);

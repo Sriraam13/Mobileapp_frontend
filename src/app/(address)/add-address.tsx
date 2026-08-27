@@ -1,6 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, Platform, StatusBar, Image, Alert, ActivityIndicator } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';;
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import * as Location from 'expo-location';
@@ -15,6 +15,7 @@ export default function AddAddress() {
   const router = useRouter();
   const { phone } = useAuthStore();
   const { addAddress, addresses } = useAddressStore();
+  const mapRef = useRef<any>(null);
   const [addressType, setAddressType] = useState('Home');
   const [flat, setFlat] = useState('');
   const [floor, setFloor] = useState('');
@@ -28,63 +29,151 @@ export default function AddAddress() {
     latitudeDelta: 0.015,
     longitudeDelta: 0.015,
   });
+  const [markerCoord, setMarkerCoord] = useState({
+    latitude: 13.0405,
+    longitude: 80.2036,
+  });
+  const [isGeocoding, setIsGeocoding] = useState(false);
 
-  const detectLocation = async () => {
-    setIsLocating(true);
+  const reverseGeocode = async (latitude: number, longitude: number) => {
+    setIsGeocoding(true);
+    let resolvedAddress = '';
+    let streetNumber = '';
+    let route = '';
+    let sublocality = '';
+    let locality = '';
+
+    // 1. Try Google Maps Geocoding API
     try {
-      let { status } = await Location.requestForegroundPermissionsAsync();
-      if (status !== 'granted') {
-        Alert.alert("Permission Denied", "Could not request location permission. Please fill in details manually.");
-        setIsLocating(false);
-        return;
-      }
-      
-      let location = await Location.getCurrentPositionAsync({});
-      const { latitude, longitude } = location.coords;
-      
-      setRegion({
-        latitude,
-        longitude,
-        latitudeDelta: 0.015,
-        longitudeDelta: 0.015,
-      });
-      
       const apiKey = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY || 'AIzaSyA2qxAJag8F89Q_TdtjqU_42W6JAVJ5_qg';
       const geocodeUrl = `https://maps.googleapis.com/maps/api/geocode/json?latlng=${latitude},${longitude}&key=${apiKey}`;
-      
       const response = await fetch(geocodeUrl);
       const data = await response.json();
-      
       if (data.status === 'OK' && data.results && data.results.length > 0) {
         const result = data.results[0];
-        const formatted = result.formatted_address;
-        
-        setFullAddress(formatted);
-        
-        let streetNumber = '';
-        let route = '';
-        let sublocality = '';
-        let locality = '';
-        
+        if (result.formatted_address) {
+          resolvedAddress = result.formatted_address;
+        }
         result.address_components.forEach((comp: any) => {
           if (comp.types.includes('street_number')) streetNumber = comp.long_name;
           if (comp.types.includes('route')) route = comp.long_name;
           if (comp.types.includes('sublocality') || comp.types.includes('sublocality_level_1')) sublocality = comp.long_name;
           if (comp.types.includes('locality')) locality = comp.long_name;
         });
-        
-        if (streetNumber) {
-          setFlat(streetNumber);
-        }
-        if (route) {
-          setBuilding(route);
-        }
-        if (sublocality || locality) {
-          setLandmark(sublocality || locality);
-        }
-      } else {
-        console.warn("Geocoding failed:", data.status, data.error_message);
       }
+    } catch (e) {
+      console.warn("Google reverse geocoding error:", e);
+    }
+
+    // 2. Try OpenStreetMap Nominatim if empty
+    if (!resolvedAddress) {
+      try {
+        const osmUrl = `https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}&zoom=18&addressdetails=1`;
+        const res = await fetch(osmUrl, { headers: { 'User-Agent': 'DataUdipiApp/1.0' } });
+        const osmData = await res.json();
+        if (osmData && osmData.display_name) {
+          resolvedAddress = osmData.display_name;
+          if (osmData.address) {
+            route = osmData.address.road || route;
+            sublocality = osmData.address.suburb || osmData.address.neighbourhood || sublocality;
+            locality = osmData.address.city || osmData.address.town || locality;
+          }
+        }
+      } catch (e) {
+        console.warn("OSM reverse geocoding error:", e);
+      }
+    }
+
+    // 3. Try Expo native Location reverseGeocodeAsync
+    if (!resolvedAddress) {
+      try {
+        const expoResults = await Location.reverseGeocodeAsync({ latitude, longitude });
+        if (expoResults && expoResults.length > 0) {
+          const item = expoResults[0];
+          streetNumber = item.streetNumber || '';
+          route = item.street || item.name || '';
+          sublocality = item.district || item.subregion || '';
+          locality = item.city || item.subregion || '';
+
+          const fullParts = [
+            item.name && item.name !== item.street ? item.name : '',
+            item.streetNumber,
+            item.street,
+            item.district,
+            item.subregion,
+            item.city,
+            item.region,
+            item.postalCode,
+          ].filter(Boolean);
+
+          const deduped = fullParts.filter((p, i, arr) => arr.indexOf(p) === i);
+          if (deduped.length > 0) {
+            resolvedAddress = deduped.join(', ');
+          }
+        }
+      } catch (e) {
+        console.warn("Expo reverse geocoding error:", e);
+      }
+    }
+
+    if (resolvedAddress) {
+      setFullAddress(resolvedAddress);
+    }
+    setFlat(streetNumber || '');
+    setBuilding(route || '');
+    setLandmark(sublocality || locality || '');
+
+    setIsGeocoding(false);
+  };
+
+  const handleSelectCoordinate = (coordinate: { latitude: number; longitude: number }) => {
+    if (!coordinate || !coordinate.latitude || !coordinate.longitude) return;
+    setMarkerCoord({
+      latitude: coordinate.latitude,
+      longitude: coordinate.longitude,
+    });
+    setRegion(prev => ({
+      ...prev,
+      latitude: coordinate.latitude,
+      longitude: coordinate.longitude,
+    }));
+    mapRef.current?.animateToRegion({
+      latitude: coordinate.latitude,
+      longitude: coordinate.longitude,
+      latitudeDelta: region.latitudeDelta || 0.015,
+      longitudeDelta: region.longitudeDelta || 0.015,
+    }, 300);
+    reverseGeocode(coordinate.latitude, coordinate.longitude);
+  };
+
+  const detectLocation = async () => {
+    setIsLocating(true);
+    try {
+      let { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert("Permission Denied", "Could not request location permission. Please tap on the map or fill details manually.");
+        setIsLocating(false);
+        return;
+      }
+      
+      let location = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
+      const { latitude, longitude } = location.coords;
+      
+      setMarkerCoord({ latitude, longitude });
+      setRegion({
+        latitude,
+        longitude,
+        latitudeDelta: 0.015,
+        longitudeDelta: 0.015,
+      });
+      mapRef.current?.animateToRegion({
+        latitude,
+        longitude,
+        latitudeDelta: 0.015,
+        longitudeDelta: 0.015,
+      }, 400);
+      
+      await reverseGeocode(latitude, longitude);
     } catch (e) {
       console.error("Error detecting location:", e);
     } finally {
@@ -96,16 +185,6 @@ export default function AddAddress() {
     detectLocation();
   }, []);
 
-  useEffect(() => {
-    if (isLocating) return;
-    const parts = [
-      flat ? `${flat}` : '',
-      floor ? `${floor}` : '',
-      building ? `${building}` : '',
-      landmark ? `${landmark}` : ''
-    ].filter(Boolean);
-    setFullAddress(parts.join(', '));
-  }, [flat, floor, building, landmark, isLocating]);
   const { customerId, customerName, phone: authPhone } = useAuthStore();
   const handleSave = async () => {
     if (!fullAddress.trim()) {
@@ -184,47 +263,59 @@ export default function AddAddress() {
         <View style={styles.mapContainer}>
           {Platform.OS === 'web' ? (
             <Image 
-              source={{ uri: `https://maps.googleapis.com/maps/api/staticmap?center=${region.latitude},${region.longitude}&zoom=16&size=600x300&markers=color:red%7C${region.latitude},${region.longitude}&key=${process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY || 'AIzaSyA2qxAJag8F89Q_TdtjqU_42W6JAVJ5_qg'}` }} 
+              source={{ uri: `https://maps.googleapis.com/maps/api/staticmap?center=${region.latitude},${region.longitude}&zoom=16&size=600x400&markers=color:red%7C${region.latitude},${region.longitude}&key=${process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY || 'AIzaSyA2qxAJag8F89Q_TdtjqU_42W6JAVJ5_qg'}` }} 
               style={styles.mapImage} 
               resizeMode="cover"
             />
           ) : (
             <MapView
+              ref={mapRef}
               style={styles.mapImage}
+              provider={PROVIDER_GOOGLE}
               region={region}
-              onRegionChangeComplete={async (newRegion) => {
-                setRegion(newRegion);
-                if (!isLocating) {
-                  try {
-                    const apiKey = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY || 'AIzaSyA2qxAJag8F89Q_TdtjqU_42W6JAVJ5_qg';
-                    const geocodeUrl = `https://maps.googleapis.com/maps/api/geocode/json?latlng=${newRegion.latitude},${newRegion.longitude}&key=${apiKey}`;
-                    const response = await fetch(geocodeUrl);
-                    const data = await response.json();
-                    
-                    if (data.status === 'OK' && data.results && data.results.length > 0) {
-                      const result = data.results[0];
-                      setFullAddress(result.formatted_address);
-                    }
-                  } catch (e) {
-                    console.error("Geocoding on pan failed:", e);
-                  }
+              onPress={(e: any) => {
+                if (e?.nativeEvent?.coordinate) {
+                  handleSelectCoordinate(e.nativeEvent.coordinate);
                 }
+              }}
+              onPoiClick={(e: any) => {
+                if (e?.nativeEvent?.coordinate) {
+                  handleSelectCoordinate(e.nativeEvent.coordinate);
+                }
+              }}
+              onRegionChangeComplete={(newRegion: any) => {
+                setRegion(newRegion);
               }}
             >
               <Marker
-                coordinate={{ latitude: region.latitude, longitude: region.longitude }}
-                title="Your Location"
+                coordinate={markerCoord}
+                draggable
+                onDragEnd={(e: any) => {
+                  if (e?.nativeEvent?.coordinate) {
+                    handleSelectCoordinate(e.nativeEvent.coordinate);
+                  }
+                }}
+                anchor={{ x: 0.5, y: 1 }}
+                title="Delivery Location"
+                description={fullAddress || "Selected Location"}
               >
-                <View style={{ alignItems: 'center', justifyContent: 'center' }}>
-                  <View style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: '#fff', borderWidth: 2, borderColor: '#ff4500', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
-                    <Image source={require('../../../assets/images/Dataudupi.png')} style={{ width: 34, height: 34 }} resizeMode="contain" />
+                <View style={styles.modernMarkerContainer}>
+                  <View style={styles.markerPin}>
+                    <Ionicons name="location" size={22} color="#fff" />
                   </View>
-                  <View style={{ width: 0, height: 0, backgroundColor: 'transparent', borderStyle: 'solid', borderLeftWidth: 6, borderRightWidth: 6, borderBottomWidth: 12, borderLeftColor: 'transparent', borderRightColor: 'transparent', borderBottomColor: '#ff4500', transform: [{ rotate: '180deg' }], marginTop: -2 }} />
-                  <View style={{ width: 12, height: 12, borderRadius: 6, backgroundColor: '#ff8c00', marginTop: 2, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.3, shadowRadius: 2, elevation: 4 }} />
+                  <View style={styles.markerPinTip} />
+                  <View style={styles.markerShadow} />
                 </View>
               </Marker>
             </MapView>
           )}
+
+          {/* Map Helper Guide Badge */}
+          <View style={styles.mapHelperBadge} pointerEvents="none">
+            <Ionicons name="hand-left-outline" size={13} color="#ff4500" />
+            <Text style={styles.mapHelperText}>Tap map or drag pin to select location</Text>
+          </View>
+
           {isLocating && (
             <View style={[StyleSheet.absoluteFillObject, { backgroundColor: 'rgba(255,255,255,0.85)', justifyContent: 'center', alignItems: 'center' }]}>
               <ActivityIndicator size="large" color="#ff4500" />
@@ -232,11 +323,29 @@ export default function AddAddress() {
             </View>
           )}
           
+          {/* Live Address Preview on Map */}
+          <View style={styles.mapAddressBar} pointerEvents="none">
+            {isGeocoding ? (
+              <View style={styles.geocodingRow}>
+                <ActivityIndicator size="small" color="#ff4500" />
+                <Text style={styles.geocodingText}>Fetching address at location...</Text>
+              </View>
+            ) : (
+              <View style={styles.geocodingRow}>
+                <Ionicons name="checkmark-circle" size={16} color="#00a01d" />
+                <Text style={styles.mapAddressText} numberOfLines={1}>
+                  {fullAddress || "Tap anywhere on map"}
+                </Text>
+              </View>
+            )}
+          </View>
+
           {/* Locate Me Button */}
           {!isLocating && (
             <TouchableOpacity 
-              style={{ position: 'absolute', bottom: 16, right: 16, backgroundColor: '#fff', width: 44, height: 44, borderRadius: 22, justifyContent: 'center', alignItems: 'center', shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.2, shadowRadius: 4, elevation: 5 }} 
+              style={styles.locateMeBtn} 
               onPress={detectLocation}
+              activeOpacity={0.8}
             >
               <Ionicons name="locate" size={24} color="#ff4500" />
             </TouchableOpacity>
@@ -365,14 +474,126 @@ const styles = StyleSheet.create({
     paddingBottom: 100,
   },
   mapContainer: {
-    height: 200,
+    height: 320,
     width: '100%',
     backgroundColor: '#eee',
     marginBottom: 20,
+    position: 'relative',
+    overflow: 'hidden',
   },
   mapImage: {
     width: '100%',
     height: '100%',
+  },
+  modernMarkerContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: 60,
+    height: 70,
+  },
+  markerPin: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#ff4500',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 3,
+    borderColor: '#ffffff',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.35,
+    shadowRadius: 6,
+    elevation: 8,
+    zIndex: 2,
+  },
+  markerPinTip: {
+    width: 0,
+    height: 0,
+    borderLeftWidth: 8,
+    borderRightWidth: 8,
+    borderTopWidth: 12,
+    borderLeftColor: 'transparent',
+    borderRightColor: 'transparent',
+    borderTopColor: '#ff4500',
+    marginTop: -3,
+    zIndex: 1,
+  },
+  markerShadow: {
+    width: 14,
+    height: 5,
+    borderRadius: 7,
+    backgroundColor: 'rgba(0, 0, 0, 0.25)',
+    marginTop: 2,
+  },
+  mapHelperBadge: {
+    position: 'absolute',
+    top: 14,
+    alignSelf: 'center',
+    backgroundColor: 'rgba(255, 255, 255, 0.95)',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingVertical: 7,
+    paddingHorizontal: 14,
+    borderRadius: 20,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  mapHelperText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#333',
+  },
+  mapAddressBar: {
+    position: 'absolute',
+    bottom: 16,
+    left: 16,
+    right: 74,
+    backgroundColor: 'rgba(255, 255, 255, 0.96)',
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderRadius: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 4,
+    elevation: 4,
+  },
+  geocodingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  geocodingText: {
+    fontSize: 12,
+    color: '#ff4500',
+    fontWeight: '600',
+  },
+  mapAddressText: {
+    fontSize: 12,
+    color: '#333',
+    fontWeight: '600',
+    flex: 1,
+  },
+  locateMeBtn: {
+    position: 'absolute',
+    bottom: 16,
+    right: 16,
+    backgroundColor: '#fff',
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 5,
+    elevation: 6,
   },
   sectionLabel: {
     fontSize: 12,

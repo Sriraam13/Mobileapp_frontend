@@ -90,7 +90,10 @@ export default function OutletSelectorScreen() {
     if (outlet) {
       setStatusText(`Branch set to ${outlet.name}.`);
       setSelectedOutlet(outlet);
-      router.replace('/home');
+      router.replace({
+        pathname: '/home',
+        params: { autoPromptQR: 'true' }
+      });
     }
   };
 

@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { View, Text, StyleSheet, ScrollView, TextInput, TouchableOpacity, Image, ImageBackground, Platform, StatusBar, Alert, Modal, ActivityIndicator, Dimensions } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
+import { useRouter, useLocalSearchParams } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { customerApi, menuApi, tableApi } from '../../services/apiService';
 import { getFullImageUrl } from '../../constants/api';
@@ -13,6 +13,7 @@ import { useRestaurantStore } from '../../store';
 
 export default function Home() {
   const router = useRouter();
+  const params = useLocalSearchParams<{ autoPromptQR?: string }>();
   const { phone } = useAuthStore();
   const { selectedOutlet } = useRestaurantStore();
   const scrollRef = useRef<ScrollView>(null);
@@ -21,14 +22,15 @@ export default function Home() {
   const insets = useSafeAreaInsets();
   const { items: cart, addItem, incrementQuantity, decrementQuantity } = useCartStore();
 
-  const handleIncrement = (itemId: string) => {
-    const item = popularDishes.find(i => i.id === itemId);
+  const handleIncrement = (itemId: number | string) => {
+    const numId = Number(itemId);
+    const item = popularDishes.find(i => i.id === numId || i.id === itemId);
     if (!item) return;
-    if (cart[itemId]) {
-      incrementQuantity(itemId);
+    if (cart[numId]) {
+      incrementQuantity(numId);
     } else {
       addItem({
-        id: item.id,
+        id: numId,
         name: item.name,
         price: item.price,
         image: item.image,
@@ -39,8 +41,8 @@ export default function Home() {
     }
   };
 
-  const handleDecrement = (itemId: string) => {
-    decrementQuantity(itemId);
+  const handleDecrement = (itemId: number | string) => {
+    decrementQuantity(Number(itemId));
   };
 
   useEffect(() => {
@@ -87,6 +89,7 @@ export default function Home() {
   const [popularDishes, setPopularDishes] = useState<any[]>([]);
   const [categories, setCategories] = useState<any[]>([]);
   const [selectedBranchName, setSelectedBranchName] = useState('Koramangala, Bangalore');
+  const [searchText, setSearchText] = useState('');
 
   const [tableNumber, setTableNumber] = useState<string | null>(null);
   const [tableStatus, setTableStatus] = useState<string | null>(null);
@@ -102,6 +105,7 @@ export default function Home() {
     message: string;
     type: 'success' | 'error' | 'info';
     buttons?: { text: string; onPress?: () => void; style?: 'cancel' | 'default' }[];
+    onConfirm?: () => void;
   }>({
     visible: false,
     title: '',
@@ -161,6 +165,32 @@ export default function Home() {
     };
     loadSavedTable();
   }, []);
+
+  useEffect(() => {
+    if (params?.autoPromptQR === 'true') {
+      const timer = setTimeout(() => {
+        showPopup(
+          "Scan Table QR Code",
+          "Would you like to scan your table QR code to start ordering, or cancel to explore the menu?",
+          "info",
+          undefined,
+          [
+            { 
+              text: "Scan Table QR", 
+              onPress: () => {
+                handleDineInPress();
+              } 
+            },
+            { 
+              text: "Cancel", 
+              style: "cancel" 
+            }
+          ]
+        );
+      }, 500);
+      return () => clearTimeout(timer);
+    }
+  }, [params?.autoPromptQR]);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -389,23 +419,74 @@ export default function Home() {
     }
   };
 
-  const handleSearchFocus = () => {
+  const handleSearchSubmit = (query?: string) => {
+    const searchVal = typeof query === 'string' ? query : searchText;
     if (activeTab === 'Dine-in' && !tableNumber) {
       showPopup(
         "Scan QR Code",
-        "Please scan the QR code on your table to view menu and order.",
+        "Please scan the QR code on your table to place dine-in orders, or explore the menu.",
         "info",
         undefined,
         [
           { text: "Scan QR", onPress: handleDineInPress },
-          { text: "Cancel", style: "cancel" }
+          { 
+            text: "Search Menu", 
+            style: "default",
+            onPress: () => {
+              router.push({
+                pathname: '/menu',
+                params: {
+                  orderType: activeTab === 'Dine-in' ? 'Dine In' : activeTab,
+                  tableNumber: activeTab === 'Dine-in' ? (tableNumber || '') : '',
+                  search: searchVal
+                }
+              });
+            }
+          }
         ]
       );
       return;
     }
     router.push({
       pathname: '/menu',
-      params: { orderType: activeTab === 'Dine-in' ? 'Dine In' : activeTab, tableNumber: activeTab === 'Dine-in' ? (tableNumber || '') : '' }
+      params: {
+        orderType: activeTab === 'Dine-in' ? 'Dine In' : activeTab,
+        tableNumber: activeTab === 'Dine-in' ? (tableNumber || '') : '',
+        search: searchVal
+      }
+    });
+  };
+
+  const handleSearchFocus = () => {
+    if (activeTab === 'Dine-in' && !tableNumber) {
+      showPopup(
+        "Scan QR Code",
+        "Please scan the QR code on your table to view menu and order, or browse the menu.",
+        "info",
+        undefined,
+        [
+          { text: "Scan QR", onPress: handleDineInPress },
+          { 
+            text: "Browse Menu", 
+            style: "default",
+            onPress: () => {
+              router.push({
+                pathname: '/menu',
+                params: {
+                  orderType: activeTab === 'Dine-in' ? 'Dine In' : activeTab,
+                  tableNumber: activeTab === 'Dine-in' ? (tableNumber || '') : '',
+                  search: searchText
+                }
+              });
+            }
+          }
+        ]
+      );
+      return;
+    }
+    router.push({
+      pathname: '/menu',
+      params: { orderType: activeTab === 'Dine-in' ? 'Dine In' : activeTab, tableNumber: activeTab === 'Dine-in' ? (tableNumber || '') : '', search: searchText }
     });
   };
 
@@ -486,8 +567,17 @@ export default function Home() {
             placeholder='Search crispy dosa, soft idli, filter coffee...'
             style={styles.searchInput}
             placeholderTextColor='#888'
+            value={searchText}
+            onChangeText={setSearchText}
+            onSubmitEditing={() => handleSearchSubmit(searchText)}
+            returnKeyType='search'
             onFocus={handleSearchFocus}
           />
+          {searchText.trim().length > 0 && (
+            <TouchableOpacity onPress={() => handleSearchSubmit(searchText)} style={{ padding: 4 }}>
+              <Ionicons name='arrow-forward-circle' size={22} color='#ff4500' />
+            </TouchableOpacity>
+          )}
         </View>
 
         {/* Banner Carousel */}
@@ -804,13 +894,26 @@ export default function Home() {
         </TouchableOpacity>
         <TouchableOpacity style={styles.navItem} onPress={() => {
           if (activeTab === 'Dine-in' && !tableNumber) {
-            showPopup("Scan QR Code", "Please scan the QR code on your table to view menu and order.", "info", undefined, [
+            showPopup("Scan QR Code", "Please scan the QR code on your table to place dine-in orders, or continue to search the menu.", "info", undefined, [
               { text: "Scan QR", onPress: handleDineInPress },
-              { text: "Cancel", style: "cancel" }
+              { 
+                text: "Search Menu", 
+                style: "default",
+                onPress: () => {
+                  router.push({ 
+                    pathname: '/menu', 
+                    params: { 
+                      orderType: activeTab === 'Dine-in' ? 'Dine In' : activeTab, 
+                      tableNumber: activeTab === 'Dine-in' ? (tableNumber || '') : '',
+                      search: searchText
+                    } 
+                  });
+                }
+              }
             ]);
             return;
           }
-          router.replace({ pathname: '/menu', params: { orderType: activeTab === 'Dine-in' ? 'Dine In' : activeTab, tableNumber: activeTab === 'Dine-in' ? (tableNumber || '') : '' } })
+          router.push({ pathname: '/menu', params: { orderType: activeTab === 'Dine-in' ? 'Dine In' : activeTab, tableNumber: activeTab === 'Dine-in' ? (tableNumber || '') : '', search: searchText } });
         }}>
           <Ionicons name='search-outline' size={24} color='#888' />
           <Text style={styles.navText}>Search</Text>
@@ -1051,7 +1154,7 @@ const styles = StyleSheet.create({
     borderRadius: 15,
   },
   bannerOverlay: {
-    ...StyleSheet.absoluteFill,
+    ...StyleSheet.absoluteFillObject,
     backgroundColor: 'rgba(0, 0, 0, 0.45)',
     padding: 20,
     justifyContent: 'center',

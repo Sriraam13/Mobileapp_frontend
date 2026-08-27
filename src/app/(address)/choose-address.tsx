@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, Platform, StatusBar, Image, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -17,6 +17,7 @@ export default function ChooseAddress() {
   const { customerId } = useAuthStore();
   const [loading, setLoading] = useState(true);
   const { addresses, setAddresses, setSelectedDeliveryAddress } = useAddressStore();
+  const mapRef = useRef<any>(null);
   
   const [searchQuery, setSearchQuery] = useState('');
   const [addressType, setAddressType] = useState('Home');
@@ -27,6 +28,10 @@ export default function ChooseAddress() {
     longitude: 80.2036,
     latitudeDelta: 0.015,
     longitudeDelta: 0.015,
+  });
+  const [markerCoord, setMarkerCoord] = useState({
+    latitude: 13.0405,
+    longitude: 80.2036,
   });
 
   const loadAddresses = async () => {
@@ -59,27 +64,9 @@ export default function ChooseAddress() {
     }
   };
 
-  const detectLocation = async () => {
-    setIsLocating(true);
-    setSelectedAddressText('Locating...');
+  const reverseGeocode = async (latitude: number, longitude: number) => {
+    setSelectedAddressText('Fetching address at location...');
     try {
-      let { status } = await Location.requestForegroundPermissionsAsync();
-      if (status !== 'granted') {
-        setSelectedAddressText('Location permission denied.');
-        setIsLocating(false);
-        return;
-      }
-      
-      let location = await Location.getCurrentPositionAsync({});
-      const { latitude, longitude } = location.coords;
-      
-      setRegion({
-        latitude,
-        longitude,
-        latitudeDelta: 0.015,
-        longitudeDelta: 0.015,
-      });
-      
       const apiKey = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY || 'AIzaSyA2qxAJag8F89Q_TdtjqU_42W6JAVJ5_qg';
       const geocodeUrl = `https://maps.googleapis.com/maps/api/geocode/json?latlng=${latitude},${longitude}&key=${apiKey}`;
       
@@ -88,9 +75,99 @@ export default function ChooseAddress() {
       
       if (data.status === 'OK' && data.results && data.results.length > 0) {
         setSelectedAddressText(data.results[0].formatted_address);
-      } else {
-        setSelectedAddressText('Could not get address');
+        return;
       }
+    } catch (e) {
+      console.warn("Google geocoding error:", e);
+    }
+
+    try {
+      const osmUrl = `https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}&zoom=18&addressdetails=1`;
+      const res = await fetch(osmUrl, { headers: { 'User-Agent': 'DataUdipiApp/1.0' } });
+      const osmData = await res.json();
+      if (osmData && osmData.display_name) {
+        setSelectedAddressText(osmData.display_name);
+        return;
+      }
+    } catch (e) {
+      console.warn("OSM geocoding error:", e);
+    }
+
+    try {
+      const expoResults = await Location.reverseGeocodeAsync({ latitude, longitude });
+      if (expoResults && expoResults.length > 0) {
+        const item = expoResults[0];
+        const fullParts = [
+          item.name && item.name !== item.street ? item.name : '',
+          item.streetNumber,
+          item.street,
+          item.district,
+          item.subregion,
+          item.city,
+          item.region,
+          item.postalCode,
+        ].filter(Boolean);
+        const deduped = fullParts.filter((p, i, arr) => arr.indexOf(p) === i);
+        if (deduped.length > 0) {
+          setSelectedAddressText(deduped.join(', '));
+          return;
+        }
+      }
+    } catch (e) {
+      console.warn("Expo geocoding error:", e);
+    }
+
+    setSelectedAddressText('Selected Location');
+  };
+
+  const handleSelectCoordinate = (coordinate: { latitude: number; longitude: number }) => {
+    if (!coordinate || !coordinate.latitude || !coordinate.longitude) return;
+    setMarkerCoord({
+      latitude: coordinate.latitude,
+      longitude: coordinate.longitude,
+    });
+    setRegion(prev => ({
+      ...prev,
+      latitude: coordinate.latitude,
+      longitude: coordinate.longitude,
+    }));
+    mapRef.current?.animateToRegion({
+      latitude: coordinate.latitude,
+      longitude: coordinate.longitude,
+      latitudeDelta: region.latitudeDelta || 0.015,
+      longitudeDelta: region.longitudeDelta || 0.015,
+    }, 300);
+    reverseGeocode(coordinate.latitude, coordinate.longitude);
+  };
+
+  const detectLocation = async () => {
+    setIsLocating(true);
+    try {
+      let { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== 'granted') {
+        setSelectedAddressText("Permission denied");
+        setIsLocating(false);
+        return;
+      }
+      
+      let location = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
+      const { latitude, longitude } = location.coords;
+      
+      setMarkerCoord({ latitude, longitude });
+      setRegion({
+        latitude,
+        longitude,
+        latitudeDelta: 0.015,
+        longitudeDelta: 0.015,
+      });
+      mapRef.current?.animateToRegion({
+        latitude,
+        longitude,
+        latitudeDelta: 0.015,
+        longitudeDelta: 0.015,
+      }, 400);
+      
+      await reverseGeocode(latitude, longitude);
     } catch (e) {
       console.error("Error detecting location:", e);
       setSelectedAddressText('Error getting location');
@@ -212,22 +289,40 @@ export default function ChooseAddress() {
             />
           ) : (
             <MapView
+              ref={mapRef}
               style={styles.mapImage}
               provider={PROVIDER_GOOGLE}
               region={region}
+              onPress={(e: any) => {
+                if (e?.nativeEvent?.coordinate) {
+                  handleSelectCoordinate(e.nativeEvent.coordinate);
+                }
+              }}
+              onPoiClick={(e: any) => {
+                if (e?.nativeEvent?.coordinate) {
+                  handleSelectCoordinate(e.nativeEvent.coordinate);
+                }
+              }}
               onRegionChangeComplete={(reg: any) => setRegion(reg)}
             >
               <Marker
-                coordinate={{ latitude: region.latitude, longitude: region.longitude }}
+                coordinate={markerCoord}
+                draggable
+                onDragEnd={(e: any) => {
+                  if (e?.nativeEvent?.coordinate) {
+                    handleSelectCoordinate(e.nativeEvent.coordinate);
+                  }
+                }}
+                anchor={{ x: 0.5, y: 1 }}
                 title="Selected Location"
               >
-                 <View style={styles.customMarker}>
-                    <View style={styles.customMarkerInner}>
-                      <Text style={styles.customMarkerText}>Data</Text>
-                      <Text style={styles.customMarkerTextBottom}>UDIPI</Text>
-                    </View>
-                    <View style={styles.markerTriangle} />
-                 </View>
+                <View style={styles.modernMarkerContainer}>
+                  <View style={styles.markerPin}>
+                    <Ionicons name="location" size={22} color="#fff" />
+                  </View>
+                  <View style={styles.markerPinTip} />
+                  <View style={styles.markerShadow} />
+                </View>
               </Marker>
             </MapView>
           )}
@@ -425,29 +520,46 @@ const styles = StyleSheet.create({
     width: '100%',
     height: '100%',
   },
-  customMarker: {
+  modernMarkerContainer: {
     alignItems: 'center',
-  },
-  customMarkerInner: {
-    backgroundColor: '#fff',
-    borderRadius: 25,
-    padding: 2,
-    width: 44,
-    height: 44,
     justifyContent: 'center',
+    width: 60,
+    height: 70,
+  },
+  markerPin: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#ff4500',
     alignItems: 'center',
-    borderWidth: 2,
-    borderColor: '#ff4500',
+    justifyContent: 'center',
+    borderWidth: 3,
+    borderColor: '#ffffff',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.35,
+    shadowRadius: 6,
+    elevation: 8,
+    zIndex: 2,
   },
-  customMarkerText: {
-    color: '#ff4500',
-    fontSize: 9,
-    fontWeight: 'bold',
+  markerPinTip: {
+    width: 0,
+    height: 0,
+    borderLeftWidth: 8,
+    borderRightWidth: 8,
+    borderTopWidth: 12,
+    borderLeftColor: 'transparent',
+    borderRightColor: 'transparent',
+    borderTopColor: '#ff4500',
+    marginTop: -3,
+    zIndex: 1,
   },
-  customMarkerTextBottom: {
-    color: '#00a01d',
-    fontSize: 9,
-    fontWeight: 'bold',
+  markerShadow: {
+    width: 14,
+    height: 5,
+    borderRadius: 7,
+    backgroundColor: 'rgba(0, 0, 0, 0.25)',
+    marginTop: 2,
   },
   markerTriangle: {
     width: 0,
