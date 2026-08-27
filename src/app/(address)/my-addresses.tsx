@@ -50,14 +50,15 @@ export default function Profile() {
     return unsubscribe;
   }, [navigation]);
 
-  const handleDeleteAddress = async (id: string) => {
+  const handleDeleteAddress = async (id: string | number) => {
     if (!customerId) return;
+    const idStr = String(id);
     try {
-      const response = await fetch(`${API_BASE_URL}/api/v1/public/customers/${customerId}/addresses/${id}`, {
+      const response = await fetch(`${API_BASE_URL}/api/v1/public/customers/${customerId}/addresses/${idStr}`, {
         method: 'DELETE'
       });
       if (response.ok) {
-        const updated = addresses.filter(item => item.id !== id);
+        const updated = addresses.filter(item => String(item.id) !== idStr);
         setAddresses(updated);
       }
     } catch (e) {

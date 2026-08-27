@@ -389,11 +389,11 @@ export default function App() {
                       </View>
                       <View style={styles.cartItemRight}>
                         <View style={styles.stepper}>
-                          <TouchableOpacity style={styles.stepBtnMinus} onPress={() => handleDecrement(item.id)}>
+                          <TouchableOpacity style={styles.stepBtnMinus} onPress={() => decrementQuantity(item.id as any)}>
                             <Ionicons name="remove" size={16} color="#f87171" />
                           </TouchableOpacity>
                           <Text style={styles.stepVal}>{item.quantity}</Text>
-                          <TouchableOpacity style={styles.stepBtnPlus} onPress={() => handleIncrement(item.id)}>
+                          <TouchableOpacity style={styles.stepBtnPlus} onPress={() => incrementQuantity(item.id as any)}>
                             <Ionicons name="add" size={16} color="#fff" />
                           </TouchableOpacity>
                         </View>

@@ -22,10 +22,10 @@ export default function Home() {
   const { items: cart, addItem, incrementQuantity, decrementQuantity } = useCartStore();
 
   const handleIncrement = (itemId: string) => {
-    const item = popularDishes.find(i => i.id === itemId);
+    const item = popularDishes.find(i => String(i.id) === itemId);
     if (!item) return;
     if (cart[itemId]) {
-      incrementQuantity(itemId);
+      incrementQuantity(itemId as any);
     } else {
       addItem({
         id: item.id,
@@ -40,7 +40,7 @@ export default function Home() {
   };
 
   const handleDecrement = (itemId: string) => {
-    decrementQuantity(itemId);
+    decrementQuantity(itemId as any);
   };
 
   useEffect(() => {
@@ -101,6 +101,7 @@ export default function Home() {
     title: string;
     message: string;
     type: 'success' | 'error' | 'info';
+    onConfirm?: () => void;
     buttons?: { text: string; onPress?: () => void; style?: 'cancel' | 'default' }[];
   }>({
     visible: false,

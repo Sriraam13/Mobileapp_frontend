@@ -170,8 +170,6 @@ export default function OrderSuccessScreen() {
     return () => {
       if (subscription?.remove) {
         subscription.remove();
-      } else if (BackHandler.removeEventListener) {
-        (BackHandler as any).removeEventListener('hardwareBackPress', onBackPress);
       }
       if (intervalId) {
         clearInterval(intervalId);

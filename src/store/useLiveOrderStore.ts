@@ -61,8 +61,8 @@ export const useLiveOrderStore = create<LiveOrderState>()(
       estimatedTime: null,
       pollingActive: false,
 
-      setLiveOrder: (orderType, orderId, dbOrderId, status, estimatedTime = null) => 
-        set({ orderType, orderId, dbOrderId, status, estimatedTime, pollingActive: true }),
+      setLiveOrder: (orderType, orderId, dbOrderId, status, estimatedTime = undefined) => 
+        set({ orderType, orderId, dbOrderId, status, estimatedTime: estimatedTime ?? null, pollingActive: true }),
       
       updateStatus: (status) => set({ status }),
       

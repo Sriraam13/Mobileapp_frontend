@@ -3,7 +3,7 @@ import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Image, Alert, Pla
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -75,7 +75,7 @@ export default function InvoiceScreen() {
       const mimeType = isPng ? 'image/png' : 'image/jpeg';
 
       if (uri.startsWith('http://') || uri.startsWith('https://')) {
-        const cacheDir = FileSystem.FileSystem.cacheDirectory || FileSystem.FileSystem.documentDirectory;
+        const cacheDir = FileSystem.cacheDirectory || FileSystem.documentDirectory;
         const ext = isPng ? 'png' : 'jpg';
         const localPath = `${cacheDir}temp_asset_${Math.random().toString(36).substring(7)}.${ext}`;
         const result = await FileSystem.downloadAsync(uri, localPath);
@@ -427,7 +427,7 @@ export default function InvoiceScreen() {
         await Print.printAsync({ html: htmlContent });
       } else {
         const { uri } = await Print.printToFileAsync({ html: htmlContent });
-        const safeUri = FileSystem.FileSystem.documentDirectory + `DataUdipi_Bill_${orderId}.pdf`;
+        const safeUri = FileSystem.documentDirectory + `DataUdipi_Bill_${orderId}.pdf`;
         await FileSystem.moveAsync({ from: uri, to: safeUri });
         await Sharing.shareAsync(safeUri, { UTI: '.pdf', mimeType: 'application/pdf' });
       }

@@ -31,6 +31,7 @@ export default function PaymentScreen() {
   const { setPaymentMethod, setPaymentSuccess, setPaymentFailed } = usePaymentStore();
   const { setLiveOrder } = useLiveOrderStore();
   const { setCurrentOrder, addPastOrder } = useOrderStore();
+  const { selectedDeliveryAddress } = useAddressStore();
 
   const [selectedMethod, setSelectedMethod] = useState<PaymentMethod>('UPI');
   const [loading, setLoading] = useState(false);
@@ -368,7 +369,10 @@ export default function PaymentScreen() {
               <Text style={styles.delInfoPrice}>Rs. {baseDeliveryTotal.toFixed(0)}</Text>
             </View>
             <Text style={styles.delInfoAddress} numberOfLines={1}>
-              {selectedDeliveryAddress && <Text style={(styles as any).delHeaderAddressText}>{selectedDeliveryAddress || 'Flat 402, Green Glen Layout, Bellandur, Bengaluru'}</Text>} 402, Green Glen Layout, Bellandur'} • ETA: 35 mins
+              {selectedDeliveryAddress
+                ? <Text style={(styles as any).delHeaderAddressText}>{selectedDeliveryAddress} • ETA: 35 mins</Text>
+                : <Text style={(styles as any).delHeaderAddressText}>Flat 402, Green Glen Layout, Bellandur, Bengaluru • ETA: 35 mins</Text>
+              }
             </Text>
           </View>
 

@@ -17,7 +17,7 @@ export interface Address {
 interface AddressState {
   addresses: Address[];
   selectedDeliveryAddress: string | null;
-  selectedAddressId: number | null;
+  selectedAddressId?: number;
 
   setAddresses: (addresses: Address[]) => void;
   setSelectedDeliveryAddress: (address: string, id?: number) => void;
@@ -54,12 +54,12 @@ export const useAddressStore = create<AddressState>()(
     (set) => ({
       addresses: [],
       selectedDeliveryAddress: null,
-      selectedAddressId: null as any,
+      selectedAddressId: undefined,
 
       setAddresses: (addresses) => set({ addresses }),
-      setSelectedDeliveryAddress: (selectedDeliveryAddress, selectedAddressId = null) => set({ selectedDeliveryAddress, selectedAddressId }),
+      setSelectedDeliveryAddress: (selectedDeliveryAddress, selectedAddressId) => set({ selectedDeliveryAddress, selectedAddressId }),
       addAddress: (address) => set((state) => ({ addresses: [...state.addresses, address] })),
-      clearAddresses: () => set({ addresses: [], selectedDeliveryAddress: null, selectedAddressId: null as any }),
+      clearAddresses: () => set({ addresses: [], selectedDeliveryAddress: null, selectedAddressId: undefined }),
     }),
     {
       name: 'address-storage',

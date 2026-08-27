@@ -48,9 +48,9 @@ interface CartState {
 
   // Actions
   addItem: (item: Omit<CartItem, 'quantity'> & { quantity?: number }) => void;
-  removeItem: (id: number) => void;
-  incrementQuantity: (id: number) => void;
-  decrementQuantity: (id: number) => void;
+  removeItem: (id: string | number) => void;
+  incrementQuantity: (id: string | number) => void;
+  decrementQuantity: (id: string | number) => void;
   clearCart: () => void;
   setOrderType: (type: OrderType) => void;
   setTableNumber: (tableNumber: string) => void;
