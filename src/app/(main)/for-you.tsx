@@ -56,7 +56,7 @@ export default function ForYou() {
         const frequencyMap: Record<string, number> = {};
         ordersList.forEach(order => {
           if (order.items) {
-            const items = order.items.split(',').map((i: string) => i.trim());
+            const items = (order.items as any).split(',').map((i: string) => i.trim());
             items.forEach((itemStr: string) => {
               const nameMatch = itemStr.match(/(.*)\s+x\s+\d+/i);
               const name = nameMatch ? nameMatch[1].trim() : itemStr;

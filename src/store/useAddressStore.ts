@@ -54,12 +54,12 @@ export const useAddressStore = create<AddressState>()(
     (set) => ({
       addresses: [],
       selectedDeliveryAddress: null,
-      selectedAddressId: null,
+      selectedAddressId: null as any,
 
       setAddresses: (addresses) => set({ addresses }),
       setSelectedDeliveryAddress: (selectedDeliveryAddress, selectedAddressId = null) => set({ selectedDeliveryAddress, selectedAddressId }),
       addAddress: (address) => set((state) => ({ addresses: [...state.addresses, address] })),
-      clearAddresses: () => set({ addresses: [], selectedDeliveryAddress: null, selectedAddressId: null }),
+      clearAddresses: () => set({ addresses: [], selectedDeliveryAddress: null, selectedAddressId: null as any }),
     }),
     {
       name: 'address-storage',

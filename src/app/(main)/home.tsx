@@ -509,10 +509,10 @@ export default function Home() {
                     imageStyle={styles.bannerImage}
                     resizeMode="cover"
                   >
-                    <View style={[styles.bannerOverlay, { backgroundColor: 'rgba(0, 0, 0, 0.55)' }]}>
-                      <Text style={[styles.bannerDiscount, { color: offer.color }]}>{offer.discount}</Text>
+                    <View style={[styles.bannerOverlay, { backgroundColor: 'rgba(0, 0, 0, 0.35)' }]}>
+                      <Text style={styles.bannerDiscount}>{offer.discount}</Text>
                       <Text style={styles.bannerSubtitle}>{offer.subtitle}</Text>
-                      <TouchableOpacity style={[styles.orderNowBtn, { backgroundColor: offer.color }]} onPress={async () => {
+                      <TouchableOpacity style={styles.orderNowBtn} onPress={async () => {
                         showPopup(
                           "Congratulations! 🎉",
                           `You've selected the ${offer.discount} offer.`,
@@ -1041,17 +1041,17 @@ const styles = StyleSheet.create({
     width: '100%',
     borderRadius: 15,
     overflow: 'hidden',
-    height: 150,
+    height: 160,
     justifyContent: 'center',
     backgroundColor: '#1a1a1a',
   },
   bannerImage: {
-    width: 320,
-    height: 150,
+    width: '100%',
+    height: '100%',
     borderRadius: 15,
   },
   bannerOverlay: {
-    ...StyleSheet.absoluteFill,
+    ...StyleSheet.absoluteFillObject,
     backgroundColor: 'rgba(0, 0, 0, 0.45)',
     padding: 20,
     justifyContent: 'center',
@@ -1059,26 +1059,39 @@ const styles = StyleSheet.create({
   },
   bannerDiscount: {
     color: '#fff',
-    fontSize: 24,
-    fontWeight: 'bold',
+    fontSize: 34,
+    fontWeight: '900',
+    letterSpacing: 0.5,
+    textShadowColor: 'rgba(0,0,0,0.6)',
+    textShadowOffset: { width: 1, height: 1 },
+    textShadowRadius: 3,
   },
   bannerSubtitle: {
     color: '#fff',
-    fontSize: 14,
-    marginTop: 5,
-    marginBottom: 15,
+    fontSize: 16,
+    fontWeight: '700',
+    marginTop: 4,
+    marginBottom: 16,
+    textShadowColor: 'rgba(0,0,0,0.6)',
+    textShadowOffset: { width: 1, height: 1 },
+    textShadowRadius: 3,
   },
   orderNowBtn: {
-    backgroundColor: '#ff4500',
-    paddingVertical: 8,
-    paddingHorizontal: 15,
-    borderRadius: 20,
+    backgroundColor: '#ea4a26',
+    paddingVertical: 10,
+    paddingHorizontal: 24,
+    borderRadius: 25,
     alignSelf: 'flex-start',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 3,
+    elevation: 3,
   },
   orderNowText: {
     color: '#fff',
     fontWeight: 'bold',
-    fontSize: 12,
+    fontSize: 15,
   },
   tabsContainer: {
     flexDirection: 'row',

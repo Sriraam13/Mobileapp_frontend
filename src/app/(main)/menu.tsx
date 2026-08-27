@@ -377,7 +377,7 @@ export default function App() {
                   <View key={item.id} style={styles.cartItemCard}>
                     <TouchableOpacity 
                       style={styles.removeBtn} 
-                      onPress={() => removeItem(item.id)}
+                      onPress={() => removeItem(item.id as any)}
                     >
                       <Ionicons name="close" size={14} color="#fff" />
                     </TouchableOpacity>

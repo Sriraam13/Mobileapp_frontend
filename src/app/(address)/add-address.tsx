@@ -192,7 +192,7 @@ export default function AddAddress() {
             <MapView
               style={styles.mapImage}
               region={region}
-              onRegionChangeComplete={async (newRegion) => {
+              onRegionChangeComplete={async (newRegion: any) => {
                 setRegion(newRegion);
                 if (!isLocating) {
                   try {

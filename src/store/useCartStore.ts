@@ -27,7 +27,7 @@ const webSafeStorage = {
 };
 
 export interface CartItem {
-  id: number;
+  id: number | string;
   name: string;
   price: number;
   image: string;
@@ -37,10 +37,10 @@ export interface CartItem {
   note?: string;
 }
 
-export type OrderType = 'Dine In' | 'Take Away';
+export type OrderType = 'Dine In' | 'Take Away' | 'Delivery';
 
 interface CartState {
-  items: Record<number, CartItem>;
+  items: Record<string | number, CartItem>;
   orderType: OrderType;
   tableNumber: string;
   tableStatus: string | null;
