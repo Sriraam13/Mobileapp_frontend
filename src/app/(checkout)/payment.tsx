@@ -505,23 +505,7 @@ export default function PaymentScreen() {
               )}
             </View>
 
-            {/* Pay at Counter Option */}
-            <TouchableOpacity 
-              style={[styles.methodCard, selectedMethod === 'Cash' ? styles.methodSelected : styles.methodUnselected]} 
-              onPress={() => setSelectedMethod('Cash')}
-              activeOpacity={0.8}
-            >
-              <View style={[styles.methodIconWrap, selectedMethod === 'Cash' ? styles.iconBgOrange : styles.iconBgWhite]}>
-                <Ionicons name="cash-outline" size={20} color={selectedMethod === 'Cash' ? '#fff' : '#888'} />
-              </View>
-              <View style={styles.methodTextContainer}>
-                <Text style={styles.methodName}>Pay at Counter</Text>
-                <Text style={styles.methodDesc}>Cash payment after your meal</Text>
-              </View>
-              <View style={[styles.radioCircle, selectedMethod === 'Cash' ? styles.radioSelected : styles.radioUnselected]}>
-                 {selectedMethod === 'Cash' && <Ionicons name="checkmark" size={14} color="#fff" />}
-              </View>
-            </TouchableOpacity>
+
 
           </View>
         </View>
