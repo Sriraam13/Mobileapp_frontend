@@ -24,7 +24,8 @@
         "android.permission.ACCESS_FINE_LOCATION",
         "android.permission.ACCESS_COARSE_LOCATION"
       ],
-      "package": "com.anonymous.dataudipiapp"
+      "package": "com.dataudipi.app",
+      "versionCode": 1
     },
     "web": {
       "output": "single",
@@ -74,10 +75,7 @@
       "typedRoutes": true
     },
     "extra": {
-      "router": {},
-      "eas": {
-        "projectId": "927f995e-93f1-4348-83d6-2b4a4753993c"
-      }
+      "router": {}
     }
   }
 }
