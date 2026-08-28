@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "Data Udipi App",
+    "name": "Data Udipi",
     "slug": "data-udipi-app",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -46,20 +46,20 @@
       [
         "expo-camera",
         {
-          "cameraPermission": "Allow Data Udipi App to access your camera to scan table QR codes."
+          "cameraPermission": "Allow Data Udipi to access your camera to scan table QR codes."
         }
       ],
       [
         "expo-image-picker",
         {
-          "photosPermission": "Allow Data Udipi App to access your photos for profile pictures.",
-          "cameraPermission": "Allow Data Udipi App to access your camera to take profile pictures."
+          "photosPermission": "Allow Data Udipi to access your photos for profile pictures.",
+          "cameraPermission": "Allow Data Udipi to access your camera to take profile pictures."
         }
       ],
       [
         "expo-location",
         {
-          "locationAlwaysAndWhenInUsePermission": "Allow Data Udipi App to use your location to find nearby addresses."
+          "locationAlwaysAndWhenInUsePermission": "Allow Data Udipi to use your location to find nearby addresses."
         }
       ],
       [
@@ -75,7 +75,10 @@
       "typedRoutes": true
     },
     "extra": {
-      "router": {}
+      "router": {},
+      "eas": {
+        "projectId": "07a600e4-fe0d-4ba1-b941-36bed42fd455"
+      }
     }
   }
 }
