@@ -112,58 +112,19 @@ export default function AddAddress() {
       Alert.alert("Error", "Please fill in address details.");
       return;
     }
-    if (!customerId) {
-      Alert.alert("Error", "You must be logged in to add an address.");
-      return;
-    }
-    
-    try {
-      const response = await fetch(`${API_BASE_URL}/api/v1/public/customers/${customerId}/addresses`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          address_type: addressType,
-          flat_house_no: flat || '',
-          floor: floor || '',
-          building_apartment_name: building || '',
-          landmark: landmark || '',
-          full_address: fullAddress.trim(),
-          latitude: region.latitude,
-          longitude: region.longitude,
-          city: 'Chennai',
-          state: 'Tamil Nadu',
-          pincode: '600001', // Example pincode
-          contact_name: customerName || 'Guest',
-          contact_phone: authPhone || '',
-          is_default: addresses.length === 0
-        })
-      });
-      
-      if (!response.ok) {
-        throw new Error("Failed to save address to backend.");
-      }
-      
-      const savedAddress = await response.json();
-      
-      const payload = {
-        id: savedAddress.id.toString(),
-        type: addressType,
-        address: fullAddress.trim(),
-        full_address: fullAddress.trim(),
-        icon: addressType === 'Home' ? 'home' : addressType === 'Office' ? 'briefcase' : 'location',
-        iconBg: addressType === 'Home' ? '#ff4500' : addressType === 'Office' ? '#e6f2ff' : '#e6ffe6',
-        iconColor: addressType === 'Home' ? '#fff' : addressType === 'Office' ? '#1e90ff' : '#00cc66',
-        isDefault: savedAddress.is_default
-      };
+    const payload = {
+      id: Date.now().toString(),
+      type: addressType,
+      address: fullAddress.trim(),
+      full_address: fullAddress.trim(),
+      icon: addressType === 'Home' ? 'home' : addressType === 'Office' ? 'briefcase' : 'location',
+      iconBg: addressType === 'Home' ? '#ff4500' : addressType === 'Office' ? '#e6f2ff' : '#e6ffe6',
+      iconColor: addressType === 'Home' ? '#fff' : addressType === 'Office' ? '#1e90ff' : '#00cc66',
+      isDefault: addresses.length === 0
+    };
 
-      addAddress(payload);
-      router.back();
-    } catch (e) {
-      console.error("Failed to save address:", e);
-      Alert.alert("Error", "Failed to save address. Please try again.");
-    }
+    addAddress(payload);
+    router.replace('/menu');
   };
 
   return (
@@ -214,15 +175,7 @@ export default function AddAddress() {
               <Marker
                 coordinate={{ latitude: region.latitude, longitude: region.longitude }}
                 title="Your Location"
-              >
-                <View style={{ alignItems: 'center', justifyContent: 'center' }}>
-                  <View style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: '#fff', borderWidth: 2, borderColor: '#ff4500', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
-                    <Image source={require('../../../assets/images/Dataudupi.png')} style={{ width: 34, height: 34 }} resizeMode="contain" />
-                  </View>
-                  <View style={{ width: 0, height: 0, backgroundColor: 'transparent', borderStyle: 'solid', borderLeftWidth: 6, borderRightWidth: 6, borderBottomWidth: 12, borderLeftColor: 'transparent', borderRightColor: 'transparent', borderBottomColor: '#ff4500', transform: [{ rotate: '180deg' }], marginTop: -2 }} />
-                  <View style={{ width: 12, height: 12, borderRadius: 6, backgroundColor: '#ff8c00', marginTop: 2, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.3, shadowRadius: 2, elevation: 4 }} />
-                </View>
-              </Marker>
+              />
             </MapView>
           )}
           {isLocating && (

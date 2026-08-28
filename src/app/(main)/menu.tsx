@@ -29,7 +29,7 @@ export default function App() {
 
   useEffect(() => {
     const initialOrderType = (params.orderType as string) || "Dine In";
-    const mappedOrderType = initialOrderType === "Takeaway" ? "Take Away" : (initialOrderType === "Dine-in" ? "Dine In" : initialOrderType) as "Dine In" | "Take Away";
+    const mappedOrderType = initialOrderType === "Takeaway" ? "Take Away" : (initialOrderType === "Dine-in" ? "Dine In" : initialOrderType) as "Dine In" | "Take Away" | "Delivery";
     if (mappedOrderType) setOrderType(mappedOrderType);
     if (params.tableNumber) setTableNumber(params.tableNumber as string);
   }, [params.orderType, params.tableNumber, setOrderType, setTableNumber]);
@@ -365,7 +365,13 @@ export default function App() {
                 <Ionicons name="bag-handle-outline" size={16} color={orderType === "Take Away" ? "#fff" : "#ccc"} />
                 <Text style={orderType === "Take Away" ? styles.orderTypeActiveText : styles.orderTypeInactiveText}>Take Away</Text>
               </TouchableOpacity>
-
+              <TouchableOpacity 
+                style={[styles.orderTypeBtn, orderType === "Delivery" && styles.orderTypeActive]}
+                onPress={() => setOrderType("Delivery")}
+              >
+                <Ionicons name="bicycle-outline" size={16} color={orderType === "Delivery" ? "#fff" : "#ccc"} />
+                <Text style={orderType === "Delivery" ? styles.orderTypeActiveText : styles.orderTypeInactiveText}>Delivery</Text>
+              </TouchableOpacity>
             </View>
 
             <ScrollView style={styles.cartItemsScroll} contentContainerStyle={{ paddingTop: 12, paddingRight: 12, paddingLeft: 4, paddingBottom: 12 }} showsVerticalScrollIndicator={false}>

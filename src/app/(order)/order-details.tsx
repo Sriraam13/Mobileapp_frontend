@@ -20,6 +20,11 @@ export default function OrderDetails() {
       orderApi.getOrderDetails(orderId as string, restaurantId ? Number(restaurantId) : 1)
         .then(data => {
           if (data && data.order) {
+            let mappedType = data.order.order_type || 'Dine In';
+            if (mappedType === 'DINE_IN') mappedType = 'Dine In';
+            if (mappedType === 'TAKEAWAY') mappedType = 'Take Away';
+            if (mappedType === 'DELIVERY') mappedType = 'Delivery';
+            data.order.order_type = mappedType;
             setOrder(data.order);
             setItems(data.items || []);
           }
@@ -122,7 +127,12 @@ export default function OrderDetails() {
 
   const formatDate = (isoString: string) => {
     try {
-      const d = new Date(isoString);
+      let parsedString = isoString;
+      if (parsedString && parsedString.includes('T') && !parsedString.endsWith('Z') && !parsedString.includes('+')) {
+        parsedString += 'Z';
+      }
+      const d = new Date(parsedString);
+      if (isNaN(d.getTime())) return isoString;
       const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
       const date = d.getDate();
       const month = months[d.getMonth()];

@@ -568,6 +568,15 @@ export default function Home() {
           >
             <Text style={[styles.tabText, activeTab === 'Takeaway' && styles.activeTabText]}>Takeaway</Text>
           </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.tabBtn, activeTab === 'Delivery' && styles.activeTabBtn]}
+            onPress={() => {
+              setActiveTab('Delivery');
+              router.push('/(address)/choose-address');
+            }}
+          >
+            <Text style={[styles.tabText, activeTab === 'Delivery' && styles.activeTabText]}>Delivery</Text>
+          </TouchableOpacity>
         </View>
 
         {/* Table Status Card for Dine-in */}

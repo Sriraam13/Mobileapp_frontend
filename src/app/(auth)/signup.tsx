@@ -6,7 +6,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useAuthStore } from '../../store';
 import { customerApi } from '../../services/apiService';
 
-export default function LoginScreen() {
+export default function SignupScreen() {
   const router = useRouter();
   const { login } = useAuthStore();
   
@@ -15,7 +15,7 @@ export default function LoginScreen() {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
 
-  const handleLogin = async () => {
+  const handleSignup = async () => {
     setError('');
     
     // Basic validation
@@ -51,8 +51,8 @@ export default function LoginScreen() {
       
       router.replace('/outlet-selector');
     } catch (err: any) {
-      console.error('Login error:', err);
-      setError(err.message || 'An error occurred during login.');
+      console.error('Signup error:', err);
+      setError(err.message || 'An error occurred during signup.');
     } finally {
       setIsLoading(false);
     }
@@ -71,8 +71,8 @@ export default function LoginScreen() {
               style={styles.logo} 
               resizeMode="contain"
             />
-            <Text style={styles.title}>Welcome Back</Text>
-            <Text style={styles.subtitle}>Enter your details to continue</Text>
+            <Text style={styles.title}>Create an Account</Text>
+            <Text style={styles.subtitle}>Join us and start ordering</Text>
           </View>
 
           <View style={styles.form}>
@@ -108,30 +108,26 @@ export default function LoginScreen() {
               />
             </View>
 
-
-
             <TouchableOpacity 
               style={[styles.loginBtn, isLoading && styles.loginBtnDisabled]}
-              onPress={handleLogin}
+              onPress={handleSignup}
               disabled={isLoading}
             >
               {isLoading ? (
                 <ActivityIndicator color="#fff" />
               ) : (
-                <Text style={styles.loginBtnText}>Login</Text>
+                <Text style={styles.loginBtnText}>Sign Up</Text>
               )}
             </TouchableOpacity>
             
             <View style={styles.signupContainer}>
-              <Text style={styles.signupText}>Don't have an account? </Text>
-              <Link href="/signup" asChild>
+              <Text style={styles.signupText}>Already have an account? </Text>
+              <Link href="/login" asChild>
                 <TouchableOpacity>
-                  <Text style={styles.signupLink}>Sign Up</Text>
+                  <Text style={styles.signupLink}>Login</Text>
                 </TouchableOpacity>
               </Link>
             </View>
-            
-            <Text style={styles.hintText}>Enter your name and mobile number to proceed.</Text>
           </View>
         </View>
       </KeyboardAvoidingView>

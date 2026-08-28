@@ -78,15 +78,15 @@ export default function PaymentScreen() {
           title: item.name, itemName: item.name, image_url: item.image,
           note: item.note || ''
         }));
-        let deliveryAddressId = null;
-        if (orderType === 'Delivery') {
-          deliveryAddressId = useAddressStore.getState().selectedAddressId;
-        }
+        let backendOrderType = 'DINE_IN';
+        if (orderType === 'Take Away') backendOrderType = 'TAKEAWAY';
+        if (orderType === 'Delivery') backendOrderType = 'DELIVERY';
+
         const orderData = {
           table_number: orderType === 'Dine In' ? (tableNumber || 'T-06') : null,
-          order_type: orderType,
+          order_type: backendOrderType,
           delivery_address: null,
-          delivery_address_id: deliveryAddressId,
+          delivery_address_id: null,
           payment_method: selectedMethod,
           phone: userPhone,
           cart: formattedCart,
@@ -119,7 +119,11 @@ export default function PaymentScreen() {
         addPastOrder({ orderId: generatedOrderId, dbOrderId, date: new Date().toISOString(), total: totalVal, itemsCount: getItemCount(), status: 'Preparing' });
         setLiveOrder(orderType as 'Dine In' | 'Take Away', generatedOrderId, dbOrderId, 'Preparing');
         clearCart();
-        router.push({ pathname: '/order-success', params: finalOrder });
+        if (orderType === 'Delivery') {
+          router.push({ pathname: '/delivery-success', params: finalOrder });
+        } else {
+          router.push({ pathname: '/order-success', params: finalOrder });
+        }
       } else if (razorpayStatus === 'failed') {
         setPaymentFailedReason(razorpayReason || 'Payment failed');
         setPaymentFailed();
@@ -229,15 +233,13 @@ export default function PaymentScreen() {
 
     // Cash Payment (Pay at counter) Flow
 
-    let deliveryAddressId = null;
-    if (orderType === 'Delivery') {
-      const addressStoreState = useAddressStore.getState();
-      deliveryAddressId = addressStoreState.selectedAddressId;
-    }
+    let backendOrderType = 'DINE_IN';
+    if (orderType === 'Take Away') backendOrderType = 'TAKEAWAY';
+    if (orderType === 'Delivery') backendOrderType = 'DELIVERY';
 
     const orderData = {
       table_number: orderType === 'Dine In' ? (tableNumber || 'T-06') : null,
-      order_type: orderType,
+      order_type: backendOrderType,
       delivery_address: null,
       delivery_address_id: null,
       payment_method: 'Cash',
@@ -305,7 +307,11 @@ export default function PaymentScreen() {
             setLiveOrder(orderType as 'Dine In' | 'Take Away', generatedOrderId, dbOrderId, 'Preparing');
             clearCart();
 
-            router.push({ pathname: '/order-success', params: finalOrder });
+            if (orderType === 'Delivery') {
+              router.push({ pathname: '/delivery-success', params: finalOrder });
+            } else {
+              router.push({ pathname: '/order-success', params: finalOrder });
+            }
           }
         } catch (err) {
           console.error('Polling error', err);
@@ -330,7 +336,11 @@ export default function PaymentScreen() {
         discountCode: discountCode
       };
       // Navigate to success screen if DB ID not found (fallback)
-      router.push({ pathname: '/order-success', params: fallbackOrder });
+      if (orderType === 'Delivery') {
+        router.push({ pathname: '/delivery-success', params: fallbackOrder });
+      } else {
+        router.push({ pathname: '/order-success', params: fallbackOrder });
+      }
     }
   };
 

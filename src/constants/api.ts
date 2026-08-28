@@ -2,11 +2,22 @@ import { Platform } from 'react-native';
 import Constants from 'expo-constants';
 
 const getApiUrl = () => {
-  return 'http://dev-api.dataudipi.com';
+  // Try to use the Expo host URI to get the local network IP address
+  const hostUri = Constants.expoConfig?.hostUri;
+  if (hostUri) {
+    const ip = hostUri.split(':')[0];
+    return `http://${ip}:8001`;
+  }
+
+  // Fallback for Android emulator
+  if (Platform.OS === 'android') {
+    return 'http://10.0.2.2:8001';
+  }
+  return 'http://localhost:8001';
 };
 
 export const API_BASE_URL = getApiUrl();
-export const IMAGE_BASE_URL = 'http://dev-api.dataudipi.com';
+export const IMAGE_BASE_URL = getApiUrl();
 
 // Curated high quality food fallbacks based on dish names
 const FOOD_FALLBACKS: Record<string, string> = {

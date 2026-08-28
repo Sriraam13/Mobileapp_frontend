@@ -4,6 +4,7 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useCartStore } from '../../store/useCartStore';
+import { useAddressStore } from '../../store/useAddressStore';
 
 export default function CheckoutScreen() {
   const router = useRouter();
@@ -21,6 +22,8 @@ export default function CheckoutScreen() {
     discountCode
   } = useCartStore();
 
+  const { selectedDeliveryAddress, addresses, selectedAddressId } = useAddressStore();
+
   const cartItems = Object.values(items).filter(item => item && item.quantity > 0);
   const itemCount = getItemCount();
   const subtotal = getSubtotal();
@@ -30,33 +33,18 @@ export default function CheckoutScreen() {
   const packagingCharges = 0; // Fixed as per wireframe
   
   const toPay = subtotal + packagingCharges + gst - discountAmount;
+  
+  const deliveryFee = orderType === 'Delivery' ? 30 : 0;
+  const finalToPay = toPay + deliveryFee;
+
+  const selectedAddressObj = addresses.find(a => a.id == selectedAddressId);
+  const deliveryAddressType = selectedAddressObj ? selectedAddressObj.type : 'Home';
 
   return (
     <SafeAreaView style={styles.safeArea}>
       <StatusBar barStyle="light-content" backgroundColor="#222" />
       
-      {/* Dark Top Header */}
-      <View style={styles.darkHeader}>
-        {orderType !== 'Take Away' && (
-          <View style={styles.tableBadge}>
-            <Text style={styles.tableText}>Table no : </Text>
-            <View style={styles.tableCircle}>
-              <Text style={styles.tableCircleText}>{tableNumber?.replace('T-', '') ?? '06'}</Text>
-            </View>
-          </View>
-        )}
-        
-        <View style={styles.logoContainer}>
-          <Image 
-            source={require('../../../assets/images/Dataudupi.png')} 
-            style={styles.logoImageFull} 
-            resizeMode="contain"
-          />
-        </View>
 
-        {/* Spacer to keep logo centered */}
-        <View style={{ width: 32 }} />
-      </View>
 
       {/* Header */}
       <View style={styles.header}>
@@ -106,6 +94,26 @@ export default function CheckoutScreen() {
           </View>
         )}
 
+        {/* Delivery Address Box */}
+        {orderType === 'Delivery' && (
+          <View style={styles.addressBox}>
+            <View style={styles.addressTop}>
+              <Text style={styles.addressType}>Delivering to {selectedDeliveryAddress ? deliveryAddressType : 'Home'}</Text>
+              <TouchableOpacity onPress={() => router.push('/choose-address')}>
+                <Text style={styles.changeBtn}>CHANGE</Text>
+              </TouchableOpacity>
+            </View>
+            <View style={styles.addressBottom}>
+              <Text style={styles.addressText} numberOfLines={1}>
+                {selectedDeliveryAddress || 'Flat 402, Maple Heights, Kora...'}
+              </Text>
+              <View style={styles.etaBadge}>
+                <Text style={styles.etaText}>30-40 MIN ETA</Text>
+              </View>
+            </View>
+          </View>
+        )}
+
         {/* Bill Details */}
         <View style={styles.billDetailsBox}>
           <Text style={styles.billTitle}>Bill Details</Text>
@@ -114,6 +122,13 @@ export default function CheckoutScreen() {
             <Text style={styles.billLabel}>Item Subtotal</Text>
             <Text style={styles.billValue}>Rs. {subtotal.toFixed(2)}</Text>
           </View>
+          
+          {orderType === 'Delivery' && (
+            <View style={styles.billRow}>
+              <Text style={styles.billLabel}>Delivery Fee</Text>
+              <Text style={styles.billValue}>Rs. {deliveryFee.toFixed(2)}</Text>
+            </View>
+          )}
           
           <View style={styles.billRow}>
             <Text style={styles.billLabel}>Packaging Charges</Text>
@@ -136,7 +151,7 @@ export default function CheckoutScreen() {
 
           <View style={styles.billRowToPay}>
             <Text style={styles.toPayLabel}>To Pay</Text>
-            <Text style={styles.toPayValue}>Rs. {Math.max(toPay, 0).toFixed(2)}</Text>
+            <Text style={styles.toPayValue}>Rs. {Math.max(finalToPay, 0).toFixed(2)}</Text>
           </View>
         </View>
       </ScrollView>
@@ -145,9 +160,15 @@ export default function CheckoutScreen() {
       <View style={[styles.footer, { paddingBottom: Math.max(insets.bottom, 16) }]}>
         <TouchableOpacity 
           style={styles.proceedBtn}
-          onPress={() => router.push('/payment')}
+          onPress={() => {
+            if (orderType === 'Delivery') {
+              router.push('/delivery-checkout');
+            } else {
+              router.push('/payment');
+            }
+          }}
         >
-          <Text style={styles.proceedBtnText}>Proceed to Payment</Text>
+          <Text style={styles.proceedBtnText}>Proceed to Checkout</Text>
         </TouchableOpacity>
       </View>
     </SafeAreaView>

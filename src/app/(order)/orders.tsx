@@ -41,6 +41,11 @@ export default function Orders() {
             
             // Format for UI
             const finalOrderId = o.orderId || `ORD-${String(o.id).padStart(6, '0')}`;
+            let mappedType = o.order_type || 'Dine In';
+            if (mappedType === 'DINE_IN') mappedType = 'Dine In';
+            if (mappedType === 'TAKEAWAY') mappedType = 'Take Away';
+            if (mappedType === 'DELIVERY') mappedType = 'Delivery';
+
             return {
               id: finalOrderId,
               dbId: o.id,
@@ -50,7 +55,7 @@ export default function Orders() {
               items: items || [],
               total: o.total_amount || 0,
               image: items?.[0]?.image_url ? getFullImageUrl(items[0].image_url) : 'https://via.placeholder.com/150',
-              order_type: o.order_type || 'Dine In'
+              order_type: mappedType
             }
           });
           setOrders(formattedOrders);
@@ -114,14 +119,25 @@ export default function Orders() {
   const handleOrderPress = (order: any) => {
     const activeStatuses = ['PENDING', 'CONFIRMED', 'PREPARING', 'ALMOST_READY', 'READY'];
     if (activeStatuses.includes((order.status || '').toUpperCase())) {
-      router.push({ 
-        pathname: '/track-order', 
-        params: { 
-          dbOrderId: order.dbOrderId,
-          orderId: order.id,
-          orderType: order.order_type || 'Take Away'
-        } 
-      });
+      if (order.order_type === 'Delivery') {
+        router.push({
+          pathname: '/delivery-tracking',
+          params: {
+            dbOrderId: order.dbOrderId,
+            orderId: order.id,
+            orderType: order.order_type
+          }
+        });
+      } else {
+        router.push({ 
+          pathname: '/track-order', 
+          params: { 
+            dbOrderId: order.dbOrderId,
+            orderId: order.id,
+            orderType: order.order_type || 'Take Away'
+          } 
+        });
+      }
     } else {
       router.push({ pathname: '/order-details', params: { orderId: order.dbOrderId || order.id } });
     }
@@ -147,7 +163,12 @@ export default function Orders() {
 
   const formatDate = (isoString: string) => {
     try {
-      const d = new Date(isoString);
+      let parsedString = isoString;
+      if (parsedString && parsedString.includes('T') && !parsedString.endsWith('Z') && !parsedString.includes('+')) {
+        parsedString += 'Z';
+      }
+      const d = new Date(parsedString);
+      if (isNaN(d.getTime())) return isoString;
       const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
       const date = d.getDate();
       const month = months[d.getMonth()];

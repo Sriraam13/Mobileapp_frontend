@@ -220,15 +220,7 @@ export default function ChooseAddress() {
               <Marker
                 coordinate={{ latitude: region.latitude, longitude: region.longitude }}
                 title="Selected Location"
-              >
-                 <View style={styles.customMarker}>
-                    <View style={styles.customMarkerInner}>
-                      <Text style={styles.customMarkerText}>Data</Text>
-                      <Text style={styles.customMarkerTextBottom}>UDIPI</Text>
-                    </View>
-                    <View style={styles.markerTriangle} />
-                 </View>
-              </Marker>
+              />
             </MapView>
           )}
           
