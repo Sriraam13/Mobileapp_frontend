@@ -3,6 +3,7 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { Ionicons } from '@expo/vector-icons';
 import { useState, useEffect } from 'react';
 import { useRouter, useLocalSearchParams } from 'expo-router';
+import { useVoiceAgentStore } from '../../store';
 import { menuApi } from '../../services/apiService';
 import { getFullImageUrl } from '../../constants/api';
 import { useRestaurantStore } from '../../store';
@@ -43,6 +44,7 @@ export default function App() {
   const [isCartModalVisible, setIsCartModalVisible] = useState(false);
   const [selectedItem, setSelectedItem] = useState<any>(null);
   const [isFilterModalVisible, setIsFilterModalVisible] = useState(false);
+  const showAgent = useVoiceAgentStore((state) => state.showAgent);
   const [availabilityFilter, setAvailabilityFilter] = useState("All Items");
   const [priceSort, setPriceSort] = useState("Default");
   
@@ -136,8 +138,11 @@ export default function App() {
 
         {/* Table No */}
         {orderType === "Dine In" && (
-          <View style={styles.tableBadge}>
-            <Text style={styles.tableText}>Table no : </Text>
+          <View style={styles.tableBadgeContainer}>
+            <View style={styles.tableTextContainer}>
+              <Text style={styles.tableText}>Table no : </Text>
+            </View>
+            <View style={styles.tableLine} />
             <View style={styles.tableCircle}>
               <Text style={styles.tableCircleText}>{tableNumber.replace('T-', '')}</Text>
             </View>
@@ -321,7 +326,19 @@ export default function App() {
           </TouchableOpacity>
         )}
 
-        {/* Talk to Chef button removed */}
+        {/* Talk to Chef button */}
+        <TouchableOpacity style={styles.talkToChefBtn} onPress={() => showAgent()}>
+          <View style={styles.chefIconContainer}>
+             <Image source={require('../../../assets/images/chef_mascot.png')} style={styles.talkChefImg} resizeMode="contain" />
+          </View>
+          <View style={styles.talkChefTextCol}>
+            <Text style={styles.talkChefTitle}>Talk to Chef</Text>
+            <View style={styles.talkChefSubRow}>
+              <Ionicons name="mic-outline" size={12} color="#666" />
+              <Text style={styles.talkChefSub}>Tap to speak</Text>
+            </View>
+          </View>
+        </TouchableOpacity>
       </View>
 
       {/* Cart Modal */}
@@ -565,30 +582,35 @@ const styles = StyleSheet.create({
     marginRight: -4,
   },
   homeBtn: { width: 36, height: 36, borderRadius: 18, backgroundColor: 'rgba(255,255,255,0.2)', alignItems: 'center', justifyContent: 'center' },
-  tableBadge: {
+  tableBadgeContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#fff',
-    borderRadius: 20,
-    paddingLeft: 10,
-    paddingRight: 2,
-    paddingVertical: 2,
-    borderWidth: 1,
-    borderColor: '#dfdfdf'
   },
-  tableText: { fontSize: 10, fontWeight: '600', color: '#000' },
-  tableCircle: {
-    backgroundColor: '#ff3400',
-    borderRadius: 12,
-    width: 24,
-    height: 24,
-    alignItems: 'center',
-    justifyContent: 'center',
+  tableTextContainer: {
+    backgroundColor: '#fff',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 14,
     borderWidth: 1,
     borderColor: '#dfdfdf',
-    marginLeft: 4,
   },
-  tableCircleText: { color: '#fff', fontSize: 14, fontWeight: 'bold' },
+  tableText: { fontSize: 10, fontWeight: '600', color: '#000' },
+  tableLine: {
+    width: 10,
+    height: 2,
+    backgroundColor: '#fff',
+  },
+  tableCircle: {
+    backgroundColor: '#ff3400',
+    borderRadius: 16,
+    width: 32,
+    height: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1.5,
+    borderColor: '#fff',
+  },
+  tableCircleText: { color: '#fff', fontSize: 16, fontWeight: 'bold', fontFamily: 'serif' },
   logoContainer: { flexDirection: 'row', alignItems: 'center', flex: 1, justifyContent: 'center' },
   logoImageFull: { width: 140, height: 36, resizeMode: 'contain' },
   globeIcon: {
@@ -702,7 +724,7 @@ const styles = StyleSheet.create({
   viewCartBtn: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#00a01d',
+    backgroundColor: '#0BA01E',
     paddingVertical: 10,
     paddingHorizontal: 16,
     borderRadius: 24,
@@ -716,21 +738,68 @@ const styles = StyleSheet.create({
   viewCartText: {
     color: '#fff',
     fontWeight: 'bold',
-    fontSize: 14,
+    fontSize: 16,
   },
   viewCartBadge: {
-    backgroundColor: '#32d366',
-    width: 20,
-    height: 20,
-    borderRadius: 10,
+    backgroundColor: 'rgba(255, 255, 255, 0.3)',
+    width: 24,
+    height: 24,
+    borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
     marginLeft: 4,
   },
   viewCartBadgeText: {
     color: '#fff',
+    fontSize: 14,
+    fontWeight: 'bold',
+  },
+  talkToChefBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#fff',
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    borderRadius: 30,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 6,
+    elevation: 6,
+    gap: 12,
+    borderWidth: 1,
+    borderColor: '#eee',
+    marginTop: 12,
+  },
+  chefIconContainer: {
+    width: 36,
+    height: 36,
+    backgroundColor: '#f5f5f5',
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  talkChefImg: {
+    width: 28,
+    height: 28,
+  },
+  talkChefTextCol: {
+    justifyContent: 'center',
+  },
+  talkChefTitle: {
     fontSize: 12,
     fontWeight: 'bold',
+    color: '#333',
+  },
+  talkChefSubRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 2,
+    marginTop: 2,
+  },
+  talkChefSub: {
+    fontSize: 10,
+    color: '#666',
   },
   modalOverlay: {
     flex: 1,

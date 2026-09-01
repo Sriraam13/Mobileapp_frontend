@@ -6,3 +6,4 @@ export { usePaymentStore } from './usePaymentStore';
 export { useOrderStore } from './useOrderStore';
 export { useLiveOrderStore } from './useLiveOrderStore';
 export { useDineInSessionStore } from './useDineInSessionStore';
+export { useVoiceAgentStore } from './useVoiceAgentStore';

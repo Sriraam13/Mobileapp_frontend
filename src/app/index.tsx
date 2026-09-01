@@ -264,8 +264,8 @@ const styles = StyleSheet.create({
     width: '100%',
   },
   mascot: {
-    width: 200,
-    height: 200,
+    width: 240,
+    height: 240,
     marginBottom: 10,
   },
   loadingContainer: {
