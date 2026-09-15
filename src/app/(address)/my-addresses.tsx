@@ -1,17 +1,25 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Platform, StatusBar, ActivityIndicator } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Platform, StatusBar, ActivityIndicator, RefreshControl } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';;
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter, useNavigation } from 'expo-router';
-import { API_BASE_URL } from '../../constants/api';
 import { useAuthStore, useAddressStore } from '../../store';
+import { customerApi } from '../../services/apiService';
+import BottomNavBar from '../../components/layout/BottomNavBar';
 
 export default function Profile() {
   const router = useRouter();
   const navigation = useNavigation();
   const { customerId } = useAuthStore();
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const { addresses, setAddresses } = useAddressStore();
+
+  const onRefresh = async () => {
+    setRefreshing(true);
+    await loadAddresses();
+    setRefreshing(false);
+  };
 
   const loadAddresses = async () => {
     if (!customerId) {
@@ -21,14 +29,15 @@ export default function Profile() {
     
     try {
       setLoading(true);
-      const response = await fetch(`${API_BASE_URL}/api/v1/public/customers/${customerId}/addresses`);
-      if (response.ok) {
-        const data = await response.json();
+      const data = await customerApi.getAddresses(customerId);
+      if (Array.isArray(data)) {
         const formattedAddresses = data.map((item: any) => ({
           id: item.id.toString(),
           type: item.address_type,
-          address: item.flat_house_no + (item.building_apartment_name ? `, ${item.building_apartment_name}` : ''),
-          full_address: item.full_address,
+          address: item.full_address || [item.flat_house_no, item.building_apartment_name, item.landmark].filter(Boolean).join(', '),
+          full_address: item.full_address || '',
+          latitude: item.latitude != null ? Number(item.latitude) : undefined,
+          longitude: item.longitude != null ? Number(item.longitude) : undefined,
           icon: item.address_type.toLowerCase() === 'home' ? 'home' : (item.address_type.toLowerCase() === 'work' ? 'briefcase' : 'location'),
           iconBg: item.address_type.toLowerCase() === 'home' ? '#ffe5e5' : (item.address_type.toLowerCase() === 'work' ? '#e6f2ff' : '#e6ffe6'),
           iconColor: item.address_type.toLowerCase() === 'home' ? '#ff4500' : (item.address_type.toLowerCase() === 'work' ? '#1e90ff' : '#00cc66'),
@@ -54,13 +63,9 @@ export default function Profile() {
     if (!customerId) return;
     const idStr = String(id);
     try {
-      const response = await fetch(`${API_BASE_URL}/api/v1/public/customers/${customerId}/addresses/${idStr}`, {
-        method: 'DELETE'
-      });
-      if (response.ok) {
-        const updated = addresses.filter(item => String(item.id) !== idStr);
-        setAddresses(updated);
-      }
+      await customerApi.deleteAddress(customerId, Number(idStr));
+      const updated = addresses.filter(item => String(item.id) !== idStr);
+      setAddresses(updated);
     } catch (e) {
       console.error("Error deleting address", e);
     }
@@ -78,7 +83,11 @@ export default function Profile() {
         <Text style={styles.headerTitle}>My Addresses</Text>
       </View>
 
-      <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+      <ScrollView 
+        contentContainerStyle={styles.scrollContent} 
+        showsVerticalScrollIndicator={false}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={['#ff4500']} />}
+      >
         {loading ? (
           <View style={{ alignItems: 'center', marginTop: 40 }}>
             <ActivityIndicator size="large" color="#ff4500" />
@@ -121,34 +130,15 @@ export default function Profile() {
             </View>
           ))
         )}
-      </ScrollView>
 
-      <View style={styles.footerContainer}>
         <TouchableOpacity style={styles.addNewBtn} onPress={() => router.push('/add-address')}>
           <Ionicons name="add" size={20} color="#fff" />
           <Text style={styles.addNewText}>Add New Address</Text>
         </TouchableOpacity>
-      </View>
+      </ScrollView>
 
       {/* Bottom Navigation */}
-      <View style={styles.bottomNav}>
-        <TouchableOpacity style={styles.navItem} onPress={() => router.push('/home')}>
-          <Ionicons name='home-outline' size={24} color='#888' />
-          <Text style={styles.navText}>Home</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.navItem} onPress={() => router.push('/menu')}>
-          <Ionicons name='search-outline' size={24} color='#888' />
-          <Text style={styles.navText}>Search</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.navItem}>
-          <Ionicons name='receipt-outline' size={24} color='#888' />
-          <Text style={styles.navText}>Orders</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.navItem}>
-          <Ionicons name='person' size={24} color='#ff4500' />
-          <Text style={[styles.navText, { color: '#ff4500' }]}>Profile</Text>
-        </TouchableOpacity>
-      </View>
+      <BottomNavBar activeTab="profile" />
     </SafeAreaView>
   );
 }
@@ -157,7 +147,7 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#fafafa',
-    paddingTop: Platform.OS === 'android' ? StatusBar.currentHeight : 0,
+    
   },
   header: {
     flexDirection: 'row',
@@ -257,6 +247,8 @@ const styles = StyleSheet.create({
     paddingVertical: 15,
     borderRadius: 25,
     gap: 10,
+    marginTop: 20,
+    marginBottom: 20,
   },
   addNewText: {
     color: '#fff',

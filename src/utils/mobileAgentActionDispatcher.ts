@@ -32,11 +32,12 @@ export const executeMobileAgentActions = (actions: UIAction[]) => {
           break;
         case 'add_to_cart':
           if (act.menu_item_id && act.quantity) {
-            // Assume menu item data is passed via payload or fetched.
-            // Since useCartStore requires the full item, we might need to 
-            // construct it. If the agent didn't provide full item, we skip for now.
             if (act.payload && act.payload.item) {
-                useCartStore.getState().addItem(act.payload.item, act.quantity);
+                useCartStore.getState().addItem({
+                  ...act.payload.item,
+                  category: act.payload.item.category ?? 'General',
+                  quantity: act.quantity
+                });
             } else {
                 console.warn('add_to_cart missing full item payload');
             }
@@ -44,7 +45,9 @@ export const executeMobileAgentActions = (actions: UIAction[]) => {
           break;
         case 'select_order_type':
           if (act.order_type) {
-             useCartStore.getState().setOrderType(act.order_type);
+             const validTypes = ['Dine In', 'Take Away', 'Delivery'] as const;
+             const matched = validTypes.find(t => t === act.order_type);
+             if (matched) useCartStore.getState().setOrderType(matched);
           }
           break;
         case 'open_tracking':

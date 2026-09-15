@@ -1,9 +1,9 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, TextInput, TouchableOpacity, ActivityIndicator, Image, KeyboardAvoidingView, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, Link } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { useAuthStore, useVoiceAgentStore } from '../../store';
+import { useAuthStore } from '../../store';
 import { customerApi } from '../../services/apiService';
 import { DeviceEventEmitter } from 'react-native';
 
@@ -15,28 +15,16 @@ export default function SignupScreen() {
   const [phone, setPhone] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
-  const { showAgent, addMessage, setAgentState } = useVoiceAgentStore();
-  const [hasGreeted, setHasGreeted] = useState(false);
 
   useEffect(() => {
     const nameSub = DeviceEventEmitter.addListener('set_signup_name', (val) => setName(val));
     const phoneSub = DeviceEventEmitter.addListener('set_signup_phone', (val) => setPhone(val));
-    
-    if (!hasGreeted) {
-      setHasGreeted(true);
-      setTimeout(() => {
-        showAgent();
-        // Since we want the backend to generate the exact greeting TTS and enter the right state,
-        // we emit an invisible prompt to the backend or just hardcode the local UI and then start listening.
-        // It's cleaner to just let the backend handle the greeting.
-        DeviceEventEmitter.emit('start_signup_voice');
-      }, 500);
-    }
+
     return () => {
       nameSub.remove();
       phoneSub.remove();
     };
-  }, [hasGreeted]);
+  }, []);
 
   const handleSignup = async () => {
     setError('');
@@ -59,7 +47,15 @@ export default function SignupScreen() {
         formattedPhone = `+91${formattedPhone.replace(/^0+/, '')}`;
       }
 
-      const data = await customerApi.login({
+      // Check if phone already exists
+      const checkRes = await customerApi.checkPhone({ phone: formattedPhone });
+      if (checkRes.customer_exists) {
+        setError('An account already exists with this mobile number. Please log in.');
+        setIsLoading(false);
+        return;
+      }
+
+      const data = await customerApi.signup({
         name: name.trim(),
         phone: formattedPhone,
         otp: '1234'

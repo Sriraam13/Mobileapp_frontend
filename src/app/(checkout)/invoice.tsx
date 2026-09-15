@@ -8,6 +8,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRestaurantStore } from '../../store';
+import { orderApi } from '../../services/apiService';
 
 export default function InvoiceScreen() {
   const { selectedOutlet } = useRestaurantStore();
@@ -17,6 +18,8 @@ export default function InvoiceScreen() {
   const [rating, setRating] = useState<string | null>(null);
   const [branchName, setBranchName] = useState('Data Udipi — Mugalivakkam');
   const [branchAddress, setBranchAddress] = useState('Mount-Poonamallee Road, Mugalivakkam, Chennai 600125');
+  const [orderData, setOrderData] = useState<any>(null);
+  const [loadingOrder, setLoadingOrder] = useState(Boolean(params.dbOrderId));
 
   useEffect(() => {
     if (selectedOutlet) {
@@ -25,14 +28,40 @@ export default function InvoiceScreen() {
     }
   }, [selectedOutlet]);
 
-  const orderId = params.orderId as string || 'DU104-100034372TE';
-  const subtotalVal = parseFloat((params.subtotal as string) || '0');
-  const finalTotalVal = parseFloat((params.finalTotal as string) || '0');
-  const discountAmountVal = parseFloat((params.discountAmount as string) || '0');
+  useEffect(() => {
+    const dbOrderId = params.dbOrderId as string | undefined;
+    if (!dbOrderId) return;
+
+    const restaurantId = selectedOutlet?.restaurant_id ? Number(selectedOutlet.restaurant_id) : null;
+    if (!restaurantId) {
+      setLoadingOrder(false);
+      Alert.alert('Invoice unavailable', 'Restaurant context is unavailable.');
+      return;
+    }
+
+    orderApi.getOrderDetails(dbOrderId, restaurantId)
+      .then(data => setOrderData(data))
+      .catch(error => {
+        console.error('Failed to load invoice order data', error);
+        Alert.alert('Invoice unavailable', 'We could not load the order details.');
+      })
+      .finally(() => setLoadingOrder(false));
+  }, [params.dbOrderId, selectedOutlet]);
+
+  const backendOrder = orderData?.order || {};
+  const orderId = (params.orderId as string) || (backendOrder.id ? `ORD-${backendOrder.id}` : 'Invoice');
+  const subtotalVal = orderData?.items?.reduce((sum: number, item: any) => sum + Number(item.price || item.unit_price || 0) * Number(item.quantity || 1), 0) || parseFloat((params.subtotal as string) || '0');
+  const finalTotalVal = Number(backendOrder.total_amount ?? parseFloat((params.finalTotal as string) || '0'));
+  const discountAmountVal = Number(backendOrder.discount_amount ?? parseFloat((params.discountAmount as string) || '0'));
+  const deliveryFeeVal = Number(backendOrder.delivery_fee || 0);
+  const packagingFeeVal = Number(backendOrder.packaging_fee || 0);
+  const tipAmountVal = Number(backendOrder.tip_amount || 0);
+  const gstAmountVal = Number(backendOrder.gst_amount || 0);
+  const deliveryAddress = backendOrder.delivery_address_snapshot;
   const discountCodeStr = (params.discountCode as string) || '';
   const mobileNumber = (params.mobileNumber as string) || 'WALK-IN';
   const customerName = (params.customerName as string) || (mobileNumber === 'WALK-IN' ? 'WALK-IN' : 'REGISTERED');
-  const paymentMethod = (params.paymentMethod as string) || 'UPI';
+  const paymentMethod = backendOrder.payment_method || (params.paymentMethod as string) || 'UPI';
   const orderType = (params.orderType as string) || 'Dine In';
 
   let cartData: any[] = [];
@@ -43,15 +72,17 @@ export default function InvoiceScreen() {
   } catch (e) {
     console.error("Error parsing cart data", e);
   }
+  if (orderData?.items) cartData = orderData.items;
 
   const totalQty = cartData.reduce((acc, item) => acc + parseInt(item.quantity || item.qty || 1, 10), 0);
-  const now = new Date();
-  const formattedDate = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')}`;
+  const invoiceDate = backendOrder.created_at || backendOrder.delivered_at;
+  const formattedDate = invoiceDate ? new Date(invoiceDate).toLocaleString('en-IN') : 'Date unavailable';
 
-  const netTaxableVal = finalTotalVal / 1.05;
-  const cgstVal = (finalTotalVal - netTaxableVal) / 2;
+  const totalGstValFromOrder = gstAmountVal || (finalTotalVal / 1.05 * 0.05);
+  const netTaxableVal = finalTotalVal - totalGstValFromOrder;
+  const cgstVal = totalGstValFromOrder / 2;
   const sgstVal = cgstVal;
-  const totalGstVal = cgstVal + sgstVal;
+  const totalGstVal = totalGstValFromOrder;
 
   const subtotal = subtotalVal.toFixed(2);
   const discountAmount = discountAmountVal.toFixed(2);
@@ -361,6 +392,7 @@ export default function InvoiceScreen() {
               <div>${formattedDate}</div>
             </div>
           </div>
+          ${deliveryAddress ? `<div style="font-size: 11px; margin: 8px 0;"><strong>Delivery Address:</strong> ${typeof deliveryAddress === 'string' ? deliveryAddress : (deliveryAddress.address || deliveryAddress.full_address || '')}</div>` : ''}
 
           <div class="divider"></div>
           
@@ -382,6 +414,9 @@ export default function InvoiceScreen() {
 
           <div class="totals-container">
             <div class="total-row"><span>Gross Total :</span><span>₹${subtotal}</span></div>
+            ${packagingFeeVal > 0 ? `<div class="total-row"><span>Packaging Fee :</span><span>₹${packagingFeeVal.toFixed(2)}</span></div>` : ''}
+            ${deliveryFeeVal > 0 ? `<div class="total-row"><span>Delivery Fee :</span><span>₹${deliveryFeeVal.toFixed(2)}</span></div>` : ''}
+            ${tipAmountVal > 0 ? `<div class="total-row"><span>Rider Tip :</span><span>₹${tipAmountVal.toFixed(2)}</span></div>` : ''}
             ${discountAmountVal > 0 ? `<div class="total-row" style="color: #00a01d;"><span>Discount (${discountCodeStr}) :</span><span>-₹${discountAmount}</span></div>` : ''}
             <div class="total-row"><span>Net Taxable Value :</span><span>₹${netTaxable}</span></div>
             <div class="total-row"><span>CGST @ 2.5% :</span><span>₹${cgst}</span></div>
@@ -443,6 +478,17 @@ export default function InvoiceScreen() {
     ? `https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=upi://pay?pa=dataudipi@upi%26pn=DataUdipi%26am=${finalTotal}%26cu=INR`
     : `https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=CashPaymentConfirmed`;
 
+  if (loadingOrder) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
+          <ActivityIndicator size="large" color="#ff4500" />
+          <Text style={{ marginTop: 12 }}>Loading invoice...</Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
@@ -487,6 +533,7 @@ export default function InvoiceScreen() {
           <Text style={styles.metaLabel}>Counter : 4</Text>
           <Text style={styles.metaLabel}>Customer : {customerName}</Text>
           <Text style={styles.metaLabel}>Mobile No : {mobileNumber}</Text>
+          {deliveryAddress && <Text style={styles.metaLabel}>Delivery Address : {typeof deliveryAddress === 'string' ? deliveryAddress : deliveryAddress.address || deliveryAddress.full_address || ''}</Text>}
 
           <View style={styles.divider} />
 
@@ -510,6 +557,9 @@ export default function InvoiceScreen() {
 
           <View style={styles.totalsContainer}>
             <View style={styles.totalRow}><Text style={styles.totalLabel}>Gross Total :</Text><Text style={styles.totalValue}>₹{subtotal}</Text></View>
+            {packagingFeeVal > 0 && <View style={styles.totalRow}><Text style={styles.totalLabel}>Packaging Fee :</Text><Text style={styles.totalValue}>₹{packagingFeeVal.toFixed(2)}</Text></View>}
+            {deliveryFeeVal > 0 && <View style={styles.totalRow}><Text style={styles.totalLabel}>Delivery Fee :</Text><Text style={styles.totalValue}>₹{deliveryFeeVal.toFixed(2)}</Text></View>}
+            {tipAmountVal > 0 && <View style={styles.totalRow}><Text style={styles.totalLabel}>Rider Tip :</Text><Text style={styles.totalValue}>₹{tipAmountVal.toFixed(2)}</Text></View>}
             {discountAmountVal > 0 && (
               <View style={styles.totalRow}>
                 <Text style={[styles.totalLabel, { color: '#00a01d' }]}>Discount ({discountCodeStr}) :</Text>

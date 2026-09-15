@@ -72,7 +72,7 @@ export const useCartStore = create<CartState>()(
   persist(
     (set, get) => ({
   items: {},
-  orderType: 'Dine In',
+  orderType: 'Delivery',
   tableNumber: '',
   tableStatus: null,
   discountCode: null,

@@ -1,11 +1,13 @@
-import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, Platform, StatusBar, Image, Alert, ActivityIndicator } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';;
+import React, { useState, useEffect, useRef } from 'react';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, Platform, StatusBar, Image, Alert, ActivityIndicator, RefreshControl, Modal, Pressable } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
+import { useRouter, useLocalSearchParams } from 'expo-router';
 import * as Location from 'expo-location';
 import { API_BASE_URL } from '../../constants/api';
 import { useAuthStore, useAddressStore } from '../../store';
+import BottomNavBar from '../../components/layout/BottomNavBar';
+import { isWithinDeliveryArea } from '../../utils/deliveryArea';
 
 const MapView = Platform.OS !== 'web' ? require('react-native-maps').default : null;
 const { PROVIDER_GOOGLE } = Platform.OS !== 'web' ? require('react-native-maps') : { PROVIDER_GOOGLE: 'google' };
@@ -13,21 +15,86 @@ const Marker = Platform.OS !== 'web' ? require('react-native-maps').Marker : nul
 
 export default function AddAddress() {
   const router = useRouter();
-  const { phone } = useAuthStore();
-  const { addAddress, addresses } = useAddressStore();
-  const [addressType, setAddressType] = useState('Home');
+  const params = useLocalSearchParams<{ predefinedAddress?: string; latitude?: string; longitude?: string; addressType?: string }>();
+  const { phone, customerId, customerName } = useAuthStore();
+  const { addAddress, addresses, setSelectedDeliveryAddress } = useAddressStore();
+  
+  const [addressType, setAddressType] = useState(params.addressType as string || 'Home');
   const [flat, setFlat] = useState('');
   const [floor, setFloor] = useState('');
   const [building, setBuilding] = useState('');
   const [landmark, setLandmark] = useState('');
-  const [fullAddress, setFullAddress] = useState('');
+  const [fullAddress, setFullAddress] = useState(params.predefinedAddress || '');
   const [isLocating, setIsLocating] = useState(false);
   const [region, setRegion] = useState({
-    latitude: 13.0405,
-    longitude: 80.2036,
+    latitude: params.latitude ? Number(params.latitude) : 13.0223,
+    longitude: params.longitude ? Number(params.longitude) : 80.2229,
     latitudeDelta: 0.015,
     longitudeDelta: 0.015,
   });
+  const [refreshing, setRefreshing] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchResults, setSearchResults] = useState<any[]>([]);
+  const [isSearching, setIsSearching] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [hasConfirmedLocation, setHasConfirmedLocation] = useState(Boolean(params.latitude && params.longitude));
+  const [showDeliveryUnavailable, setShowDeliveryUnavailable] = useState(false);
+  const mapRef = useRef<any>(null);
+
+  const handleSearch = async (text: string) => {
+    setSearchQuery(text);
+    if (text.length > 2) {
+      setIsSearching(true);
+      try {
+        const apiKey = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY || 'AIzaSyA2qxAJag8F89Q_TdtjqU_42W6JAVJ5_qg';
+        const url = `https://maps.googleapis.com/maps/api/place/autocomplete/json?input=${encodeURIComponent(text)}&key=${apiKey}&components=country:in`;
+        const response = await fetch(url);
+        const data = await response.json();
+        if (data.status === 'OK') {
+          setSearchResults(data.predictions);
+        } else {
+          setSearchResults([]);
+        }
+      } catch (e) {
+        console.error("Error fetching places:", e);
+      } finally {
+        setIsSearching(false);
+      }
+    } else {
+      setSearchResults([]);
+    }
+  };
+
+  const handleSelectPlace = async (placeId: string, description: string) => {
+    setSearchQuery(description);
+    setSearchResults([]);
+    try {
+      const apiKey = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY || 'AIzaSyA2qxAJag8F89Q_TdtjqU_42W6JAVJ5_qg';
+      const url = `https://maps.googleapis.com/maps/api/place/details/json?place_id=${placeId}&fields=geometry&key=${apiKey}`;
+      const response = await fetch(url);
+      const data = await response.json();
+      if (data.status === 'OK' && data.result?.geometry?.location) {
+        const { lat, lng } = data.result.geometry.location;
+        const selectedRegion = {
+          latitude: lat,
+          longitude: lng,
+          latitudeDelta: 0.015,
+          longitudeDelta: 0.015,
+        };
+        setRegion(selectedRegion);
+        mapRef.current?.animateToRegion(selectedRegion, 500);
+        setHasConfirmedLocation(true);
+        setFullAddress(description);
+      }
+    } catch (e) {
+      console.error("Error fetching place details:", e);
+    }
+  };
+
+  const onRefresh = async () => {
+    setRefreshing(true);
+    setRefreshing(false);
+  };
 
   const detectLocation = async () => {
     setIsLocating(true);
@@ -42,12 +109,15 @@ export default function AddAddress() {
       let location = await Location.getCurrentPositionAsync({});
       const { latitude, longitude } = location.coords;
       
-      setRegion({
+      const detectedRegion = {
         latitude,
         longitude,
         latitudeDelta: 0.015,
         longitudeDelta: 0.015,
-      });
+      };
+      setRegion(detectedRegion);
+      mapRef.current?.animateToRegion(detectedRegion, 500);
+      setHasConfirmedLocation(true);
       
       const apiKey = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY || 'AIzaSyA2qxAJag8F89Q_TdtjqU_42W6JAVJ5_qg';
       const geocodeUrl = `https://maps.googleapis.com/maps/api/geocode/json?latlng=${latitude},${longitude}&key=${apiKey}`;
@@ -73,15 +143,9 @@ export default function AddAddress() {
           if (comp.types.includes('locality')) locality = comp.long_name;
         });
         
-        if (streetNumber) {
-          setFlat(streetNumber);
-        }
-        if (route) {
-          setBuilding(route);
-        }
-        if (sublocality || locality) {
-          setLandmark(sublocality || locality);
-        }
+        if (streetNumber) setFlat(streetNumber);
+        if (route) setBuilding(route);
+        if (sublocality || locality) setLandmark(sublocality || locality);
       } else {
         console.warn("Geocoding failed:", data.status, data.error_message);
       }
@@ -93,10 +157,6 @@ export default function AddAddress() {
   };
 
   useEffect(() => {
-    detectLocation();
-  }, []);
-
-  useEffect(() => {
     if (isLocating) return;
     const parts = [
       flat ? `${flat}` : '',
@@ -104,27 +164,84 @@ export default function AddAddress() {
       building ? `${building}` : '',
       landmark ? `${landmark}` : ''
     ].filter(Boolean);
-    setFullAddress(parts.join(', '));
-  }, [flat, floor, building, landmark, isLocating]);
-  const { customerId, customerName, phone: authPhone } = useAuthStore();
+    if (parts.length > 0) {
+       setFullAddress(parts.join(', '));
+    }
+  }, [flat, floor, building, landmark]);
+
   const handleSave = async () => {
     if (!fullAddress.trim()) {
       Alert.alert("Error", "Please fill in address details.");
       return;
     }
+
+    if (!hasConfirmedLocation || !isWithinDeliveryArea(region.latitude, region.longitude)) {
+      setShowDeliveryUnavailable(true);
+      return;
+    }
+    
+    setIsSaving(true);
+    const newId = Date.now();
     const payload = {
-      id: Date.now().toString(),
+      id: newId,
       type: addressType,
       address: fullAddress.trim(),
       full_address: fullAddress.trim(),
-      icon: addressType === 'Home' ? 'home' : addressType === 'Office' ? 'briefcase' : 'location',
-      iconBg: addressType === 'Home' ? '#ff4500' : addressType === 'Office' ? '#e6f2ff' : '#e6ffe6',
-      iconColor: addressType === 'Home' ? '#fff' : addressType === 'Office' ? '#1e90ff' : '#00cc66',
+      latitude: region.latitude,
+      longitude: region.longitude,
+      flat_house_no: flat || '',
+      floor: floor || '',
+      building_apartment_name: building || '',
+      landmark: landmark || '',
+      contact_name: customerName || 'Customer',
+      contact_phone: phone || '',
+      city: 'Chennai',
+      state: 'Tamil Nadu',
+      pincode: '600001',
+      icon: addressType === 'Home' ? 'home' : addressType === 'Work' ? 'briefcase' : 'location',
+      iconBg: addressType === 'Home' ? '#ff4500' : addressType === 'Work' ? '#e6f2ff' : '#e6ffe6',
+      iconColor: addressType === 'Home' ? '#fff' : addressType === 'Work' ? '#1e90ff' : '#00cc66',
       isDefault: addresses.length === 0
     };
 
-    addAddress(payload);
-    router.replace('/menu');
+    if (customerId) {
+      try {
+        const { customerApi } = await import('../../services/apiService');
+        const resp = await customerApi.addAddress(customerId, {
+          address_type: addressType,
+          flat_house_no: flat || 'N/A',
+          floor: floor || null,
+          building_apartment_name: building || null,
+          landmark: landmark || null,
+          full_address: fullAddress.trim(),
+          latitude: region.latitude,
+          longitude: region.longitude,
+          city: 'Chennai',
+          state: 'Tamil Nadu',
+          pincode: '600001',
+          contact_name: customerName || 'Customer',
+          contact_phone: phone || '',
+          is_default: addresses.length === 0
+        });
+        
+        // Update store only after backend success
+        const finalId = resp?.address?.id || resp?.id || newId;
+        payload.id = finalId;
+        addAddress(payload);
+        setSelectedDeliveryAddress(fullAddress.trim(), finalId);
+        setIsSaving(false);
+        router.replace({ pathname: '/menu', params: { orderType: 'Delivery' } });
+      } catch (e: any) {
+        setIsSaving(false);
+        console.warn('Address backend sync note:', e);
+        Alert.alert("Unable to save address", e?.message || "The address could not be saved. Please try again.");
+      }
+    } else {
+      addAddress(payload);
+      setSelectedDeliveryAddress(fullAddress.trim(), newId);
+      setIsSaving(false);
+      router.replace({ pathname: '/menu', params: { orderType: 'Delivery' } });
+    }
   };
 
   return (
@@ -139,8 +256,41 @@ export default function AddAddress() {
         <Text style={styles.headerTitle}>Add Address</Text>
       </View>
 
-      <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps='handled'>
+      <ScrollView 
+        contentContainerStyle={styles.scrollContent} 
+        showsVerticalScrollIndicator={false} 
+        keyboardShouldPersistTaps='handled'
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={['#ff4500']} />}
+      >
         
+        {/* Search Bar */}
+        <View style={styles.searchContainer}>
+          <Ionicons name="search-outline" size={20} color="#888" style={styles.searchIcon} />
+          <TextInput 
+            style={styles.searchInput}
+            placeholder="Search for area, street..."
+            placeholderTextColor="#999"
+            value={searchQuery}
+            onChangeText={handleSearch}
+          />
+        </View>
+
+        {/* Search Results Dropdown */}
+        {searchResults.length > 0 && (
+          <View style={styles.searchResultsContainer}>
+            {searchResults.map((item, index) => (
+              <TouchableOpacity 
+                key={item.place_id} 
+                style={[styles.searchResultItem, index < searchResults.length - 1 && styles.searchResultBorder]}
+                onPress={() => handleSelectPlace(item.place_id, item.description)}
+              >
+                <Ionicons name="location-outline" size={18} color="#666" style={{marginRight: 10}} />
+                <Text style={styles.searchResultText} numberOfLines={2}>{item.description}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        )}
+
         {/* Map View */}
         <View style={styles.mapContainer}>
           {Platform.OS === 'web' ? (
@@ -151,11 +301,13 @@ export default function AddAddress() {
             />
           ) : (
             <MapView
+              ref={mapRef}
               style={styles.mapImage}
               region={region}
-              onRegionChangeComplete={async (newRegion: any) => {
+              onRegionChangeComplete={async (newRegion: any, details: any) => {
                 setRegion(newRegion);
-                if (!isLocating) {
+                if (!isLocating && details?.isGesture) {
+                  setHasConfirmedLocation(true);
                   try {
                     const apiKey = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY || 'AIzaSyA2qxAJag8F89Q_TdtjqU_42W6JAVJ5_qg';
                     const geocodeUrl = `https://maps.googleapis.com/maps/api/geocode/json?latlng=${newRegion.latitude},${newRegion.longitude}&key=${apiKey}`;
@@ -199,7 +351,7 @@ export default function AddAddress() {
         {/* Address Type */}
         <Text style={styles.sectionLabel}>ADDRESS TYPE</Text>
         <View style={styles.typeContainer}>
-          {['Home', 'Office', 'Other'].map(type => (
+          {['Home', 'Work', 'Other'].map(type => (
             <TouchableOpacity 
               key={type}
               style={[styles.typeBtn, addressType === type && styles.typeBtnActive]}
@@ -265,31 +417,44 @@ export default function AddAddress() {
           />
         </View>
 
-        <TouchableOpacity style={styles.saveBtn} onPress={handleSave}>
-          <Text style={styles.saveBtnText}>Save Address</Text>
+        <TouchableOpacity style={styles.saveBtn} onPress={handleSave} disabled={isSaving}>
+          {isSaving ? (
+            <ActivityIndicator color="#fff" size="small" />
+          ) : (
+            <Text style={styles.saveBtnText}>Confirm and Save Address</Text>
+          )}
         </TouchableOpacity>
 
       </ScrollView>
 
+      <Modal
+        visible={showDeliveryUnavailable}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowDeliveryUnavailable(false)}
+      >
+        <Pressable style={styles.deliveryModalBackdrop} onPress={() => setShowDeliveryUnavailable(false)}>
+          <Pressable style={styles.deliveryModalCard} onPress={() => undefined}>
+            <View style={styles.deliveryModalIcon}>
+              <Ionicons name="location-outline" size={26} color="#0BA01E" />
+            </View>
+            <Text style={styles.deliveryModalTitle}>Delivery unavailable</Text>
+            <Text style={styles.deliveryModalMessage}>Data Udipi isn&apos;t available here.</Text>
+            <TouchableOpacity
+              style={styles.deliveryModalButton}
+              onPress={() => {
+                setShowDeliveryUnavailable(false);
+                setSearchQuery('');
+              }}
+            >
+              <Text style={styles.deliveryModalButtonText}>Try another location</Text>
+            </TouchableOpacity>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
       {/* Bottom Navigation */}
-      <View style={styles.bottomNav}>
-        <TouchableOpacity style={styles.navItem} onPress={() => router.push('/home')}>
-          <Ionicons name='home-outline' size={24} color='#888' />
-          <Text style={styles.navText}>Home</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.navItem} onPress={() => router.push('/menu')}>
-          <Ionicons name='search-outline' size={24} color='#888' />
-          <Text style={styles.navText}>Search</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.navItem} onPress={() => router.push('/orders')}>
-          <Ionicons name='receipt-outline' size={24} color='#888' />
-          <Text style={styles.navText}>Orders</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.navItem} onPress={() => router.push('/profile')}>
-          <Ionicons name='person' size={24} color='#ff4500' />
-          <Text style={[styles.navText, { color: '#ff4500' }]}>Profile</Text>
-        </TouchableOpacity>
-      </View>
+      <BottomNavBar activeTab="profile" />
     </SafeAreaView>
   );
 }
@@ -298,7 +463,7 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#fff',
-    paddingTop: Platform.OS === 'android' ? StatusBar.currentHeight : 0,
+    
   },
   header: {
     flexDirection: 'row',
@@ -315,13 +480,70 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
   },
   scrollContent: {
-    paddingBottom: 100,
+    paddingBottom: 350,
+  },
+  searchContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginHorizontal: 20,
+    marginBottom: 15,
+    gap: 10,
+    zIndex: 2,
+  },
+  searchInput: {
+    flex: 1,
+    backgroundColor: '#f9f9f9',
+    borderRadius: 25,
+    paddingHorizontal: 40,
+    paddingVertical: 12,
+    fontSize: 14,
+    color: '#333',
+    borderWidth: 1,
+    borderColor: '#eee',
+  },
+  searchIcon: {
+    position: 'absolute',
+    left: 15,
+    zIndex: 1,
+  },
+  searchResultsContainer: {
+    marginHorizontal: 20,
+    marginTop: -10,
+    marginBottom: 15,
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#eee',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.1,
+    shadowRadius: 12,
+    elevation: 3,
+    maxHeight: 200,
+    zIndex: 1000,
+    overflow: 'hidden',
+  },
+  searchResultItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 12,
+    backgroundColor: '#fff',
+  },
+  searchResultBorder: {
+    borderBottomWidth: 1,
+    borderBottomColor: '#f0f0f0',
+  },
+  searchResultText: {
+    flex: 1,
+    fontSize: 13,
+    color: '#333',
   },
   mapContainer: {
-    height: 200,
+    height: 300,
     width: '100%',
     backgroundColor: '#eee',
     marginBottom: 20,
+    zIndex: 1,
   },
   mapImage: {
     width: '100%',
@@ -394,6 +616,59 @@ const styles = StyleSheet.create({
   multilineInput: {
     height: 80,
     paddingTop: 12,
+  },
+  deliveryModalBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.45)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 24,
+  },
+  deliveryModalCard: {
+    width: '100%',
+    maxWidth: 360,
+    backgroundColor: '#fff',
+    borderRadius: 18,
+    padding: 24,
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.2,
+    shadowRadius: 18,
+    elevation: 10,
+  },
+  deliveryModalIcon: {
+    width: 54,
+    height: 54,
+    borderRadius: 27,
+    backgroundColor: '#e8f7eb',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 14,
+  },
+  deliveryModalTitle: {
+    color: '#111',
+    fontSize: 21,
+    fontWeight: '800',
+    marginBottom: 8,
+  },
+  deliveryModalMessage: {
+    color: '#555',
+    fontSize: 16,
+    textAlign: 'center',
+    marginBottom: 22,
+  },
+  deliveryModalButton: {
+    width: '100%',
+    backgroundColor: '#0BA01E',
+    borderRadius: 10,
+    paddingVertical: 13,
+    alignItems: 'center',
+  },
+  deliveryModalButtonText: {
+    color: '#fff',
+    fontSize: 15,
+    fontWeight: '700',
   },
   saveBtn: {
     backgroundColor: '#ff4500',

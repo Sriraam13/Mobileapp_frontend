@@ -1,11 +1,12 @@
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, StatusBar, Image } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, StatusBar, Image, Alert } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useCartStore } from '../../store/useCartStore';
 import { useAddressStore } from '../../store/useAddressStore';
 import { useAuthStore } from '../../store';
+import { getDistanceInKm, isWithinDeliveryArea } from '../../utils/deliveryArea';
 
 export default function DeliveryCheckoutScreen() {
   const router = useRouter();
@@ -16,7 +17,7 @@ export default function DeliveryCheckoutScreen() {
   const { phone } = useAuthStore();
   
   const [instruction, setInstruction] = useState('');
-  const [selectedTip, setSelectedTip] = useState<number | null>(30);
+  const [selectedTip, setSelectedTip] = useState<number | null>(null);
   
   const selectedAddressObj = addresses.find(a => a.id == selectedAddressId);
   const deliveryAddressType = selectedAddressObj ? selectedAddressObj.type : 'Home';
@@ -30,7 +31,7 @@ export default function DeliveryCheckoutScreen() {
   const baseTotal = subtotal + packagingCharges + gst - discountAmount + deliveryFee;
   const finalTotal = baseTotal + (selectedTip || 0);
 
-  const tips = [20, 30, 50];
+  const tips = [10, 20, 30];
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -59,7 +60,7 @@ export default function DeliveryCheckoutScreen() {
                 {selectedDeliveryAddress || 'Flat 402, Maple Heights, Karaman...'}
               </Text>
             </View>
-            <TouchableOpacity onPress={() => router.push('/choose-address')}>
+            <TouchableOpacity onPress={() => router.push('/add-address')}>
               <Text style={styles.changeBtnText}>Change</Text>
             </TouchableOpacity>
           </View>
@@ -111,8 +112,15 @@ export default function DeliveryCheckoutScreen() {
                 <Text style={[styles.tipBtnText, selectedTip === amount && styles.tipBtnTextSelected]}>Rs. {amount}</Text>
               </TouchableOpacity>
             ))}
-            <TouchableOpacity style={styles.tipBtn}>
-              <Text style={styles.tipBtnText}>Other</Text>
+            <TouchableOpacity style={styles.tipBtn} onPress={() => {
+              Alert.prompt
+                ? Alert.prompt('Custom Tip', 'Enter tip amount (₹)', (val) => {
+                    const n = parseInt(val, 10);
+                    if (!isNaN(n) && n >= 0) setSelectedTip(n || null);
+                  }, 'plain-text', '')
+                : Alert.alert('Custom Tip', 'Enter a custom tip amount in the text field above.');
+            }}>
+              <Text style={styles.tipBtnText}>Custom</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -132,7 +140,24 @@ export default function DeliveryCheckoutScreen() {
         </View>
         <TouchableOpacity 
           style={styles.proceedBtn}
-          onPress={() => router.push({ pathname: '/payment', params: { tipAmount: selectedTip || 0 } })}
+          onPress={() => {
+            if (!selectedDeliveryAddress && !selectedAddressId) {
+              Alert.alert("Address Required", "Please select or add a delivery address before proceeding.");
+              return;
+            }
+            if (!isWithinDeliveryArea(selectedAddressObj?.latitude, selectedAddressObj?.longitude)) {
+              const distance = selectedAddressObj?.latitude != null && selectedAddressObj?.longitude != null
+                ? ` This location is approximately ${getDistanceInKm(selectedAddressObj.latitude, selectedAddressObj.longitude).toFixed(1)} km from Mugalivakkam.`
+                : '';
+              Alert.alert(
+                "Delivery unavailable",
+                `Data Udipi isn't available here. Delivery is available within 15 km.${distance}`,
+                [{ text: "Try another location", onPress: () => router.push('/add-address') }],
+              );
+              return;
+            }
+            router.push({ pathname: '/payment', params: { tipAmount: selectedTip || 0, instructions: instruction } });
+          }}
         >
           <Text style={styles.proceedBtnText}>Continue to Payment</Text>
         </TouchableOpacity>

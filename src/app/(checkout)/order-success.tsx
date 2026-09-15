@@ -3,10 +3,15 @@ import { View, Text, StyleSheet, TouchableOpacity, Image, Platform, StatusBar, S
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { orderApi } from '../../services/apiService';
 import { getFullImageUrl } from '../../constants/api';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRestaurantStore } from '../../store';
+import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from '../(order)/_MapComponents';
+import MapViewDirections from 'react-native-maps-directions';
+import * as Location from 'expo-location';
+
+const GOOGLE_MAPS_APIKEY = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY || '';
 
 export default function OrderSuccessScreen() {
   const { selectedOutlet } = useRestaurantStore();
@@ -29,10 +34,26 @@ export default function OrderSuccessScreen() {
 
   const [orderDetails, setOrderDetails] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [userLocation, setUserLocation] = useState<{latitude: number, longitude: number} | null>(null);
 
   const dbOrderId = params.dbOrderId;
 
   useEffect(() => {
+    (async () => {
+      try {
+        let { status } = await Location.requestForegroundPermissionsAsync();
+        if (status === 'granted') {
+          let location = await Location.getCurrentPositionAsync({});
+          setUserLocation({
+            latitude: location.coords.latitude,
+            longitude: location.coords.longitude,
+          });
+        }
+      } catch (error) {
+        console.log("Error fetching location", error);
+      }
+    })();
+
     AsyncStorage.removeItem('activeDiscount').catch(e => console.log('Error clearing discount', e));
 
     const onBackPress = () => {
@@ -306,23 +327,64 @@ export default function OrderSuccessScreen() {
 
           {/* Map Location */}
           {!isDineIn && (
-            <TouchableOpacity 
-              style={styles.mapContainer}
-              onPress={() => {
-                const destination = encodeURIComponent(selectedOutlet?.name || 'Data Udipi Mugalivakkam');
-                Linking.openURL(`https://www.google.com/maps/dir/?api=1&destination=${destination}`);
-              }}
-            >
-               <Image 
-                 source={{ uri: 'https://images.unsplash.com/photo-1524661135-423995f22d0b?auto=format&fit=crop&w=600&q=80' }} 
-                 style={styles.mapImage} 
-               />
-               <View style={styles.mapPill}>
-                 <Ionicons name="location" size={16} color="#ff4500" />
-                 <Text style={styles.mapPillText}>{selectedOutlet?.name || 'Data Udipi Mugalivakkam'}</Text>
-               </View>
-            </TouchableOpacity>
+            <View style={[styles.mapContainer, { height: 200, overflow: 'hidden' }]}>
+               <MapView
+                 provider={PROVIDER_GOOGLE}
+                 style={{ flex: 1 }}
+                 initialRegion={{
+                   latitude: 13.0270,
+                   longitude: 80.1585,
+                   latitudeDelta: 0.05,
+                   longitudeDelta: 0.05,
+                 }}
+               >
+                 <Marker 
+                   coordinate={{ latitude: 13.0270, longitude: 80.1585 }} 
+                   title={selectedOutlet?.name || "Data Udipi"}
+                   description="Restaurant Location"
+                 >
+                   <Ionicons name="restaurant" size={30} color="#ff4500" />
+                 </Marker>
+                 <Marker 
+                   coordinate={userLocation || { latitude: 13.0320, longitude: 80.1500 }} 
+                   title="You"
+                   description="Your Location"
+                 >
+                   <Ionicons name="person-circle" size={30} color="#00a01d" />
+                 </Marker>
+                 {GOOGLE_MAPS_APIKEY ? (
+                   <MapViewDirections
+                     origin={userLocation || { latitude: 13.0320, longitude: 80.1500 }}
+                     destination={{ latitude: 13.0270, longitude: 80.1585 }}
+                     apikey={GOOGLE_MAPS_APIKEY}
+                     strokeWidth={4}
+                     strokeColor="#00a01d"
+                   />
+                 ) : (
+                   <Polyline 
+                     coordinates={[
+                       userLocation || { latitude: 13.0320, longitude: 80.1500 },
+                       { latitude: 13.0270, longitude: 80.1585 }
+                     ]}
+                     strokeColor="#ff4500"
+                     strokeWidth={3}
+                     lineDashPattern={[5, 5]}
+                   />
+                 )}
+               </MapView>
+               <TouchableOpacity 
+                 style={styles.mapOverlayPill}
+                 onPress={() => {
+                   const destination = encodeURIComponent(selectedOutlet?.name || 'Data Udipi Mugalivakkam');
+                   Linking.openURL(`https://www.google.com/maps/dir/?api=1&destination=${destination}`);
+                 }}
+               >
+                 <Ionicons name="location" size={14} color="#ff4500" />
+                 <Text style={styles.mapPillText} numberOfLines={1}>Directions to {selectedOutlet?.name || 'Restaurant'}</Text>
+               </TouchableOpacity>
+            </View>
           )}
+
         </View>
       </ScrollView>
 
@@ -556,27 +618,28 @@ const styles = StyleSheet.create({
     height: '100%',
     resizeMode: 'cover',
   },
-  mapPill: {
+  mapOverlayPill: {
     position: 'absolute',
-    top: '50%',
-    left: '50%',
-    transform: [{ translateX: -80 }, { translateY: -15 }],
+    bottom: 10,
+    alignSelf: 'center',
     backgroundColor: '#fff',
+    borderRadius: 20,
     paddingHorizontal: 12,
     paddingVertical: 6,
-    borderRadius: 20,
     flexDirection: 'row',
     alignItems: 'center',
     shadowColor: '#000',
     shadowOpacity: 0.1,
     shadowRadius: 4,
     elevation: 4,
+    maxWidth: '90%',
   },
   mapPillText: {
     fontSize: 12,
     fontWeight: 'bold',
     color: '#000',
     marginLeft: 4,
+    flexShrink: 1,
   },
   bottomBar: {
     position: 'absolute',

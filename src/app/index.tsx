@@ -1,5 +1,6 @@
 import React, { useEffect } from 'react';
-import { View, Text, Image, StyleSheet, Dimensions, StatusBar, TouchableOpacity, ImageBackground } from 'react-native';
+import { View, Text, Image, StyleSheet, Dimensions, StatusBar, TouchableOpacity, ImageBackground, Platform } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
@@ -40,16 +41,16 @@ export default function SplashScreen() {
   const bgScale = useSharedValue(1.15);
   const bgOpacity = useSharedValue(0);
   const welcomeOpacity = useSharedValue(0);
-  const welcomeTranslateY = useSharedValue(-25);
-  const logoScale = useSharedValue(0.6);
+  const welcomeTranslateY = useSharedValue(-20);
+  const logoScale = useSharedValue(0.7);
   const logoOpacity = useSharedValue(0);
   const subOpacity = useSharedValue(0);
-  const subTranslateY = useSharedValue(25);
+  const subTranslateY = useSharedValue(20);
   const mascotOpacity = useSharedValue(0);
-  const mascotTranslateY = useSharedValue(90);
+  const mascotTranslateY = useSharedValue(40);
   const loaderOpacity = useSharedValue(0);
   const rotation = useSharedValue(0);
-  const topBoardTranslateY = useSharedValue(-100);
+  const topBoardTranslateY = useSharedValue(-60);
 
   useEffect(() => {
     // 1. Background Image
@@ -59,46 +60,46 @@ export default function SplashScreen() {
     // 2. "Welcome To" Text
     welcomeOpacity.value = withSequence(
       withTiming(0, { duration: 300 }),
-      withTiming(1, { duration: 800 })
+      withTiming(1, { duration: 700 })
     );
     welcomeTranslateY.value = withSequence(
-      withTiming(-25, { duration: 300 }),
-      withTiming(0, { duration: 800, easing: Easing.out(Easing.back(1.5)) })
+      withTiming(-20, { duration: 300 }),
+      withTiming(0, { duration: 700, easing: Easing.out(Easing.back(1.5)) })
     );
 
     // 3. Main logo
     logoOpacity.value = withSequence(
-      withTiming(0, { duration: 600 }),
-      withTiming(1, { duration: 800 })
+      withTiming(0, { duration: 500 }),
+      withTiming(1, { duration: 700 })
     );
     logoScale.value = withSequence(
-      withTiming(0.6, { duration: 600 }),
-      withTiming(1, { duration: 800, easing: Easing.out(Easing.back(1.6)) })
+      withTiming(0.7, { duration: 500 }),
+      withTiming(1, { duration: 700, easing: Easing.out(Easing.back(1.5)) })
     );
 
     // 4. Subtitle Text
     subOpacity.value = withSequence(
-      withTiming(0, { duration: 900 }),
-      withTiming(1, { duration: 800 })
+      withTiming(0, { duration: 800 }),
+      withTiming(1, { duration: 700 })
     );
     subTranslateY.value = withSequence(
-      withTiming(25, { duration: 900 }),
-      withTiming(0, { duration: 800, easing: Easing.out(Easing.quad) })
+      withTiming(20, { duration: 800 }),
+      withTiming(0, { duration: 700, easing: Easing.out(Easing.quad) })
     );
 
     // 5. Chef Mascot
     mascotOpacity.value = withSequence(
-      withTiming(0, { duration: 1200 }),
+      withTiming(0, { duration: 1000 }),
       withTiming(1, { duration: 800 })
     );
     mascotTranslateY.value = withSequence(
-      withTiming(90, { duration: 1200 }),
-      withTiming(0, { duration: 900, easing: Easing.out(Easing.back(1.4)) })
+      withTiming(40, { duration: 1000 }),
+      withTiming(0, { duration: 800, easing: Easing.out(Easing.back(1.4)) })
     );
 
     // 6. Loader Spinner
     loaderOpacity.value = withSequence(
-      withTiming(0, { duration: 1600 }),
+      withTiming(0, { duration: 1400 }),
       withTiming(1, { duration: 600 })
     );
 
@@ -111,8 +112,8 @@ export default function SplashScreen() {
 
     // 8. Top board slide down
     topBoardTranslateY.value = withSequence(
-      withTiming(-100, { duration: 200 }),
-      withTiming(0, { duration: 1000, easing: Easing.bounce })
+      withTiming(-60, { duration: 200 }),
+      withTiming(0, { duration: 800, easing: Easing.out(Easing.back(1.2)) })
     );
   }, []);
 
@@ -162,49 +163,53 @@ export default function SplashScreen() {
       {/* Dark overlay for contrast and premium aesthetic */}
       <View style={styles.overlay} />
 
-      <TouchableOpacity activeOpacity={1} style={styles.container} onPress={navigateToHome}>
+      <TouchableOpacity activeOpacity={1} style={styles.touchableContainer} onPress={navigateToHome}>
         <StatusBar barStyle="light-content" backgroundColor="transparent" translucent />
 
-        {/* Top Hanging Banner */}
-        <Animated.View style={[styles.topBoardWrapper, topBoardAnimatedStyle]}>
-          <Image 
-            source={require('../../assets/images/udupi-banner.png')} 
-            style={styles.topBannerImage} 
-            resizeMode="contain" 
-          />
-        </Animated.View>
+        <SafeAreaView style={styles.safeAreaContent} edges={['top', 'bottom', 'left', 'right']}>
+          {/* Top Section: Hanging Banner */}
+          <View style={styles.topSection}>
+            <Animated.View style={topBoardAnimatedStyle}>
+              <Image 
+                source={require('../../assets/images/udupi-banner.png')} 
+                style={styles.topBannerImage} 
+                resizeMode="contain" 
+              />
+            </Animated.View>
+          </View>
 
-        {/* Middle Area: Reveals in order */}
-        <View style={styles.middleContainer}>
-          <Animated.Text style={[styles.welcomeText, welcomeAnimatedStyle]}>
-            Welcome To
-          </Animated.Text>
+          {/* Middle Section: Perfectly centered Welcome + Logo + Tagline */}
+          <View style={styles.middleSection}>
+            <Animated.Text style={[styles.welcomeText, welcomeAnimatedStyle]}>
+              Welcome To
+            </Animated.Text>
 
-          <Animated.Text style={[styles.subtitleText, subAnimatedStyle, { marginBottom: 25 }]}>
-            {"40 YEARS OF EXCELLENCE IN SOUTH INDIAN\nVEGETARIAN CUISINE"}
-          </Animated.Text>
+            <Animated.Image
+              source={require('../../assets/images/Dataudupi.png')}
+              style={[styles.logo, logoAnimatedStyle]}
+              resizeMode="contain"
+            />
 
-          <Animated.Image
-            source={require('../../assets/images/Dataudupi.png')}
-            style={[styles.logo, logoAnimatedStyle]}
-            resizeMode="contain"
-          />
-        </View>
+            <Animated.Text style={[styles.subtitleText, subAnimatedStyle]}>
+              {"40 YEARS OF EXCELLENCE IN SOUTH INDIAN\nVEGETARIAN CUISINE"}
+            </Animated.Text>
+          </View>
 
-        {/* Footer Area: Large Mascot + Loading Symbol at the very bottom */}
-        <Animated.View style={[styles.footerContainer, mascotAnimatedStyle]}>
-          <Image
-            source={require('../../assets/images/chef_mascot.png')}
-            style={styles.mascot}
-            resizeMode="contain"
-          />
+          {/* Bottom Section: Chef Mascot + Spinner */}
+          <Animated.View style={[styles.bottomSection, mascotAnimatedStyle]}>
+            <Image
+              source={require('../../assets/images/chef_mascot.png')}
+              style={styles.mascot}
+              resizeMode="contain"
+            />
 
-          <Animated.View style={[styles.loadingContainer, loaderAnimatedStyle]}>
-            <Animated.View style={[styles.spinnerRing, spinnerStyle]}>
-              <View style={styles.spinnerDot} />
+            <Animated.View style={[styles.loadingContainer, loaderAnimatedStyle]}>
+              <Animated.View style={[styles.spinnerRing, spinnerStyle]}>
+                <View style={styles.spinnerDot} />
+              </Animated.View>
             </Animated.View>
           </Animated.View>
-        </Animated.View>
+        </SafeAreaView>
       </TouchableOpacity>
     </AnimatedImageBackground>
   );
@@ -218,88 +223,92 @@ const styles = StyleSheet.create({
   },
   overlay: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(0, 0, 0, 0.84)', // Sleek, dark transparent overlay to resolve brightness
+    backgroundColor: 'rgba(0, 0, 0, 0.84)',
   },
-  container: {
+  touchableContainer: {
     flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  middleContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
     width: '100%',
+  },
+  safeAreaContent: {
+    flex: 1,
+    width: '100%',
+    alignItems: 'center',
+    justifyContent: 'space-between',
     paddingHorizontal: 20,
+    paddingVertical: 10,
+  },
+  topSection: {
+    width: '100%',
+    alignItems: 'center',
+    paddingTop: Platform.OS === 'android' ? 10 : 0,
+  },
+  topBannerImage: {
+    width: Math.min(width * 0.65, 230),
+    height: 70,
+  },
+  middleSection: {
+    width: '100%',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 16,
   },
   welcomeText: {
     color: '#fff',
-    fontSize: 22,
+    fontSize: 20,
     fontWeight: '600',
-    fontFamily: 'serif',
-    letterSpacing: 3,
-    marginBottom: 20,
+    fontFamily: Platform.OS === 'ios' ? 'Georgia' : 'serif',
+    letterSpacing: 4,
+    marginBottom: 14,
     textTransform: 'uppercase',
     textAlign: 'center',
   },
   logo: {
-    width: width * 0.85,
-    height: 140,
+    width: Math.min(width * 0.82, 300),
+    height: 95,
+    marginBottom: 16,
   },
   subtitleText: {
-    color: 'rgba(255, 255, 255, 0.75)',
+    color: 'rgba(255, 255, 255, 0.82)',
     fontSize: 11,
     fontWeight: '700',
-    fontFamily: 'serif',
-    letterSpacing: 2.2,
-    lineHeight: 20,
+    fontFamily: Platform.OS === 'ios' ? 'Georgia' : 'serif',
+    letterSpacing: 2,
+    lineHeight: 18,
     textAlign: 'center',
     paddingHorizontal: 20,
     textTransform: 'uppercase',
   },
-  footerContainer: {
-    position: 'absolute',
-    bottom: 20,
-    alignItems: 'center',
+  bottomSection: {
     width: '100%',
+    alignItems: 'center',
+    paddingBottom: 10,
   },
   mascot: {
-    width: 240,
-    height: 240,
-    marginBottom: 10,
+    width: 185,
+    height: 185,
+    marginBottom: 8,
   },
   loadingContainer: {
     justifyContent: 'center',
     alignItems: 'center',
-    height: 60,
+    height: 44,
   },
   spinnerRing: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    borderWidth: 3.5,
-    borderColor: 'rgba(255, 69, 0, 0.15)',
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    borderWidth: 3,
+    borderColor: 'rgba(255, 69, 0, 0.2)',
     borderTopColor: '#ff4500',
     justifyContent: 'center',
     alignItems: 'center',
   },
   spinnerDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
+    width: 5,
+    height: 5,
+    borderRadius: 2.5,
     backgroundColor: '#ff4500',
     position: 'absolute',
     top: 2,
   },
-  topBoardWrapper: {
-    position: 'absolute',
-    top: 40,
-    alignItems: 'center',
-    width: '100%',
-    zIndex: 10,
-  },
-  topBannerImage: {
-    width: 250,
-    height: 100,
-  }
 });

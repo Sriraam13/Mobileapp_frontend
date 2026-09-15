@@ -26,7 +26,7 @@ const webSafeStorage = {
   },
 };
 
-export type OrderType = 'Take Away' | 'Dine In' | null;
+export type OrderType = 'Take Away' | 'Dine In' | 'Delivery' | null;
 export type LiveOrderStatus = string | null;
 
 interface LiveOrderState {

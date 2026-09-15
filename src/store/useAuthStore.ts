@@ -32,19 +32,22 @@ interface AuthState {
   phone: string | null;
   token: string | null;
   isAuthenticated: boolean;
+  _hasHydrated: boolean;
   
   login: (data: { customerId: number; customerName: string; phone: string; token: string }) => void;
   logout: () => void;
+  setHasHydrated: (state: boolean) => void;
 }
 
 export const useAuthStore = create<AuthState>()(
   persist(
     (set) => ({
-      customerId: 1,
-      customerName: 'Test User',
-      phone: '1234567890',
-      token: 'test_token_123',
-      isAuthenticated: true,
+      customerId: null,
+      customerName: null,
+      phone: null,
+      token: null,
+      isAuthenticated: false,
+      _hasHydrated: false,
 
       login: (data) => set({ 
         customerId: data.customerId, 
@@ -60,10 +63,14 @@ export const useAuthStore = create<AuthState>()(
         token: null, 
         isAuthenticated: false 
       }),
+      setHasHydrated: (state) => set({ _hasHydrated: state }),
     }),
     {
-      name: 'auth-storage-v2',
+      name: 'auth-storage-v3',
       storage: createJSONStorage(() => webSafeStorage),
+      onRehydrateStorage: () => (state) => {
+        state?.setHasHydrated(true);
+      },
     }
   )
 );

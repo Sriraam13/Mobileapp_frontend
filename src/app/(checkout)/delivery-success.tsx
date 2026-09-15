@@ -32,7 +32,8 @@ export default function DeliverySuccessScreen() {
     let intervalId: ReturnType<typeof setInterval>;
     const fetchOrderDetails = async () => {
       try {
-        const restId = selectedOutlet?.restaurant_id ? Number(selectedOutlet.restaurant_id) : 1;
+        const restId = selectedOutlet?.restaurant_id ? Number(selectedOutlet.restaurant_id) : null;
+        if (!restId) return;
         const data = await orderApi.getOrderDetails(dbOrderId, restId);
         if (data && data.order) {
           setOrderDetails(data);
@@ -69,7 +70,8 @@ export default function DeliverySuccessScreen() {
 
     const saveOrderToHistory = async () => {
       try {
-        const restId = selectedOutlet?.restaurant_id ? Number(selectedOutlet.restaurant_id) : 1;
+        const restId = selectedOutlet?.restaurant_id ? Number(selectedOutlet.restaurant_id) : null;
+        if (!restId) return;
         const restName = selectedOutlet?.name || 'Data Udipi — Mugalivakkam';
         let storedOrders = null;
         try {
@@ -238,13 +240,13 @@ export default function DeliverySuccessScreen() {
           </View>
 
           <View style={styles.progressLabels}>
-            <Text style={styles.progressLabelActive}>Kitchen preparing</Text>
+            <Text style={styles.progressLabelActive}>Order Received</Text>
             <Text style={isRiderPhase ? styles.progressLabelActive : styles.progressLabelInactive}>Rider heading over</Text>
           </View>
 
           <View style={styles.infoBox}>
             <Ionicons name="information-circle-outline" size={16} color="#00a01d" style={{ marginTop: 2, marginRight: 8 }} />
-            <Text style={styles.infoText}>Our chef is preparing your fresh meal with authentic taste.</Text>
+            <Text style={styles.infoText}>We have received your order and our chef will begin preparing your fresh meal soon.</Text>
           </View>
         </View>
 

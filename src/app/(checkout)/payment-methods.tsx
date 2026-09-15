@@ -3,49 +3,20 @@ import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Platform, StatusB
 import { SafeAreaView } from 'react-native-safe-area-context';;
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-
-interface PaymentItem {
-  id: string;
-  category: 'card' | 'upi' | 'wallet';
-  badgeType: 'VISA' | 'UPI' | 'Paytm';
-  title: string;
-  subtitle: string;
-}
+import { usePaymentMethodStore, PaymentItem } from '../../store';
+import BottomNavBar from '../../components/layout/BottomNavBar';
 
 export default function PaymentMethodsScreen() {
   const router = useRouter();
 
-  const [selectedMethodId, setSelectedMethodId] = useState<string>('card-1');
+  const { paymentMethods, selectedMethodId, setSelectedMethod, addPaymentMethod, removePaymentMethod } = usePaymentMethodStore();
+
   const [isSearchActive, setIsSearchActive] = useState<boolean>(false);
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [isAddModalVisible, setIsAddModalVisible] = useState<boolean>(false);
   const [newMethodType, setNewMethodType] = useState<'card' | 'upi' | 'wallet'>('upi');
   const [newMethodTitle, setNewMethodTitle] = useState<string>('');
   const [newMethodSubtitle, setNewMethodSubtitle] = useState<string>('');
-
-  const [paymentMethods, setPaymentMethods] = useState<PaymentItem[]>([
-    {
-      id: 'card-1',
-      category: 'card',
-      badgeType: 'VISA',
-      title: 'HDFC Credit Card',
-      subtitle: '•••• •••• •••• 4829',
-    },
-    {
-      id: 'upi-1',
-      category: 'upi',
-      badgeType: 'UPI',
-      title: 'Google Pay UPI',
-      subtitle: 'shruti@okaxis',
-    },
-    {
-      id: 'wallet-1',
-      category: 'wallet',
-      badgeType: 'Paytm',
-      title: 'Paytm Wallet',
-      subtitle: 'Balance: Rs. 420.00',
-    },
-  ]);
 
   const savedCards = paymentMethods.filter(
     (item) =>
@@ -76,19 +47,29 @@ export default function PaymentMethodsScreen() {
     const newItem: PaymentItem = {
       id: newId,
       category: newMethodType,
-      badgeType: badgeMap[newMethodType],
+      badgeType: badgeMap[newMethodType] as any,
       title: newMethodTitle,
       subtitle: newMethodSubtitle,
     };
 
-    setPaymentMethods([...paymentMethods, newItem]);
-    setSelectedMethodId(newId);
+    addPaymentMethod(newItem);
     setNewMethodTitle('');
     setNewMethodSubtitle('');
     setIsAddModalVisible(false);
   };
 
-  const renderBadge = (badgeType: 'VISA' | 'UPI' | 'Paytm') => {
+  const handleLongPress = (id: string) => {
+    Alert.alert(
+      "Delete Payment Method",
+      "Are you sure you want to remove this payment method?",
+      [
+        { text: "Cancel", style: "cancel" },
+        { text: "Delete", style: "destructive", onPress: () => removePaymentMethod(id) }
+      ]
+    );
+  };
+
+  const renderBadge = (badgeType: PaymentItem['badgeType']) => {
     switch (badgeType) {
       case 'VISA':
         return (
@@ -109,7 +90,11 @@ export default function PaymentMethodsScreen() {
           </View>
         );
       default:
-        return null;
+        return (
+          <View style={[styles.badgeContainer, styles.paytmBadge]}>
+            <Text style={styles.paytmText}>{badgeType}</Text>
+          </View>
+        );
     }
   };
 
@@ -178,7 +163,8 @@ export default function PaymentMethodsScreen() {
                   key={item.id}
                   style={[styles.paymentCard, isSelected && styles.paymentCardSelected]}
                   activeOpacity={0.7}
-                  onPress={() => setSelectedMethodId(item.id)}
+                  onPress={() => setSelectedMethod(item.id)}
+                  onLongPress={() => handleLongPress(item.id)}
                 >
                   <View style={styles.cardLeft}>
                     {renderBadge(item.badgeType)}
@@ -210,7 +196,8 @@ export default function PaymentMethodsScreen() {
                   key={item.id}
                   style={[styles.paymentCard, isSelected && styles.paymentCardSelected]}
                   activeOpacity={0.7}
-                  onPress={() => setSelectedMethodId(item.id)}
+                  onPress={() => setSelectedMethod(item.id)}
+                  onLongPress={() => handleLongPress(item.id)}
                 >
                   <View style={styles.cardLeft}>
                     {renderBadge(item.badgeType)}
@@ -244,24 +231,7 @@ export default function PaymentMethodsScreen() {
       </View>
 
       {/* Bottom Navigation */}
-      <View style={styles.bottomNav}>
-        <TouchableOpacity style={styles.navItem} onPress={() => router.push('/home')}>
-          <Ionicons name="home-outline" size={24} color="#888" />
-          <Text style={styles.navText}>Home</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.navItem} onPress={() => router.push('/menu')}>
-          <Ionicons name="search-outline" size={24} color="#888" />
-          <Text style={styles.navText}>Search</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.navItem} onPress={() => router.push('/orders')}>
-          <Ionicons name="receipt-outline" size={24} color="#888" />
-          <Text style={styles.navText}>Orders</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.navItem} onPress={() => router.push('/profile')}>
-          <Ionicons name="person" size={24} color="#ff4500" />
-          <Text style={[styles.navText, { color: '#ff4500' }]}>Profile</Text>
-        </TouchableOpacity>
-      </View>
+      <BottomNavBar activeTab="profile" />
 
       {/* Modal for adding new payment method */}
       <Modal
@@ -354,7 +324,7 @@ export default function PaymentMethodsScreen() {
               {newMethodType === 'upi'
                 ? 'Linked Email / ID'
                 : newMethodType === 'card'
-                ? 'Card Number (Last 4 digits)'
+                ? 'Card Number'
                 : 'Balance / Phone Number'}
             </Text>
             <TextInput
@@ -363,7 +333,7 @@ export default function PaymentMethodsScreen() {
                 newMethodType === 'upi'
                   ? 'e.g. shruti@okaxis'
                   : newMethodType === 'card'
-                  ? 'e.g. •••• •••• •••• 1234'
+                  ? 'e.g. 4111 2222 3333 4444 or •••• 1234'
                   : 'e.g. Balance: Rs. 500.00'
               }
               value={newMethodSubtitle}
@@ -384,7 +354,7 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#fafafa',
-    paddingTop: Platform.OS === 'android' ? StatusBar.currentHeight : 0,
+    
   },
   header: {
     flexDirection: 'row',

@@ -8,24 +8,51 @@ import * as Linking from 'expo-linking';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { API_BASE_URL } from '../../constants/api';
 import { orderApi } from '../../services/apiService';
-import { useCartStore, useRestaurantStore, usePaymentStore, useAuthStore, useLiveOrderStore, useOrderStore, useAddressStore } from '../../store';
+import {
+  useAuthStore,
+  useAddressStore,
+  useCartStore,
+  useOrderStore,
+  useRestaurantStore,
+  usePaymentMethodStore,
+  usePaymentStore,
+  useLiveOrderStore,
+  useDineInSessionStore
+} from '../../store';
 
 WebBrowser.maybeCompleteAuthSession();
 
-type PaymentMethod = 'UPI' | 'Cash' | 'Card' | 'Wallet' | 'Card' | 'Wallet' | 'Card' | 'Wallet';
+type PaymentMethod = 'UPI' | 'Pay at Counter' | 'Cash' | 'Card' | 'Wallet';
 
 export default function PaymentScreen() {
   const router = useRouter();
   const params = useLocalSearchParams();
   const tipAmount = params.tipAmount ? Number(params.tipAmount) : 0;
 
+  const isDineInSettlement = params.isDineInSettlement === 'true';
+  const settlementOrderId = (params.orderId as string) || '';
+  const settlementDbOrderId = (params.dbOrderId as string) || '';
+  const settlementTable = (params.tableNumber as string) || '';
+  const settlementTotal = params.totalAmount ? Number(params.totalAmount) : 0;
+  const settlementCartItems = React.useMemo(() => {
+    if (params.cartItems) {
+      try {
+        return typeof params.cartItems === 'string' ? JSON.parse(params.cartItems) : params.cartItems;
+      } catch (_) {}
+    }
+    return [];
+  }, [params.cartItems]);
+
   const { items, orderType, tableNumber, getSubtotal, getGst, getServiceCharge, getGrandTotal, clearCart, getItemCount, getDiscountAmount, discountCode } = useCartStore();
 
   React.useEffect(() => {
+    if (isDineInSettlement) return;
     if (getItemCount() === 0) {
       router.replace('/home');
     }
-  }, [getItemCount, router]);
+  }, [getItemCount, router, isDineInSettlement]);
+
+  const effectiveTable = isDineInSettlement && settlementTable ? settlementTable : (tableNumber || 'T-01');
   const { selectedOutlet } = useRestaurantStore();
   const { phone } = useAuthStore();
   const { setPaymentMethod, setPaymentSuccess, setPaymentFailed } = usePaymentStore();
@@ -33,7 +60,9 @@ export default function PaymentScreen() {
   const { setCurrentOrder, addPastOrder } = useOrderStore();
   const { selectedDeliveryAddress } = useAddressStore();
 
-  const [selectedMethod, setSelectedMethod] = useState<PaymentMethod>('UPI');
+  const [selectedMethod, setSelectedMethod] = useState<PaymentMethod>(
+    isDineInSettlement || orderType === 'Dine In' ? 'Pay at Counter' : (orderType === 'Delivery' ? 'Cash' : 'UPI')
+  );
   const [loading, setLoading] = useState(false);
   const [isPollingCash, setIsPollingCash] = useState(false);
   const [paymentFailedReason, setPaymentFailedReason] = useState('');
@@ -55,6 +84,8 @@ export default function PaymentScreen() {
     totalVal = baseDeliveryTotal + tipAmount;
   }
 
+  const effectiveTotalVal = isDineInSettlement && settlementTotal > 0 ? settlementTotal : totalVal;
+
   const userPhone = phone || '+919876543210';
 
   // Handle Razorpay return params
@@ -73,8 +104,9 @@ export default function PaymentScreen() {
           restId = Number(selectedOutlet.restaurant_id);
         }
         const formattedCart = Object.values(items).map(item => ({
-          id: item.id, name: item.name, image: item.image,
-          quantity: item.quantity, price: item.price,
+          id: Number(item.id || (item as any).menu_item_id),
+          name: item.name, image: item.image,
+          quantity: Number(item.quantity || 1), price: Number(item.price || 0),
           title: item.name, itemName: item.name, image_url: item.image,
           note: item.note || ''
         }));
@@ -82,11 +114,33 @@ export default function PaymentScreen() {
         if (orderType === 'Take Away') backendOrderType = 'TAKEAWAY';
         if (orderType === 'Delivery') backendOrderType = 'DELIVERY';
 
+        const { selectedDeliveryAddress, selectedAddressId, addresses } = useAddressStore.getState();
+        const selectedAddressObj = addresses.find(a => a.id == selectedAddressId) || addresses[0];
+        const deliverySnapshot = selectedAddressObj ? {
+          full_address: selectedDeliveryAddress || selectedAddressObj.full_address || selectedAddressObj.address,
+          latitude: selectedAddressObj.latitude,
+          longitude: selectedAddressObj.longitude,
+          flat_house_no: selectedAddressObj.flat_house_no,
+          landmark: selectedAddressObj.landmark,
+          contact_name: selectedAddressObj.contact_name,
+          contact_phone: selectedAddressObj.contact_phone || userPhone,
+          delivery_instructions: selectedAddressObj.delivery_instructions || (params.instructions as string) || ''
+        } : (selectedDeliveryAddress ? {
+          full_address: selectedDeliveryAddress,
+          contact_phone: userPhone,
+        } : null);
+
         const orderData = {
+          restaurant_id: restId,
           table_number: orderType === 'Dine In' ? (tableNumber || 'T-06') : null,
           order_type: backendOrderType,
-          delivery_address: null,
-          delivery_address_id: null,
+          delivery_address: selectedDeliveryAddress || (selectedAddressObj ? selectedAddressObj.full_address : null),
+          delivery_address_id: selectedAddressId ? Number(selectedAddressId) : (selectedAddressObj && !isNaN(Number(selectedAddressObj.id)) ? Number(selectedAddressObj.id) : null),
+          delivery_address_snapshot: deliverySnapshot,
+          customer_latitude: selectedAddressObj?.latitude,
+          customer_longitude: selectedAddressObj?.longitude,
+          delivery_instructions: (params.instructions as string) || selectedAddressObj?.delivery_instructions || null,
+          tip_amount: tipAmount,
           payment_method: selectedMethod,
           phone: userPhone,
           cart: formattedCart,
@@ -116,8 +170,17 @@ export default function PaymentScreen() {
           subtotal, discountAmount, discountCode
         };
         setCurrentOrder(finalOrder);
-        addPastOrder({ orderId: generatedOrderId, dbOrderId, date: new Date().toISOString(), total: totalVal, itemsCount: getItemCount(), status: 'Preparing' });
-        setLiveOrder(orderType as 'Dine In' | 'Take Away', generatedOrderId, dbOrderId, 'Preparing');
+        addPastOrder({ 
+          orderId: generatedOrderId, 
+          dbOrderId, 
+          date: new Date().toISOString(), 
+          total: totalVal, 
+          itemsCount: getItemCount(), 
+          status: 'Preparing',
+          customer_phone: userPhone || '',
+          order_type: orderType,
+        });
+        setLiveOrder(orderType, generatedOrderId, dbOrderId, 'Preparing');
         clearCart();
         if (orderType === 'Delivery') {
           router.push({ pathname: '/delivery-success', params: finalOrder });
@@ -166,6 +229,17 @@ export default function PaymentScreen() {
         const script = document.createElement('script');
         script.src = 'https://checkout.razorpay.com/v1/checkout.js';
         script.onload = () => {
+          const { paymentMethods, selectedMethodId } = usePaymentMethodStore.getState();
+          const selectedPaymentItem = paymentMethods.find(m => m.id === selectedMethodId);
+          let prefillMethod = undefined;
+          let prefillUpi = undefined;
+          let prefillWallet = undefined;
+          if (selectedPaymentItem) {
+            if (selectedPaymentItem.category === 'upi') { prefillMethod = 'upi'; prefillUpi = { vpa: selectedPaymentItem.subtitle }; }
+            else if (selectedPaymentItem.category === 'wallet') { prefillMethod = 'wallet'; prefillWallet = selectedPaymentItem.badgeType.toLowerCase(); }
+            else if (selectedPaymentItem.category === 'card') { prefillMethod = 'card'; }
+          }
+          
           const options = {
             key: RAZORPAY_KEY,
             amount: amountInPaise,
@@ -173,7 +247,10 @@ export default function PaymentScreen() {
             name: 'Udupi Restaurant',
             description: `${orderType || 'Food'} Order Payment`,
             prefill: {
-              contact: userPhone || '+919876543210'
+              contact: userPhone || '+919876543210',
+              ...(prefillMethod ? { method: prefillMethod } : {}),
+              ...(prefillUpi ? { upi: prefillUpi } : {}),
+              ...(prefillWallet ? { wallet: prefillWallet } : {})
             },
             theme: { color: '#ff3400' },
             handler: function (response: any) {
@@ -220,126 +297,194 @@ export default function PaymentScreen() {
       }
 
       setLoading(false);
+      const { selectedMethodId, paymentMethods } = usePaymentMethodStore.getState();
+      let methodIdToPass = selectedMethodId || '';
+      if (!methodIdToPass) {
+        const savedCard = paymentMethods.find(m => m.category === 'card');
+        if (savedCard) methodIdToPass = savedCard.id;
+      }
       router.push({
         pathname: '/(checkout)/razorpay-screen',
         params: {
-          amount: totalVal.toFixed(2),
+          amount: effectiveTotalVal.toFixed(2),
           phone: userPhone,
           orderType: orderType || 'Dine In',
+          paymentMethodId: methodIdToPass,
+          isDineInSettlement: isDineInSettlement ? 'true' : 'false',
+          orderId: settlementOrderId,
+          dbOrderId: settlementDbOrderId,
         }
       });
       return;
     }
 
-    // Cash Payment (Pay at counter) Flow
+    // Pay at Counter / Cash Flow
+    if (selectedMethod === 'Pay at Counter' || selectedMethod === 'Cash') {
+      try {
+        let finalOrderId = settlementOrderId;
+        let finalDbId = settlementDbOrderId;
+        let finalItems = settlementCartItems;
+        let finalTable = effectiveTable;
+        let finalAmount = effectiveTotalVal;
 
-    let backendOrderType = 'DINE_IN';
-    if (orderType === 'Take Away') backendOrderType = 'TAKEAWAY';
-    if (orderType === 'Delivery') backendOrderType = 'DELIVERY';
+        if (isDineInSettlement) {
+          const targetSettleId = settlementDbOrderId || 
+            (settlementOrderId ? settlementOrderId.replace(/\D/g, '') : '') || 
+            (useDineInSessionStore.getState().activeDbOrderId ? String(useDineInSessionStore.getState().activeDbOrderId) : '');
 
-    const orderData = {
-      table_number: orderType === 'Dine In' ? (tableNumber || 'T-06') : null,
-      order_type: backendOrderType,
-      delivery_address: null,
-      delivery_address_id: null,
-      payment_method: 'Cash',
-      phone: userPhone,
-      cart: formattedCartItems,
-      subtotal: subtotal,
-      gst: gst,
-      service_charge: serviceCharge,
-      discount_amount: discountAmount,
-      discount_code: discountCode || null,
-      total_amount: totalVal
-    };
-
-    let generatedOrderId = `ORD-${Math.floor(100000 + Math.random() * 900000)}`;
-    let dbOrderId = '';
-
-    try {
-      const result = await orderApi.createOrder(orderData);
-      if (result.success && result.orderId) {
-        generatedOrderId = result.orderId;
-        if (result.dbOrderId) {
-          dbOrderId = result.dbOrderId.toString();
-        }
-      }
-    } catch (e) {
-      console.error("Failed to post order", e);
-    }
-
-    if (dbOrderId) {
-      setCurrentDbOrderId(dbOrderId);
-      setIsPollingCash(true);
-      const pollInterval = setInterval(async () => {
-        try {
-          const statusData = await orderApi.getOrderStatus(dbOrderId, restId);
-          if (statusData?.order?.payment_status?.toLowerCase() === 'paid') {
-            clearInterval(pollInterval);
-            pollIntervalRef.current = null;
-            setIsPollingCash(false);
-            setPaymentSuccess('cash_payment');
-
-            const finalOrder = {
-              orderId: generatedOrderId,
-              dbOrderId: dbOrderId,
-              total: totalVal,
-              paymentMethod: 'Cash',
-              phone: phone || '+919876543210',
-              tableNumber,
-              itemCount: getItemCount().toString(),
-              cart: JSON.stringify(formattedCartItems),
-              orderType,
-              subtotal: subtotal,
-              discountAmount: discountAmount,
-              discountCode: discountCode
-            };
-
-            setCurrentOrder(finalOrder);
-            addPastOrder({
-              orderId: generatedOrderId,
-              dbOrderId: dbOrderId,
-              date: new Date().toISOString(),
-              total: totalVal,
-              itemsCount: getItemCount(),
-              status: 'Preparing'
-            });
-            setLiveOrder(orderType as 'Dine In' | 'Take Away', generatedOrderId, dbOrderId, 'Preparing');
-            clearCart();
-
-            if (orderType === 'Delivery') {
-              router.push({ pathname: '/delivery-success', params: finalOrder });
-            } else {
-              router.push({ pathname: '/order-success', params: finalOrder });
+          if (targetSettleId) {
+            try {
+              const res = await orderApi.settleDineInPayment(targetSettleId, {
+                payment_method: 'Pay at Counter',
+                amount_paid: effectiveTotalVal,
+              });
+              if (res) {
+                if (res.orderId) finalOrderId = res.orderId;
+                if (res.dbOrderId) finalDbId = String(res.dbOrderId);
+                if (res.items && res.items.length > 0) finalItems = res.items;
+                if (res.totalAmount) finalAmount = res.totalAmount;
+                if (res.tableNumber) finalTable = res.tableNumber;
+              }
+            } catch (settleErr) {
+              console.warn('Backend settle call error:', settleErr);
             }
           }
-        } catch (err) {
-          console.error('Polling error', err);
+          useDineInSessionStore.getState().completeDineInSession();
+        } else {
+          // New Dine In or Takeaway order placed with Pay at Counter
+          let backendOrderType = 'DINE_IN';
+          if (orderType === 'Take Away') backendOrderType = 'TAKEAWAY';
+          if (orderType === 'Delivery') backendOrderType = 'DELIVERY';
+
+          const { selectedDeliveryAddress, selectedAddressId, addresses } = useAddressStore.getState();
+          const selectedAddressObj = addresses.find(a => a.id == selectedAddressId) || addresses[0];
+          const deliverySnapshot = selectedAddressObj ? {
+            full_address: selectedDeliveryAddress || selectedAddressObj.full_address || selectedAddressObj.address,
+            latitude: selectedAddressObj.latitude,
+            longitude: selectedAddressObj.longitude,
+            flat_house_no: selectedAddressObj.flat_house_no,
+            landmark: selectedAddressObj.landmark,
+            contact_name: selectedAddressObj.contact_name,
+            contact_phone: selectedAddressObj.contact_phone || userPhone,
+            delivery_instructions: selectedAddressObj.delivery_instructions || (params.instructions as string) || ''
+          } : (selectedDeliveryAddress ? {
+            full_address: selectedDeliveryAddress,
+            contact_phone: userPhone,
+          } : null);
+
+          const formattedCartItems = Object.values(items).map(item => ({
+            id: Number(item.id || (item as any).menu_item_id),
+            quantity: Number(item.quantity || 1),
+            price: Number(item.price || 0),
+            name: item.name,
+            image: item.image,
+          }));
+
+          const orderData = {
+            restaurant_id: restId,
+            table_number: orderType === 'Dine In' ? (tableNumber || 'T-06') : null,
+            order_type: backendOrderType,
+            delivery_address: selectedDeliveryAddress || (selectedAddressObj ? selectedAddressObj.full_address : null),
+            delivery_address_id: (() => {
+              const raw = Number(selectedAddressId || selectedAddressObj?.id);
+              return (!isNaN(raw) && raw > 0 && raw < 2147483647) ? Math.floor(raw) : null;
+            })(),
+            delivery_address_snapshot: deliverySnapshot,
+            customer_latitude: selectedAddressObj?.latitude,
+            customer_longitude: selectedAddressObj?.longitude,
+            delivery_instructions: (params.instructions as string) || selectedAddressObj?.delivery_instructions || null,
+            tip_amount: tipAmount,
+            payment_method: selectedMethod || 'Cash',
+            phone: userPhone,
+            cart: formattedCartItems,
+            subtotal: subtotal,
+            gst: gst,
+            service_charge: serviceCharge,
+            discount_amount: discountAmount,
+            discount_code: discountCode || null,
+            total_amount: effectiveTotalVal,
+          };
+
+          const result = await orderApi.createOrder(orderData);
+          if (result && result.orderId) {
+            finalOrderId = result.orderId;
+            if (result.dbOrderId) {
+              finalDbId = String(result.dbOrderId);
+            }
+          }
+          finalItems = formattedCartItems;
         }
-      }, 3000);
-      pollIntervalRef.current = pollInterval;
-      return;
-    } else {
-      setLoading(false);
-      const fallbackOrder = {
-        orderId: generatedOrderId,
-        dbOrderId: dbOrderId,
-        total: totalVal,
-        paymentMethod: 'Cash',
-        phone: phone || '+919876543210',
-        tableNumber,
-        itemCount: getItemCount().toString(),
-        cart: JSON.stringify(formattedCartItems),
-        orderType,
-        subtotal: subtotal,
-        discountAmount: discountAmount,
-        discountCode: discountCode
-      };
-      // Navigate to success screen if DB ID not found (fallback)
-      if (orderType === 'Delivery') {
-        router.push({ pathname: '/delivery-success', params: fallbackOrder });
-      } else {
-        router.push({ pathname: '/order-success', params: fallbackOrder });
+
+        const isDineIn = (orderType || 'Dine In') === 'Dine In';
+
+        // Record order in order history store
+        useOrderStore.getState().addPastOrder({
+          orderId: finalOrderId || `ORD-${String(finalDbId).padStart(6, '0')}`,
+          dbOrderId: String(finalDbId || ''),
+          date: new Date().toISOString(),
+          total: Number(finalAmount),
+          itemsCount: Array.isArray(finalItems) ? finalItems.length : 1,
+          status: isDineIn ? 'SERVED' : 'Preparing',
+          payment_status: isDineIn ? 'Paid' : (orderType === 'Delivery' && selectedMethod === 'Cash' ? 'Pending' : 'Paid'),
+          table_number: isDineIn ? finalTable : (orderType === 'Delivery' ? 'Delivery' : 'Take Away'),
+          order_type: orderType || 'Dine In',
+          customer_phone: userPhone || '',
+          items: finalItems,
+        });
+
+        clearCart();
+        setLoading(false);
+
+        if (isDineIn) {
+          // Immediately navigate to thank you / order served screen with invoice download!
+          router.replace({
+            pathname: '/order-completed',
+            params: {
+              orderId: finalOrderId || `ORD-${Math.floor(100000 + Math.random() * 900000)}`,
+              dbOrderId: finalDbId || '',
+              tableNumber: finalTable,
+              totalAmount: String(finalAmount),
+              paymentMethod: selectedMethod,
+              cartItems: JSON.stringify(finalItems),
+              orderType: 'Dine In',
+              date: new Date().toISOString(),
+            },
+          });
+        } else if (orderType === 'Delivery') {
+          const finalOrder = {
+            orderId: finalOrderId,
+            dbOrderId: finalDbId,
+            total: finalAmount,
+            paymentMethod: selectedMethod,
+            phone: userPhone,
+            itemCount: Array.isArray(finalItems) ? finalItems.length.toString() : '1',
+            cart: JSON.stringify(finalItems),
+            orderType: 'Delivery',
+          };
+          router.replace({ pathname: '/delivery-success', params: finalOrder });
+        } else {
+          // Take Away
+          const finalOrder = {
+            orderId: finalOrderId,
+            dbOrderId: finalDbId,
+            total: finalAmount,
+            paymentMethod: selectedMethod,
+            phone: userPhone,
+            itemCount: Array.isArray(finalItems) ? finalItems.length.toString() : '1',
+            cart: JSON.stringify(finalItems),
+            orderType: 'Take Away',
+          };
+          router.replace({ pathname: '/order-success', params: finalOrder });
+        }
+        return;
+      } catch (err: any) {
+        setLoading(false);
+        if (Platform.OS !== 'web') {
+          Alert.alert('Payment Error', err.message || 'Could not complete payment. Please try again.');
+        } else {
+          alert('Payment Error: ' + (err.message || 'Could not complete payment.'));
+        }
+        return;
       }
     }
   };
@@ -397,44 +542,29 @@ export default function PaymentScreen() {
             </View>
           </View>
 
-          <Text style={styles.delMethodsTitle}>UPI Methods</Text>
+          <Text style={styles.delMethodsTitle}>Select Payment Method</Text>
 
           <View style={styles.delMethodsList}>
             <TouchableOpacity style={[styles.delMethodItem, selectedMethod === 'UPI' && styles.delMethodItemActive]} onPress={() => setSelectedMethod('UPI')} activeOpacity={0.8}>
               <View style={styles.delMethodIcon}>
-                <Ionicons name="card-outline" size={24} color="#ff3400" />
+                <Ionicons name="phone-portrait-outline" size={24} color="#ff3400" />
               </View>
               <View style={{ flex: 1 }}>
-                <Text style={styles.delMethodName}>Google Pay / PhonePe</Text>
-                <Text style={styles.delMethodDesc}>Instant secure direct bank transfer</Text>
+                <Text style={styles.delMethodName}>UPI / Online Payment</Text>
+                <Text style={styles.delMethodDesc}>Google Pay, PhonePe, Paytm & Netbanking</Text>
               </View>
               <View style={[styles.radioCircle, selectedMethod === 'UPI' ? styles.radioSelected : styles.radioUnselected]}>
                 {selectedMethod === 'UPI' && <Ionicons name="checkmark" size={14} color="#fff" />}
               </View>
             </TouchableOpacity>
 
-            <TouchableOpacity style={[styles.delMethodItem, selectedMethod === 'Card' && styles.delMethodItemActive]} onPress={() => setSelectedMethod('Card')} activeOpacity={0.8}>
-              <View style={styles.delMethodIcon}><Ionicons name="card" size={20} color="#666" /></View>
-              <Text style={[styles.delMethodName, { flex: 1 }]}>Credit or Debit Cards</Text>
-              <View style={[styles.radioCircle, selectedMethod === 'Card' ? styles.radioSelected : styles.radioUnselected]}>
-                {selectedMethod === 'Card' && <Ionicons name="checkmark" size={14} color="#fff" />}
-              </View>
-            </TouchableOpacity>
-
-            <TouchableOpacity style={[styles.delMethodItem, selectedMethod === 'Wallet' && styles.delMethodItemActive]} onPress={() => setSelectedMethod('Wallet')} activeOpacity={0.8}>
-              <View style={styles.delMethodIcon}><Ionicons name="wallet-outline" size={20} color="#666" /></View>
-              <Text style={[styles.delMethodName, { flex: 1 }]}>Wallets (Paytm, Mobikwik)</Text>
-              <View style={[styles.radioCircle, selectedMethod === 'Wallet' ? styles.radioSelected : styles.radioUnselected]}>
-                {selectedMethod === 'Wallet' && <Ionicons name="checkmark" size={14} color="#fff" />}
-              </View>
-            </TouchableOpacity>
-
             <TouchableOpacity style={[styles.delMethodItem, selectedMethod === 'Cash' && styles.delMethodItemActive]} onPress={() => setSelectedMethod('Cash')} activeOpacity={0.8}>
               <View style={styles.delMethodIcon}>
-                <Ionicons name="cash-outline" size={24} color="#666" />
+                <Ionicons name="cash-outline" size={24} color="#00a01d" />
               </View>
               <View style={{ flex: 1 }}>
                 <Text style={styles.delMethodName}>Cash on Delivery (COD)</Text>
+                <Text style={styles.delMethodDesc}>Pay cash to delivery partner on arrival</Text>
               </View>
               <View style={[styles.radioCircle, selectedMethod === 'Cash' ? styles.radioSelected : styles.radioUnselected]}>
                 {selectedMethod === 'Cash' && <Ionicons name="checkmark" size={14} color="#fff" />}
@@ -446,10 +576,16 @@ export default function PaymentScreen() {
         <View style={styles.delFooter}>
           <View style={styles.delSecureWrap}>
             <Ionicons name="shield-checkmark" size={14} color="#00a01d" />
-            <Text style={styles.delSecureText}>SSL Secure • PCI-DSS Compliant Payment Gateway</Text>
+            <Text style={styles.delSecureText}>100% Safe & Secure Order Processing</Text>
           </View>
           <TouchableOpacity style={[styles.delPayBtn, loading && styles.btnDisabled]} onPress={handleConfirm} disabled={loading}>
-            <Text style={styles.delPayBtnText}>{loading ? 'Processing...' : `Pay Rs. ${totalVal.toFixed(0)} Securely`}</Text>
+            <Text style={styles.delPayBtnText}>
+              {loading
+                ? 'Processing Order...'
+                : selectedMethod === 'Cash'
+                ? `Confirm Cash on Delivery (Rs. ${totalVal.toFixed(0)})`
+                : `Pay Rs. ${totalVal.toFixed(0)} via UPI`}
+            </Text>
           </TouchableOpacity>
         </View>
 
@@ -489,6 +625,36 @@ export default function PaymentScreen() {
 
           <View style={styles.methodsContainer}>
 
+            {/* Pay at Counter Option */}
+            <View>
+              <TouchableOpacity
+                style={[styles.methodCard, selectedMethod === 'Pay at Counter' ? styles.methodSelected : styles.methodUnselected]}
+                onPress={() => setSelectedMethod('Pay at Counter')}
+                activeOpacity={0.8}
+              >
+                <View style={[styles.methodIconWrap, selectedMethod === 'Pay at Counter' ? styles.iconBgOrange : styles.iconBgWhite]}>
+                  <Ionicons name="cash-outline" size={20} color={selectedMethod === 'Pay at Counter' ? '#fff' : '#888'} />
+                </View>
+                <View style={styles.methodTextContainer}>
+                  <Text style={styles.methodName}>Pay at Counter</Text>
+                  <Text style={styles.methodDesc}>Pay cash or card at counter (marked as paid)</Text>
+                </View>
+                <View style={[styles.radioCircle, selectedMethod === 'Pay at Counter' ? styles.radioSelected : styles.radioUnselected]}>
+                  {selectedMethod === 'Pay at Counter' && <Ionicons name="checkmark" size={14} color="#fff" />}
+                </View>
+              </TouchableOpacity>
+
+              {/* Info Box for Pay at Counter */}
+              {selectedMethod === 'Pay at Counter' && (
+                <View style={styles.paymentInfoBox}>
+                  <Ionicons name="checkmark-done-circle-outline" size={20} color="#00a01d" />
+                  <Text style={styles.paymentInfoText}>
+                    Order will be immediately marked as Paid at the counter. You can view and download your invoice on the next screen.
+                  </Text>
+                </View>
+              )}
+            </View>
+
             {/* UPI Option */}
             <View>
               <TouchableOpacity
@@ -519,8 +685,6 @@ export default function PaymentScreen() {
               )}
             </View>
 
-
-
           </View>
         </View>
       </ScrollView>
@@ -530,17 +694,21 @@ export default function PaymentScreen() {
         {/* Order Summary Card */}
         <View style={styles.orderSummaryCard}>
           <Text style={styles.summaryGreenText}>
-            {orderType === 'Dine In'
-              ? `Order for Table ${tableNumber?.replace('T-', '') ?? '06'}. Dine in`
+            {isDineInSettlement
+              ? `Bill Settlement for Table ${effectiveTable.replace('T-', '')} (#${settlementOrderId})`
+              : orderType === 'Dine In'
+              ? `Order for Table ${effectiveTable.replace('T-', '')}. Dine in`
               : 'Take Away Order'}
           </Text>
 
           <View style={styles.summaryRow}>
             <Text style={styles.summaryLabel}>Subtotal </Text>
-            <Text style={[styles.summaryAmount, { color: '#333' }]}>Rs. {subtotal.toFixed(2)}</Text>
+            <Text style={[styles.summaryAmount, { color: '#333' }]}>
+              Rs. {(isDineInSettlement && settlementTotal > 0 ? settlementTotal : subtotal).toFixed(2)}
+            </Text>
           </View>
 
-          {discountAmount > 0 && (
+          {!isDineInSettlement && discountAmount > 0 && (
             <View style={styles.summaryRow}>
               <Text style={styles.summaryLabel}>Discount ({discountCode}) </Text>
               <Text style={[styles.summaryAmount, { color: '#00a01d' }]}>- Rs. {discountAmount.toFixed(2)}</Text>
@@ -549,7 +717,7 @@ export default function PaymentScreen() {
 
           <View style={[styles.summaryRow, { marginTop: 8, paddingTop: 8, borderTopWidth: 1, borderTopColor: '#e8e8e8' }]}>
             <Text style={[styles.summaryLabel, { fontWeight: 'bold' }]}>Total payable </Text>
-            <Text style={styles.summaryAmount}>Rs. {totalVal.toFixed(2)}</Text>
+            <Text style={styles.summaryAmount}>Rs. {effectiveTotalVal.toFixed(2)}</Text>
           </View>
         </View>
 
@@ -560,9 +728,18 @@ export default function PaymentScreen() {
           disabled={loading}
         >
           <View style={styles.payBtnContent}>
-            <Ionicons name="lock-closed" size={16} color="#fff" style={styles.payBtnIcon} />
+            <Ionicons
+              name={selectedMethod === 'Pay at Counter' ? "checkmark-circle" : "lock-closed"}
+              size={16}
+              color="#fff"
+              style={styles.payBtnIcon}
+            />
             <Text style={styles.payBtnText}>
-              {loading ? 'Processing...' : `Pay Rs. ${totalVal.toFixed(2)} securely`}
+              {loading
+                ? 'Processing...'
+                : selectedMethod === 'Pay at Counter'
+                ? `Confirm Pay at Counter (Rs. ${effectiveTotalVal.toFixed(2)})`
+                : `Pay Rs. ${effectiveTotalVal.toFixed(2)} securely`}
             </Text>
           </View>
         </TouchableOpacity>

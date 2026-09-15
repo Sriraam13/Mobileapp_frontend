@@ -2,14 +2,23 @@ import { Platform } from 'react-native';
 import Constants from 'expo-constants';
 
 const getApiUrl = () => {
-  // Try to use the Expo host URI to get the local network IP address
+  const envUrl = process.env.EXPO_PUBLIC_API_BASE_URL?.trim();
+  if (envUrl) {
+    return envUrl;
+  }
+
+  // If in production and no explicit URL is provided, fail fast.
+  if (!__DEV__) {
+    throw new Error('EXPO_PUBLIC_API_BASE_URL is not configured for production build.');
+  }
+
+  // Fallbacks for development ONLY
   const hostUri = Constants.expoConfig?.hostUri;
   if (hostUri) {
     const ip = hostUri.split(':')[0];
     return `http://${ip}:8001`;
   }
 
-  // Fallback for Android emulator
   if (Platform.OS === 'android') {
     return 'http://10.0.2.2:8001';
   }

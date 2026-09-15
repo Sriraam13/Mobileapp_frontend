@@ -193,10 +193,10 @@ export default function OrderCompletedScreen() {
   const headerIcon = isTakeAway ? 'bag-check-outline' : isDelivery ? 'bicycle-outline' : 'restaurant-outline';
   const headerTitle = isTakeAway ? 'Picked Up!' : isDelivery ? 'Delivered!' : 'Order Served!';
   const headerSubtitle = isTakeAway
-    ? `Order completed at ${completedTime}  •  Total Rs. ${totalAmount.toFixed(0)}`
+    ? `Order completed at ${completedTime}  •  ${params.paymentMethod ? `Paid (${params.paymentMethod})` : 'Paid'}  •  Total Rs. ${totalAmount.toFixed(0)}`
     : isDelivery
-    ? `Delivered at ${completedTime}  •  Total Rs. ${totalAmount.toFixed(0)}`
-    : `Served at ${completedTime}  •  Total Rs. ${totalAmount.toFixed(0)}`;
+    ? `Delivered at ${completedTime}  •  ${params.paymentMethod ? `Paid (${params.paymentMethod})` : 'Paid'}  •  Total Rs. ${totalAmount.toFixed(0)}`
+    : `Served at ${completedTime}  •  ${params.paymentMethod ? `Paid (${params.paymentMethod})` : 'Paid'}  •  Total Rs. ${totalAmount.toFixed(0)}`;
 
   const feedbackQuestion = isDineIn
     ? 'How was your dine-in experience?'
@@ -324,7 +324,9 @@ export default function OrderCompletedScreen() {
               ))}
               <View style={styles.divider} />
               <View style={styles.itemRow}>
-                <Text style={[styles.itemName, { fontWeight: '700', color: '#111' }]}>Total</Text>
+                <Text style={[styles.itemName, { fontWeight: '700', color: '#111' }]}>
+                  Total Paid {params.paymentMethod ? `(${params.paymentMethod})` : ''}
+                </Text>
                 <Text style={[styles.itemPrice, { color: accentColor }]}>
                   Rs. {totalAmount.toFixed(0)}
                 </Text>

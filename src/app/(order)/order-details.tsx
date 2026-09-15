@@ -5,19 +5,26 @@ import { Ionicons } from '@expo/vector-icons';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { orderApi } from '../../services/apiService';
 import { getFullImageUrl } from '../../constants/api';
-import { useCartStore } from '../../store';
+import { useCartStore, useRestaurantStore } from '../../store';
+import BottomNavBar from '../../components/layout/BottomNavBar';
 
 export default function OrderDetails() {
   const router = useRouter();
   const { orderId, isHistorical, restaurantId } = useLocalSearchParams();
   const { clearCart, addItem, setOrderType } = useCartStore();
+  const { selectedOutlet } = useRestaurantStore();
   const [order, setOrder] = useState<any>(null);
   const [items, setItems] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     if (orderId && !isHistorical) {
-      orderApi.getOrderDetails(orderId as string, restaurantId ? Number(restaurantId) : 1)
+      const resolvedRestaurantId = restaurantId ? Number(restaurantId) : selectedOutlet?.restaurant_id;
+      if (!resolvedRestaurantId) {
+        setLoading(false);
+        return;
+      }
+      orderApi.getOrderDetails(orderId as string, Number(resolvedRestaurantId))
         .then(data => {
           if (data && data.order) {
             let mappedType = data.order.order_type || 'Dine In';
@@ -37,7 +44,7 @@ export default function OrderDetails() {
     } else {
       setLoading(false);
     }
-  }, [orderId]);
+  }, [orderId, restaurantId, selectedOutlet]);
 
   const handleReorder = () => {
     if (!items || items.length === 0) return;
@@ -64,15 +71,9 @@ export default function OrderDetails() {
     router.push({
       pathname: '/invoice',
       params: {
+        dbOrderId: String(order.id),
         orderId: order.orderId,
-        subtotal: getSubtotal(),
-        finalTotal: order.total_amount,
-        discountAmount: order.discount_amount || 0,
-        mobileNumber: order.customer_phone || '',
-        customerName: order.customer_name || '',
-        paymentMethod: order.payment_method || 'UPI',
         orderType: order.order_type || 'Dine In',
-        cartData: JSON.stringify(items.map((i: any) => ({ ...i, qty: i.quantity })))
       }
     });
   };
@@ -260,35 +261,47 @@ export default function OrderDetails() {
 
         {/* Buttons */}
         <View style={styles.actionRow}>
-          <TouchableOpacity style={styles.invoiceBtn} onPress={handleInvoice}>
-            <Text style={styles.invoiceText}>Invoice</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.reorderBtn} onPress={handleReorder}>
-            <Text style={styles.reorderText}>Reorder</Text>
-          </TouchableOpacity>
+          {order.order_type === 'Dine In' && (order.payment_status || '').toUpperCase() !== 'PAID' ? (
+            <>
+              <TouchableOpacity
+                style={[styles.invoiceBtn, { backgroundColor: '#00a01d', borderColor: '#00a01d' }]}
+                onPress={() => router.push({ pathname: '/menu', params: { orderType: 'Dine In', tableNumber: order.table_number || '' } })}
+              >
+                <Text style={[styles.invoiceText, { color: '#fff' }]}>Order Again</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.reorderBtn, { backgroundColor: '#ff4500' }]}
+                onPress={() => router.push({
+                  pathname: '/(checkout)/payment',
+                  params: {
+                    isDineInSettlement: 'true',
+                    orderId: order.orderId || `ORD-${String(order.id).padStart(6, '0')}`,
+                    dbOrderId: String(order.id || ''),
+                    tableNumber: order.table_number || 'T-01',
+                    totalAmount: String(order.total_amount || 0),
+                    cartItems: JSON.stringify(items),
+                  }
+                })}
+              >
+                <Text style={styles.reorderText}>Complete Order / Pay</Text>
+              </TouchableOpacity>
+            </>
+          ) : (
+            <>
+              <TouchableOpacity style={styles.invoiceBtn} onPress={handleInvoice}>
+                <Text style={styles.invoiceText}>Invoice</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.reorderBtn} onPress={handleReorder}>
+                <Text style={styles.reorderText}>Reorder</Text>
+              </TouchableOpacity>
+            </>
+          )}
         </View>
 
       </ScrollView>
 
       {/* Bottom Navigation */}
-      <View style={styles.bottomNav}>
-        <TouchableOpacity style={styles.navItem} onPress={() => router.replace('/home')}>
-          <Ionicons name='home-outline' size={24} color='#888' />
-          <Text style={styles.navText}>Home</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.navItem} onPress={() => router.replace('/menu')}>
-          <Ionicons name='search-outline' size={24} color='#888' />
-          <Text style={styles.navText}>Search</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.navItem} onPress={() => router.replace('/orders')}>
-          <Ionicons name='receipt' size={24} color='#ff4500' />
-          <Text style={[styles.navText, { color: '#ff4500' }]}>Orders</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.navItem} onPress={() => router.replace('/profile')}>
-          <Ionicons name='person-outline' size={24} color='#888' />
-          <Text style={styles.navText}>Profile</Text>
-        </TouchableOpacity>
-      </View>
+      <BottomNavBar activeTab="orders" />
     </SafeAreaView>
   );
 }
@@ -297,7 +310,7 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#fff',
-    paddingTop: Platform.OS === 'android' ? StatusBar.currentHeight : 0,
+    
   },
   header: {
     flexDirection: 'row',

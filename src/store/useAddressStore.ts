@@ -8,6 +8,18 @@ export interface Address {
   type: string;
   address: string;
   full_address: string;
+  latitude?: number;
+  longitude?: number;
+  flat_house_no?: string;
+  building_apartment_name?: string;
+  floor?: string;
+  landmark?: string;
+  city?: string;
+  state?: string;
+  pincode?: string;
+  contact_name?: string;
+  contact_phone?: string;
+  delivery_instructions?: string;
   icon: string;
   iconBg: string;
   iconColor: string;

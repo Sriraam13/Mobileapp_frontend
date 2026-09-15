@@ -2,7 +2,7 @@ import React, { useState, useCallback } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
   Platform, StatusBar, Image, ActivityIndicator,
-  TextInput, Alert
+  TextInput, Alert, Modal
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
@@ -11,6 +11,7 @@ import { useRouter } from 'expo-router';
 import { useFocusEffect } from 'expo-router';
 import { customerApi } from '../../services/apiService';
 import { getFullImageUrl } from '../../constants/api';
+import BottomNavBar from '../../components/layout/BottomNavBar';
 import {
   useAuthStore,
   useAddressStore,
@@ -18,7 +19,9 @@ import {
   useOrderStore,
   useLiveOrderStore,
   useDineInSessionStore,
-  useRestaurantStore
+  useRestaurantStore,
+  useFavoritesStore,
+  usePaymentMethodStore
 } from '../../store';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -42,6 +45,21 @@ export default function Profile() {
   const { customerId, customerName, phone } = useAuthStore();
 
   const [profile, setProfile] = useState<CustomerProfile | null>(null);
+  const [customAlert, setCustomAlert] = useState<{
+    visible: boolean;
+    title: string;
+    message: string;
+    type: 'success' | 'error' | 'info';
+    onConfirm?: () => void;
+    buttons?: { text: string; onPress?: () => void; style?: 'cancel' | 'default' }[];
+  }>({ visible: false, title: '', message: '', type: 'info' });
+
+  const showPopup = (
+    title: string, message: string, type: 'success' | 'error' | 'info',
+    onConfirm?: () => void, buttons?: { text: string; onPress?: () => void; style?: 'cancel' | 'default' }[]
+  ) => {
+    setCustomAlert({ visible: true, title, message, type, buttons: buttons || (onConfirm ? [{ text: 'Continue', onPress: onConfirm }] : [{ text: 'Continue' }]) });
+  };
   const [loading, setLoading] = useState(true);
   const [isEditing, setIsEditing] = useState(false);
   const [editName, setEditName] = useState('');
@@ -177,15 +195,32 @@ export default function Profile() {
 
   // ── Logout ──
   const handleLogout = () => {
-    useAuthStore.getState().logout();
-    useCartStore.getState().clearCart();
-    useAddressStore.getState().clearAddresses();
-    useOrderStore.getState().clearCurrentOrder();
-    useLiveOrderStore.getState().setPollingActive(false);
-    useLiveOrderStore.getState().clearLiveOrder();
-    useDineInSessionStore.getState().closeSession();
-    useRestaurantStore.getState().setSelectedOutlet(null);
-    router.replace('/login');
+    showPopup(
+      'Logout',
+      'Are you sure you want to logout?',
+      'info',
+      undefined,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Logout',
+          style: 'default',
+          onPress: () => {
+            useAuthStore.getState().logout();
+            useCartStore.getState().clearCart();
+            useAddressStore.getState().clearAddresses();
+            useOrderStore.getState().clearCurrentOrder();
+            useLiveOrderStore.getState().setPollingActive(false);
+            useLiveOrderStore.getState().clearLiveOrder();
+            useDineInSessionStore.getState().closeSession();
+            useRestaurantStore.getState().setSelectedOutlet(null);
+            useFavoritesStore.getState().clearFavorites();
+            usePaymentMethodStore.getState().clearPaymentMethods();
+            router.replace('/login');
+          },
+        },
+      ]
+    );
   };
 
   // ── Menu items ──
@@ -340,24 +375,33 @@ export default function Profile() {
       </ScrollView>
 
       {/* Bottom Nav */}
-      <View style={styles.bottomNav}>
-        <TouchableOpacity style={styles.navItem} onPress={() => router.replace('/home')}>
-          <Ionicons name="home-outline" size={24} color="#888" />
-          <Text style={styles.navText}>Home</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.navItem} onPress={() => router.replace('/menu' as any)}>
-          <Ionicons name="search-outline" size={24} color="#888" />
-          <Text style={styles.navText}>Search</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.navItem} onPress={() => router.replace('/orders' as any)}>
-          <Ionicons name="receipt-outline" size={24} color="#888" />
-          <Text style={styles.navText}>Orders</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.navItem}>
-          <Ionicons name="person" size={24} color="#ff4500" />
-          <Text style={[styles.navText, { color: '#ff4500' }]}>Profile</Text>
-        </TouchableOpacity>
-      </View>
+      <BottomNavBar activeTab="profile" />
+      
+      {/* Custom Premium Alert Modal */}
+      <Modal animationType="fade" transparent={true} visible={customAlert.visible} onRequestClose={() => setCustomAlert(prev => ({ ...prev, visible: false }))}>
+        <View style={styles.alertOverlay}>
+          <View style={styles.alertBox}>
+            <View style={[styles.alertIconBg, customAlert.type === 'success' && { backgroundColor: '#e6ffe6' }, customAlert.type === 'error' && { backgroundColor: '#ffe5e0' }, customAlert.type === 'info' && { backgroundColor: '#e6f2ff' }]}>
+              <Ionicons name={customAlert.type === 'success' ? 'checkmark-circle' : customAlert.type === 'error' ? 'alert-circle' : 'information-circle'} size={48} color={customAlert.type === 'success' ? '#00cc66' : customAlert.type === 'error' ? '#ff4500' : '#1e90ff'} />
+            </View>
+            <Text style={styles.alertTitle}>{customAlert.title}</Text>
+            <Text style={styles.alertMessage}>{customAlert.message}</Text>
+            <View style={[styles.alertBtnContainer, customAlert.buttons && customAlert.buttons.length > 2 ? { flexDirection: 'column' } : { flexDirection: 'row' }]}>
+              {customAlert.buttons && customAlert.buttons.length > 0 ? (
+                customAlert.buttons.map((btn, index) => (
+                  <TouchableOpacity key={index} style={[styles.alertBtn, btn.style === 'cancel' ? { backgroundColor: '#f0f0f0', borderWidth: 1, borderColor: '#ccc' } : { backgroundColor: '#ff4500' }, (!customAlert.buttons || customAlert.buttons.length <= 2) && { flex: 1 }]} onPress={() => { setCustomAlert(prev => ({ ...prev, visible: false })); if (btn.onPress) btn.onPress(); }}>
+                    <Text style={[styles.alertBtnText, btn.style === 'cancel' && { color: '#666' }]}>{btn.text}</Text>
+                  </TouchableOpacity>
+                ))
+              ) : (
+                <TouchableOpacity style={[styles.alertBtn, customAlert.type === 'success' && { backgroundColor: '#00cc66' }, customAlert.type === 'error' && { backgroundColor: '#ff4500' }, customAlert.type === 'info' && { backgroundColor: '#1e90ff' }]} onPress={() => { setCustomAlert(prev => ({ ...prev, visible: false })); if (customAlert.onConfirm) customAlert.onConfirm(); }}>
+                  <Text style={styles.alertBtnText}>Continue</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -368,7 +412,7 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#fafafa',
-    paddingTop: Platform.OS === 'android' ? StatusBar.currentHeight : 0,
+    
   },
   header: {
     flexDirection: 'row',
@@ -379,7 +423,7 @@ const styles = StyleSheet.create({
   },
   backBtn: { marginRight: 15 },
   headerTitle: { fontSize: 18, fontWeight: 'bold' },
-  scrollContent: { padding: 20, paddingBottom: 100 },
+  scrollContent: { padding: 20, paddingBottom: 120 },
   userCard: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -457,4 +501,12 @@ const styles = StyleSheet.create({
   },
   navItem: { alignItems: 'center' },
   navText: { fontSize: 10, marginTop: 5, color: '#888' },
+  alertOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center' },
+  alertBox: { width: '85%', backgroundColor: '#fff', borderRadius: 24, padding: 24, alignItems: 'center', shadowColor: '#000', shadowOffset: { width: 0, height: 10 }, shadowOpacity: 0.15, shadowRadius: 20, elevation: 10 },
+  alertIconBg: { width: 80, height: 80, borderRadius: 40, justifyContent: 'center', alignItems: 'center', marginBottom: 20 },
+  alertTitle: { fontSize: 22, fontWeight: 'bold', color: '#333', marginBottom: 10, textAlign: 'center' },
+  alertMessage: { fontSize: 16, color: '#666', textAlign: 'center', marginBottom: 24, lineHeight: 22 },
+  alertBtnContainer: { width: '100%', gap: 12 },
+  alertBtn: { paddingVertical: 14, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
+  alertBtnText: { color: '#fff', fontSize: 16, fontWeight: 'bold' }
 });
