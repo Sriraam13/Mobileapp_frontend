@@ -178,8 +178,19 @@ export default function OrderSuccessScreen() {
             });
           }
         }
-      } catch (err) {
+      } catch (err: any) {
         console.error("Failed to fetch order details", err);
+        if (err?.message?.includes("404") || err?.message?.includes("not found")) {
+          if (intervalId) clearInterval(intervalId);
+          import('../../store/useLiveOrderStore').then(({ useLiveOrderStore }) => {
+            useLiveOrderStore.getState().clearLiveOrder();
+          });
+          import('react-native').then(({ Alert }) => {
+            Alert.alert("Order Not Found", "Your order could not be found on the server.", [
+              { text: "OK", onPress: () => router.replace('/(main)/home') }
+            ]);
+          });
+        }
       } finally {
         setLoading(false);
       }

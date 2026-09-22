@@ -201,31 +201,11 @@ export const orderApi = {
       cart: formattedCart,
     };
 
-    // WORKAROUND: The backend has a bug where it fails to commit order items 
-    // for new orders (unless it's a delivery order with an assigned rider).
-    // However, the `appendOrderItems` endpoint DOES commit items correctly.
-    // To fix this without touching the backend, we first create the order with an empty cart
-    // (which sets up the order, fees, etc.), and then immediately append the items 
-    // to correctly save them to the database and update the total_amount.
-    
-    const emptyCartPayload = {
-      ...fullPayload,
-      cart: []
-    };
-
     const res = await fetchWithTimeout(`${API_BASE_URL}/api/orders?restaurant_id=${payload.restaurant_id}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(emptyCartPayload),
+      body: JSON.stringify(fullPayload),
     });
-
-    if (res && res.dbOrderId && formattedCart.length > 0) {
-      try {
-        await orderApi.appendOrderItems(res.dbOrderId, fullPayload);
-      } catch (err) {
-        console.error("Failed to append items to workaround backend issue:", err);
-      }
-    }
 
     return res;
   },
