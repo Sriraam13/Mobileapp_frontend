@@ -349,3 +349,40 @@ export const deliveryApi = {
       `${API_BASE_URL}/api/v1/public/orders/${encodeURIComponent(orderId)}/tracking`,
     ),
 };
+
+/**
+ * Catering Order Endpoints
+ */
+export const cateringOrderApi = {
+  /** GET /api/v1/public/customers/{customerId}/catering-orders */
+  getCateringOrders: (customerId: number) => {
+    if (!customerId) throw new Error("customerId is required");
+    return fetchWithTimeout(`${API_BASE_URL}/api/v1/public/customers/${customerId}/catering-orders`);
+  },
+
+  /** POST /api/v1/public/catering/orders/{orderId}/balance-payment */
+  startBalancePayment: (orderId: number, paymentAmount: number) => {
+    if (!orderId) throw new Error("orderId is required");
+    return fetchWithTimeout(`${API_BASE_URL}/api/v1/public/catering/orders/${orderId}/balance-payment`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ payment_amount: paymentAmount }),
+    });
+  },
+
+  /** POST /api/v1/public/catering/orders/{orderId}/balance-payment/verify */
+  verifyBalancePayment: (orderId: number, payload: {
+    amount: number;
+    razorpay_order_id: string;
+    razorpay_payment_id: string;
+    razorpay_signature: string;
+    payment_method?: string;
+  }) => {
+    if (!orderId) throw new Error("orderId is required");
+    return fetchWithTimeout(`${API_BASE_URL}/api/v1/public/catering/orders/${orderId}/balance-payment/verify`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+  },
+};

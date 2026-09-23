@@ -101,8 +101,19 @@ export default function CateringEventDetails() {
       return;
     }
 
-    // Success - navigate to next step (placeholder)
-    showAlert('Success', 'Event details saved successfully! Proceeding to menu selection...');
+    // Navigate to next step
+    router.push({
+      pathname: '/(main)/catering-choose-package',
+      params: {
+        eventName,
+        date: date,
+        time: time,
+        occasion,
+        guestCount: guests.toString(),
+        serviceType,
+        address
+      }
+    });
   };
 
   // Interactive calendar generator

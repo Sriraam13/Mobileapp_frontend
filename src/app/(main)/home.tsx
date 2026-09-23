@@ -378,15 +378,23 @@ export default function Home() {
         setCategories(formattedCats);
 
         // Fetch user profile to get used offers
-        if (phone) {
-          try {
-            const profileData = await customerApi.getProfile(phone);
+        try {
+          const { customerId, phone: authPhone } = useAuthStore.getState();
+          const targetPhone = phone || authPhone;
+          
+          if (customerId) {
+            const profileData = await customerApi.getProfileById(customerId);
             if (profileData.used_offers) {
               setUsedOffers(profileData.used_offers);
             }
-          } catch (e) {
-            // Silently ignore if profile is not found or fails
+          } else if (targetPhone) {
+            const profileData = await customerApi.getProfile(targetPhone);
+            if (profileData.used_offers) {
+              setUsedOffers(profileData.used_offers);
+            }
           }
+        } catch (e) {
+            // Silently ignore if profile is not found or fails
         }
       } catch (e) {
         console.error('Error fetching home screen data', e);
@@ -725,7 +733,7 @@ export default function Home() {
               router.push('/(main)/bulk-catering');
             }}
           >
-            <Text style={[styles.tabText, activeTab === 'Bulk' && styles.activeTabText]}>Bulk</Text>
+            <Text style={[styles.tabText, activeTab === 'Bulk' && styles.activeTabText]}>Catering</Text>
           </TouchableOpacity>
         </View>
 
