@@ -3,7 +3,7 @@ import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Platform, StatusB
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter, useNavigation } from 'expo-router';
-import { orderApi } from '../../services/apiService';
+import { orderApi, cateringOrderApi } from '../../services/apiService';
 import { getFullImageUrl } from '../../constants/api';
 import { useAuthStore, useCartStore, useOrderStore, useRestaurantStore } from '../../store';
 import { useDineInSessionStore } from '../../store/useDineInSessionStore';
@@ -99,9 +99,40 @@ export default function Orders() {
               items: items || [],
               total: o.total_amount || 0,
               image: items?.[0]?.image_url ? getFullImageUrl(items[0].image_url) : 'https://via.placeholder.com/150',
-              order_type: mappedType
+              order_type: mappedType,
+              isCatering: false
             };
           });
+        }
+      }
+      
+      const { customerId } = useAuthStore.getState();
+      if (customerId) {
+        const cateringDataRes = await cateringOrderApi.getCateringOrders(customerId).catch(() => ({ data: [] }));
+        const rawCatering = Array.isArray(cateringDataRes) ? cateringDataRes : (Array.isArray(cateringDataRes?.data) ? cateringDataRes.data : []);
+        
+        if (rawCatering.length > 0) {
+          const cateringOrders = rawCatering.map((cOrder: any) => {
+            return {
+              id: `CAT-${String(cOrder.id).padStart(6, '0')}`,
+              dbId: cOrder.id,
+              restaurant: 'Data Udipi Catering',
+              date: cOrder.created_at || new Date().toISOString(),
+              status: cOrder.order_status || 'Pending',
+              payment_status: cOrder.payment_status || 'Pending',
+              payment_method: 'Online',
+              table_number: null,
+              items: [{ name: cOrder.package_name, quantity: cOrder.guest_count, price: cOrder.package_price }],
+              total: cOrder.total_amount || 0,
+              paid_amount: cOrder.paid_amount || 0,
+              balance_amount: cOrder.balance_amount || 0,
+              image: 'https://via.placeholder.com/150', // Replace with catering icon if desired
+              order_type: 'Catering',
+              isCatering: true,
+              payments: cOrder.payments || []
+            };
+          });
+          formattedOrders = [...formattedOrders, ...cateringOrders];
         }
       }
 
@@ -269,6 +300,17 @@ export default function Orders() {
     }
   };
 
+  const handlePayBalance = (order: any) => {
+    router.push({
+      pathname: '/catering-balance-payment',
+      params: {
+        orderId: String(order.dbId),
+        balanceAmount: String(order.balance_amount || 0),
+        packageName: Array.isArray(order.items) && order.items[0] ? order.items[0].name : 'Catering Package'
+      }
+    });
+  };
+
   const getDisplayStatus = (status: string, type: string) => {
     const s = status?.toUpperCase();
     if (s === 'CANCELLED') return 'Cancelled';
@@ -356,7 +398,10 @@ export default function Orders() {
           <TouchableOpacity 
             key={order.id} 
             style={styles.orderCard}
-            onPress={() => handleOrderPress(order)}
+            onPress={() => {
+              if (order.isCatering) return; // Ignore full card press for catering, use buttons instead
+              handleOrderPress(order);
+            }}
           >
             <View style={styles.orderHeader}>
               <View style={{ flex: 1, paddingRight: 12 }}>
@@ -376,8 +421,10 @@ export default function Orders() {
 
             {(() => {
               const isDineIn = order.order_type === 'Dine In';
+              const isCatering = order.isCatering;
               const normPayMethod = (order.payment_method || '').toLowerCase().replace(/[\s_-]/g, '');
               const isCounterPaid = normPayMethod === 'payatcounter' || normPayMethod === 'counter';
+              const isPartiallyPaid = (order.payment_status || '').toUpperCase() === 'PARTIALLY_PAID';
               const isPaid = (order.payment_status || '').toUpperCase() === 'PAID' || (isDineIn && isCounterPaid);
               const isUnpaidDineIn = isDineIn && (!isPaid || order.isOngoingDineIn);
 
@@ -396,10 +443,10 @@ export default function Orders() {
                           : order.order_type}
                       </Text>
                     </View>
-                    <View style={[styles.infoBadge, isPaid ? { backgroundColor: '#e8f5e9' } : { backgroundColor: '#fff3e0' }]}>
+                    <View style={[styles.infoBadge, isPaid ? { backgroundColor: '#e8f5e9' } : (isPartiallyPaid ? {backgroundColor: '#e3f2fd'} : { backgroundColor: '#fff3e0' })]}>
                       <Text style={styles.infoBadgeLabel}>Payment</Text>
-                      <Text style={[styles.infoBadgeValue, { color: isPaid ? '#16a34a' : '#ff4500', fontWeight: 'bold' }]}>
-                        {isPaid ? 'Paid' : (order.order_type === 'Delivery' ? 'Cash on Delivery' : 'Pay Later')}
+                      <Text style={[styles.infoBadgeValue, { color: isPaid ? '#16a34a' : (isPartiallyPaid ? '#0284c7' : '#ff4500'), fontWeight: 'bold' }]}>
+                        {isPaid ? 'Paid' : (isPartiallyPaid ? 'Partially Paid' : (order.order_type === 'Delivery' ? 'Cash on Delivery' : 'Pay Later'))}
                       </Text>
                     </View>
                   </View>
@@ -409,18 +456,40 @@ export default function Orders() {
                       <Image source={{ uri: order.image }} style={styles.orderImage} />
                     ) : (
                       <View style={[styles.orderImage, { backgroundColor: '#fff0eb', alignItems: 'center', justifyContent: 'center' }]}>
-                        <Ionicons name="restaurant-outline" size={26} color="#ff4500" />
+                        {isCatering ? (
+                          <Ionicons name="people-outline" size={26} color="#ff4500" />
+                        ) : (
+                          <Ionicons name="restaurant-outline" size={26} color="#ff4500" />
+                        )}
                       </View>
                     )}
                     <View style={styles.orderInfo}>
                       <Text style={styles.orderItems} numberOfLines={2}>
-                        {Array.isArray(order.items) 
+                        {isCatering && Array.isArray(order.items) && order.items[0]
+                          ? `${order.items[0].name} (x${order.items[0].quantity} Guests)`
+                          : Array.isArray(order.items) 
                           ? order.items.map((i: any) => `${i.quantity || 1}x ${i.name || 'Item'}`).join(', ') 
                           : (typeof order.items === 'string' ? order.items : 'Items')}
                       </Text>
                       <Text style={styles.orderPrice}>Rs. {order.total}</Text>
+                      {isCatering && isPartiallyPaid && (
+                        <Text style={{ fontSize: 12, color: '#666', marginTop: 4 }}>
+                          Paid: Rs. {order.paid_amount || 0} • Bal: Rs. {order.balance_amount || 0}
+                        </Text>
+                      )}
                     </View>
-                    {isUnpaidDineIn ? (
+                    {isCatering && isPartiallyPaid ? (
+                      <TouchableOpacity 
+                        style={[styles.reorderBtn, { backgroundColor: '#3395FF', borderColor: '#3395FF', minWidth: 100, alignItems: 'center', justifyContent: 'center' }]} 
+                        onPress={(e) => {
+                          e.stopPropagation();
+                          handlePayBalance(order);
+                        }}
+                        activeOpacity={0.8}
+                      >
+                        <Text style={[styles.reorderText, { color: '#ffffff', fontWeight: 'bold' }]}>Pay Balance</Text>
+                      </TouchableOpacity>
+                    ) : isUnpaidDineIn ? (
                       <TouchableOpacity 
                         style={[styles.reorderBtn, { backgroundColor: '#ff4500', borderColor: '#ff4500', minWidth: 100, alignItems: 'center', justifyContent: 'center' }]} 
                         onPress={() => handleOrderPress(order)}
@@ -439,13 +508,39 @@ export default function Orders() {
                     ) : (
                       <TouchableOpacity 
                         style={[styles.reorderBtn, { backgroundColor: '#fff', borderColor: '#ff4500', minWidth: 100, alignItems: 'center', justifyContent: 'center' }]} 
-                        onPress={() => router.push({ pathname: '/order-details', params: { orderId: order.dbId || order.id } })}
+                        onPress={() => {
+                          if (isCatering) {
+                            router.push({ pathname: '/catering-order-details', params: { orderId: order.dbId } });
+                          } else {
+                            router.push({ pathname: '/order-details', params: { orderId: order.dbId || order.id } });
+                          }
+                        }}
                         activeOpacity={0.8}
                       >
                         <Text style={[styles.reorderText, { color: '#ff4500', fontWeight: 'bold' }]}>View Details</Text>
                       </TouchableOpacity>
                     )}
                   </View>
+
+                  {/* Payment History for Catering */}
+                  {isCatering && order.payments && order.payments.length > 0 && (
+                    <View style={{ marginTop: 12, paddingTop: 12, borderTopWidth: 1, borderTopColor: '#f0f0f0' }}>
+                      <Text style={{ fontSize: 13, fontWeight: 'bold', color: '#444', marginBottom: 8 }}>Payment History</Text>
+                      {order.payments.map((p: any) => (
+                        <View key={p.id} style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6, backgroundColor: '#f9f9f9', padding: 8, borderRadius: 6 }}>
+                          <View>
+                            <Text style={{ fontSize: 12, fontWeight: 'bold', color: '#333' }}>{p.payment_type} ({p.payment_method})</Text>
+                            <Text style={{ fontSize: 10, color: '#777', marginTop: 2 }}>Txn: {p.transaction_id || 'N/A'}</Text>
+                            <Text style={{ fontSize: 10, color: '#777' }}>{formatDate(p.created_at)}</Text>
+                          </View>
+                          <View style={{ alignItems: 'flex-end', justifyContent: 'center' }}>
+                            <Text style={{ fontSize: 13, fontWeight: 'bold', color: p.payment_status === 'SUCCESS' ? '#16a34a' : '#ff4500' }}>Rs. {p.amount}</Text>
+                            <Text style={{ fontSize: 10, color: p.payment_status === 'SUCCESS' ? '#16a34a' : '#ff4500', marginTop: 2 }}>{p.payment_status}</Text>
+                          </View>
+                        </View>
+                      ))}
+                    </View>
+                  )}
                 </>
               );
             })()}

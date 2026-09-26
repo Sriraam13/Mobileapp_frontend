@@ -174,9 +174,21 @@ export default function DeliveryTrackingScreen() {
             return;
           }
         }
-      } catch (err) {
+      } catch (err: any) {
         console.error('Tracking poll error', err);
-        setNetworkError(true);
+        if (err?.message?.includes("404") || err?.message?.includes("not found")) {
+          if (interval) clearInterval(interval);
+          import('../../store/useLiveOrderStore').then(({ useLiveOrderStore }) => {
+            useLiveOrderStore.getState().clearLiveOrder();
+          });
+          import('react-native').then(({ Alert }) => {
+            Alert.alert("Order Not Found", "Your order could not be found on the server.", [
+              { text: "OK", onPress: () => router.replace('/(main)/home') }
+            ]);
+          });
+        } else {
+          setNetworkError(true);
+        }
       } finally {
         isPollingRef.current = false;
       }
@@ -295,7 +307,7 @@ export default function DeliveryTrackingScreen() {
                   title={riderInfo?.name || 'Delivery Partner'}
                 >
                   <Image
-                    source={require('../../assets/scooter.jpg')}
+                    source={require('../../../assets/scooter.jpg')}
                     style={{ width: 40, height: 40, resizeMode: 'contain' }}
                   />
                 </Marker>

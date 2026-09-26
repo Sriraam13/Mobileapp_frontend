@@ -13,7 +13,7 @@ export default function RazorpayScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const params = useLocalSearchParams();
-  const { amount, phone, orderType, paymentMethodId } = params;
+  const { amount, phone, orderType, paymentMethodId, razorpayOrderId, returnPath, returnParams } = params;
   const webViewRef = useRef<WebView>(null);
 
   const { paymentMethods, selectedMethodId, setSelectedMethod } = usePaymentMethodStore();
@@ -235,16 +235,17 @@ export default function RazorpayScreen() {
         var options = {
           key: '${RAZORPAY_KEY}',
           amount: ${amountInPaise},
+          ${razorpayOrderId ? `order_id: '${razorpayOrderId}',` : ''}
           currency: 'INR',
           name: 'Udupi Restaurant',
           description: '${orderType || 'Food'} Order Payment',
           remember_customer: true,
           prefill: {
             contact: '${phone || '+919876543210'}',
-            method: 'card',
-            ${activeCard ? `name: '${activeCard.title}',` : ''}
-            ${activeCard ? `'card[number]': '${activeCard.subtitle}',` : ''}
-            ${activeCard ? `card: { number: '${activeCard.subtitle}', name: '${activeCard.title}' },` : ''}
+            method: '${paymentMethodId || 'card'}',
+            ${activeCard && paymentMethodId !== 'upi' ? `name: '${activeCard.title}',` : ''}
+            ${activeCard && paymentMethodId !== 'upi' ? `'card[number]': '${activeCard.subtitle}',` : ''}
+            ${activeCard && paymentMethodId !== 'upi' ? `card: { number: '${activeCard.subtitle}', name: '${activeCard.title}' },` : ''}
           },
           notes: {
             ${activeCard ? `saved_card_number: '${activeCard.subtitle}',` : ''}
@@ -256,7 +257,9 @@ export default function RazorpayScreen() {
           handler: function(response) {
             window.ReactNativeWebView.postMessage(JSON.stringify({
               status: 'success',
-              payment_id: response.razorpay_payment_id
+              payment_id: response.razorpay_payment_id,
+              order_id: response.razorpay_order_id,
+              signature: response.razorpay_signature
             }));
           },
           modal: {
@@ -322,6 +325,20 @@ export default function RazorpayScreen() {
                 router.replace('/home');
               });
             });
+          });
+          return;
+        }
+
+        if (returnPath) {
+          router.replace({
+            pathname: returnPath as any,
+            params: {
+              razorpay_status: 'success',
+              razorpay_payment_id: data.payment_id,
+              razorpay_order_id: data.order_id,
+              razorpay_signature: data.signature,
+              ...(returnParams ? JSON.parse(returnParams as string) : {})
+            }
           });
           return;
         }

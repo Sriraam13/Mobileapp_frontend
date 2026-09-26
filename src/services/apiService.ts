@@ -149,6 +149,14 @@ export const customerApi = {
 
 
 /**
+ * Restaurant Endpoints
+ */
+export const restaurantApi = {
+  /** GET /api/v1/public/restaurants */
+  getRestaurants: () => fetchWithTimeout(`${API_BASE_URL}/api/v1/public/restaurants`),
+};
+
+/**
  * Menu Endpoints
  */
 export const menuApi = {
@@ -201,31 +209,11 @@ export const orderApi = {
       cart: formattedCart,
     };
 
-    // WORKAROUND: The backend has a bug where it fails to commit order items 
-    // for new orders (unless it's a delivery order with an assigned rider).
-    // However, the `appendOrderItems` endpoint DOES commit items correctly.
-    // To fix this without touching the backend, we first create the order with an empty cart
-    // (which sets up the order, fees, etc.), and then immediately append the items 
-    // to correctly save them to the database and update the total_amount.
-    
-    const emptyCartPayload = {
-      ...fullPayload,
-      cart: []
-    };
-
     const res = await fetchWithTimeout(`${API_BASE_URL}/api/orders?restaurant_id=${payload.restaurant_id}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(emptyCartPayload),
+      body: JSON.stringify(fullPayload),
     });
-
-    if (res && res.dbOrderId && formattedCart.length > 0) {
-      try {
-        await orderApi.appendOrderItems(res.dbOrderId, fullPayload);
-      } catch (err) {
-        console.error("Failed to append items to workaround backend issue:", err);
-      }
-    }
 
     return res;
   },
@@ -368,4 +356,41 @@ export const deliveryApi = {
     fetchWithTimeout(
       `${API_BASE_URL}/api/v1/public/orders/${encodeURIComponent(orderId)}/tracking`,
     ),
+};
+
+/**
+ * Catering Order Endpoints
+ */
+export const cateringOrderApi = {
+  /** GET /api/v1/public/customers/{customerId}/catering-orders */
+  getCateringOrders: (customerId: number) => {
+    if (!customerId) throw new Error("customerId is required");
+    return fetchWithTimeout(`${API_BASE_URL}/api/v1/public/customers/${customerId}/catering-orders`);
+  },
+
+  /** POST /api/v1/public/catering/orders/{orderId}/balance-payment */
+  startBalancePayment: (orderId: number, paymentAmount: number) => {
+    if (!orderId) throw new Error("orderId is required");
+    return fetchWithTimeout(`${API_BASE_URL}/api/v1/public/catering/orders/${orderId}/balance-payment`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ payment_amount: paymentAmount }),
+    });
+  },
+
+  /** POST /api/v1/public/catering/orders/{orderId}/balance-payment/verify */
+  verifyBalancePayment: (orderId: number, payload: {
+    amount: number;
+    razorpay_order_id: string;
+    razorpay_payment_id: string;
+    razorpay_signature: string;
+    payment_method?: string;
+  }) => {
+    if (!orderId) throw new Error("orderId is required");
+    return fetchWithTimeout(`${API_BASE_URL}/api/v1/public/catering/orders/${orderId}/balance-payment/verify`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+  },
 };

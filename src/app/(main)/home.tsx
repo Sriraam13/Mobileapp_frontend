@@ -366,8 +366,6 @@ export default function Home() {
         const formattedCats = catData
           .filter((c: any) => {
             if (c.name.toLowerCase() === 'all') return false;
-            // Only show categories that belong to the current branch to hide unwanted/legacy ones
-            if (branchSuffix && !c.name.includes(branchSuffix)) return false;
             return true;
           })
           .map((c: any) => ({
@@ -378,15 +376,23 @@ export default function Home() {
         setCategories(formattedCats);
 
         // Fetch user profile to get used offers
-        if (phone) {
-          try {
-            const profileData = await customerApi.getProfile(phone);
+        try {
+          const { customerId, phone: authPhone } = useAuthStore.getState();
+          const targetPhone = phone || authPhone;
+          
+          if (customerId) {
+            const profileData = await customerApi.getProfileById(customerId);
             if (profileData.used_offers) {
               setUsedOffers(profileData.used_offers);
             }
-          } catch (e) {
-            // Silently ignore if profile is not found or fails
+          } else if (targetPhone) {
+            const profileData = await customerApi.getProfile(targetPhone);
+            if (profileData.used_offers) {
+              setUsedOffers(profileData.used_offers);
+            }
           }
+        } catch (e) {
+            // Silently ignore if profile is not found or fails
         }
       } catch (e) {
         console.error('Error fetching home screen data', e);
@@ -719,6 +725,14 @@ export default function Home() {
           >
             <Text style={[styles.tabText, activeTab === 'Delivery' && styles.activeTabText]}>Delivery</Text>
           </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.tabBtn, activeTab === 'Bulk' && styles.activeTabBtn]}
+            onPress={() => {
+              router.push('/(main)/bulk-catering');
+            }}
+          >
+            <Text style={[styles.tabText, activeTab === 'Bulk' && styles.activeTabText]}>Catering</Text>
+          </TouchableOpacity>
         </View>
 
         {/* Table Status Card for Dine-in */}
@@ -905,8 +919,8 @@ export default function Home() {
           visible={isScannerVisible}
           onRequestClose={handleCloseScanner}
         >
-          <View style={styles.scannerModalOverlay}>
-            <View style={styles.scannerModalContainer}>
+          <TouchableOpacity style={styles.scannerModalOverlay} activeOpacity={1} onPress={handleCloseScanner}>
+            <TouchableOpacity activeOpacity={1} style={styles.scannerModalContainer}>
               <View style={styles.modalHeader}>
                 <Text style={styles.modalTitle}>Scan Table QR Code</Text>
                 <TouchableOpacity onPress={handleCloseScanner}>
@@ -964,8 +978,8 @@ export default function Home() {
                   </Text>
                 </View>
               )}
-            </View>
-          </View>
+            </TouchableOpacity>
+          </TouchableOpacity>
         </Modal>
 
       </ScrollView>
@@ -1082,8 +1096,8 @@ export default function Home() {
         visible={customAlert.visible}
         onRequestClose={() => setCustomAlert(prev => ({ ...prev, visible: false }))}
       >
-        <View style={styles.alertOverlay}>
-          <View style={styles.alertBox}>
+        <TouchableOpacity style={styles.alertOverlay} activeOpacity={1} onPress={() => setCustomAlert(prev => ({ ...prev, visible: false }))}>
+          <TouchableOpacity activeOpacity={1} style={styles.alertBox}>
             <View style={[
               styles.alertIconBg,
               customAlert.type === 'success' && { backgroundColor: '#e6ffe6' },
@@ -1156,8 +1170,8 @@ export default function Home() {
                 </TouchableOpacity>
               )}
             </View>
-          </View>
-        </View>
+          </TouchableOpacity>
+        </TouchableOpacity>
       </Modal>
 
       {/* Cart Modal (Identical to Search / Menu screen) */}

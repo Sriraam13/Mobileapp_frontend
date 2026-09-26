@@ -5,8 +5,9 @@ import * as Location from 'expo-location';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
 import { useRestaurantStore } from '../../store';
+import { restaurantApi } from '../../services/apiService';
 
-const OUTLETS = [
+const FALLBACK_OUTLETS = [
   {
     id: "mugalivakkam",
     restaurant_id: 1,
@@ -43,16 +44,43 @@ export default function OutletSelectorScreen() {
   const [userLocation, setUserLocation] = useState<{lat: number, lng: number} | null>(null);
   const [statusText, setStatusText] = useState('');
   const [isLocating, setIsLocating] = useState(false);
-  const [outlets, setOutlets] = useState(OUTLETS.map(o => ({ ...o, dist: null as number | null })));
+  const [outlets, setOutlets] = useState<any[]>([]);
 
   useEffect(() => {
-    if (userLocation) {
-      let withDist = OUTLETS.map(o => ({
+    const fetchOutlets = async () => {
+      try {
+        const data = await restaurantApi.getRestaurants();
+        const apiOutlets = data.map((r: any) => ({
+          id: r.id.toString(),
+          restaurant_id: r.id,
+          name: r.name,
+          address: r.address || '',
+          lat: 13.0210, // Default lat since not in API
+          lng: 80.1614, // Default lng since not in API
+          open: true,
+          comingSoon: false,
+        }));
+        setOutlets(apiOutlets.map((o: any) => ({ ...o, dist: null })));
+      } catch (error) {
+        console.error('Failed to fetch restaurants:', error);
+        setOutlets(FALLBACK_OUTLETS.map(o => ({ ...o, dist: null })));
+      }
+    };
+    fetchOutlets();
+  }, []);
+
+  useEffect(() => {
+    if (userLocation && outlets.length > 0) {
+      // compute distances on current outlets
+      const sorted = [...outlets].map(o => ({
         ...o,
-        dist: haversineDistance(userLocation.lat, userLocation.lng, o.lat, o.lng)
-      }));
-      withDist.sort((a, b) => (a.dist || 0) - (b.dist || 0));
-      setTimeout(() => setOutlets(withDist), 0);
+        dist: o.lat && o.lng ? haversineDistance(userLocation.lat, userLocation.lng, o.lat, o.lng) : null
+      })).sort((a, b) => (a.dist || 0) - (b.dist || 0));
+      
+      // only update if different to avoid loop
+      if (sorted[0]?.id !== outlets[0]?.id || sorted[0]?.dist !== outlets[0]?.dist) {
+        setOutlets(sorted);
+      }
     }
   }, [userLocation]);
 
