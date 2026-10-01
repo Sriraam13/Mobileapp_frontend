@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { View, Text, StyleSheet, ScrollView, TextInput, TouchableOpacity, Image, ImageBackground, Platform, StatusBar, Alert, Modal, ActivityIndicator, Dimensions } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TextInput, TouchableOpacity, Image, ImageBackground, Platform, StatusBar, Alert, Modal, ActivityIndicator, Dimensions, RefreshControl } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useRouter, useLocalSearchParams } from 'expo-router';
@@ -43,7 +43,17 @@ export default function Home() {
   const subtotal = getSubtotal();
 
   const handleDineInOrder = async (payLater: boolean) => {
-    const activeTable = tableNumber || 'T-01';
+    if (!selectedOutlet?.restaurant_id) {
+      Alert.alert('No Restaurant Selected', 'Please select an outlet before ordering.', [
+        { text: 'Select Outlet', onPress: () => router.push('/outlet-selector') },
+      ]);
+      return;
+    }
+    const activeTable = tableNumber;
+    if (!activeTable) {
+      Alert.alert('No Table Selected', 'Please scan your table QR or enter a table number first.');
+      return;
+    }
     const rawCartItems = Object.values(cart).filter(item => item && item.quantity > 0);
     if (rawCartItems.length === 0) return;
 
@@ -60,7 +70,7 @@ export default function Home() {
       if (dineInSession.isActive && dineInSession.activeDbOrderId) {
         // Append items to current active dine in order
         await orderApi.appendOrderItems(dineInSession.activeDbOrderId, {
-          restaurant_id: selectedOutlet?.restaurant_id || 1,
+          restaurant_id: selectedOutlet.restaurant_id,
           cart: formattedCart,
           total_amount: subtotal,
           order_type: 'DINE_IN',
@@ -102,7 +112,7 @@ export default function Home() {
       } else if (payLater) {
         // Place initial dine-in order with Pay Later
         const res = await orderApi.createOrder({
-          restaurant_id: selectedOutlet?.restaurant_id || 1,
+          restaurant_id: selectedOutlet.restaurant_id,
           cart: formattedCart,
           subtotal: subtotal,
           total_amount: subtotal,
@@ -226,7 +236,19 @@ export default function Home() {
 
     return () => clearInterval(interval);
   }, [offersList.length]);
-  const [activeTab, setActiveTab] = useState('Dine-in');
+  const getInitialTab = () => {
+    if (orderType === 'Take Away') return 'Takeaway';
+    if (orderType === 'Delivery') return 'Delivery';
+    return 'Dine-in';
+  };
+  const [activeTab, setActiveTab] = useState(getInitialTab());
+
+  // Sync activeTab to orderType when user taps tabs
+  useEffect(() => {
+    if (activeTab === 'Takeaway' && orderType !== 'Take Away') setOrderType('Take Away');
+    else if (activeTab === 'Dine-in' && orderType !== 'Dine In') setOrderType('Dine In');
+    else if (activeTab === 'Delivery' && orderType !== 'Delivery') setOrderType('Delivery');
+  }, [activeTab]);
   const [popularDishes, setPopularDishes] = useState<any[]>([]);
   const [categories, setCategories] = useState<any[]>([]);
   const [selectedBranchName, setSelectedBranchName] = useState('Koramangala, Bangalore');
@@ -333,101 +355,129 @@ export default function Home() {
     }
   }, [params?.autoPromptQR]);
 
-  useEffect(() => {
-    const fetchData = async () => {
-      try {
-        // Retrieve selected restaurant ID
-        let restId = selectedOutlet?.restaurant_id ? Number(selectedOutlet.restaurant_id) : 1;
+  const [refreshing, setRefreshing] = useState(false);
 
-        if (selectedOutlet?.name) {
-          const cleanName = selectedOutlet.name.replace(/^Data Udipi\s*—\s*/i, '');
-          setSelectedBranchName(cleanName);
+  const fetchData = async () => {
+    try {
+      // Retrieve selected restaurant ID
+      let restId = selectedOutlet?.restaurant_id ? Number(selectedOutlet.restaurant_id) : 1;
+
+      if (selectedOutlet?.name) {
+        const cleanName = selectedOutlet.name.replace(/^Data Udipi\s*—\s*/i, '');
+        setSelectedBranchName(cleanName);
+      }
+
+      // Fetch popular dishes
+      const itemData = await menuApi.getItems(restId);
+      const formattedItems = itemData.slice(0, 5).map((item: any) => ({
+        id: item.id,
+        name: item.name,
+        desc: item.description,
+        price: item.price,
+        available: item.is_available ?? true,
+        image: getFullImageUrl(item.image_url, item.name),
+      }));
+      setPopularDishes(formattedItems);
+
+      // Fetch categories
+      const catData = await menuApi.getCategories(restId);
+      const categoryImageMap: Record<string, any> = {
+        'breakfast & dinner': require('../../../assets/images/categories/breakfast_dinner.jpg'),
+        'dosa varieties': require('../../../assets/images/categories/dosa_varieties.jpg'),
+        'evening snacks': require('../../../assets/images/categories/evening_snacks.jpg'),
+        'hot beverages': require('../../../assets/images/categories/hot_beverages.jpg'),
+        'lunch': require('../../../assets/images/categories/lunch.jpg'),
+        'noodles': { uri: 'https://images.unsplash.com/photo-1585032226651-759b368d7246?w=500&auto=format&fit=crop&q=80' },
+        'rice varieties': require('../../../assets/images/categories/rice_varieties.jpg'),
+        'salad': require('../../../assets/images/categories/salad.jpg'),
+        'soups': require('../../../assets/images/categories/soups.jpg'),
+        'tandoori breads': require('../../../assets/images/categories/tandoori_breads.jpg'),
+        'tandoori side dishes': require('../../../assets/images/categories/tandoori_side_dishes.jpg'),
+        'tandoori starters': require('../../../assets/images/categories/tandoori_starters.jpg'),
+        'raitha': require('../../../assets/images/categories/raitha.jpg'),
+      };
+      const getCategoryImage = (name: string) => {
+        // Remove things like (MGR Nagar) and standardize typos like 'varities'
+        const normalized = name.toLowerCase().replace(/\s*\(.*?\)\s*/g, '').replace('varities', 'varieties').trim();
+        return categoryImageMap[normalized] || { uri: 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=500&auto=format&fit=crop&q=80' };
+      };
+      const getCategoryDisplayName = (c: any) => {
+        if (c.description === 'South Indian' || c.description === 'North Indian') {
+          // Strip the (MGR Nagar) or (Mugalivakkam) for a cleaner customer UI
+          return c.name.replace(/\s*\(.*?\)\s*/g, '').trim();
         }
+        if (c.name.startsWith('mugalivakkam_') || c.name.startsWith('mgrnagar_')) {
+          return c.description || c.name;
+        }
+        return c.name;
+      };
 
-        // Fetch popular dishes
-        const itemData = await menuApi.getItems(restId);
-        const formattedItems = itemData.slice(0, 5).map((item: any) => ({
-          id: item.id,
-          name: item.name,
-          desc: item.description,
-          price: item.price,
-          available: item.is_available ?? true,
-          image: getFullImageUrl(item.image_url, item.name),
-        }));
-        setPopularDishes(formattedItems);
+      const branchSuffix = selectedOutlet?.name ? selectedOutlet.name.replace(/^Data Udipi\s*[-—]\s*/i, '').trim() : '';
 
-        // Fetch categories
-        const catData = await menuApi.getCategories(restId);
-        const categoryImageMap: Record<string, any> = {
-          'breakfast & dinner': require('../../../assets/images/categories/breakfast_dinner.jpg'),
-          'dosa varieties': require('../../../assets/images/categories/dosa_varieties.jpg'),
-          'evening snacks': require('../../../assets/images/categories/evening_snacks.jpg'),
-          'hot beverages': require('../../../assets/images/categories/hot_beverages.jpg'),
-          'lunch': require('../../../assets/images/categories/lunch.jpg'),
-          'noodles': { uri: 'https://images.unsplash.com/photo-1585032226651-759b368d7246?w=500&auto=format&fit=crop&q=80' },
-          'rice varieties': require('../../../assets/images/categories/rice_varieties.jpg'),
-          'salad': require('../../../assets/images/categories/salad.jpg'),
-          'soups': require('../../../assets/images/categories/soups.jpg'),
-          'tandoori breads': require('../../../assets/images/categories/tandoori_breads.jpg'),
-          'tandoori side dishes': require('../../../assets/images/categories/tandoori_side_dishes.jpg'),
-          'tandoori starters': require('../../../assets/images/categories/tandoori_starters.jpg'),
-          'raitha': require('../../../assets/images/categories/raitha.jpg'),
-        };
-        const getCategoryImage = (name: string) => {
-          // Remove things like (MGR Nagar) and standardize typos like 'varities'
-          const normalized = name.toLowerCase().replace(/\s*\(.*?\)\s*/g, '').replace('varities', 'varieties').trim();
-          return categoryImageMap[normalized] || { uri: 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=500&auto=format&fit=crop&q=80' };
-        };
-        const getCategoryDisplayName = (c: any) => {
-          if (c.description === 'South Indian' || c.description === 'North Indian') {
-            // Strip the (MGR Nagar) or (Mugalivakkam) for a cleaner customer UI
-            return c.name.replace(/\s*\(.*?\)\s*/g, '').trim();
-          }
-          if (c.name.startsWith('mugalivakkam_') || c.name.startsWith('mgrnagar_')) {
-            return c.description || c.name;
-          }
-          return c.name;
-        };
+      const uniqueCatNames = new Set<string>();
 
-        const branchSuffix = selectedOutlet?.name ? selectedOutlet.name.replace(/^Data Udipi\s*[-—]\s*/i, '').trim() : '';
-
-        const formattedCats = catData
-          .filter((c: any) => {
-            if (c.name.toLowerCase() === 'all') return false;
-            return true;
-          })
-          .map((c: any) => ({
-            id: c.id,
-            name: getCategoryDisplayName(c),
-            image: getCategoryImage(c.name)
-          }));
-        setCategories(formattedCats);
-
-        // Fetch user profile to get used offers
-        try {
-          const { customerId, phone: authPhone } = useAuthStore.getState();
-          const targetPhone = phone || authPhone;
+      const formattedCats = catData
+        .filter((c: any) => {
+          if (c.name.toLowerCase() === 'all') return false;
           
-          if (customerId) {
-            const profileData = await customerApi.getProfileById(customerId);
-            if (profileData.used_offers) {
-              setUsedOffers(profileData.used_offers);
-            }
-          } else if (targetPhone) {
-            const profileData = await customerApi.getProfile(targetPhone);
-            if (profileData.used_offers) {
-              setUsedOffers(profileData.used_offers);
-            }
+          // Hide internal region categories
+          if (c.name.includes('_all') || c.name.includes('_breakfast') || c.name.includes('_lunch') || c.name.includes('_dinner')) {
+            return false;
           }
-        } catch (e) {
-            // Silently ignore if profile is not found or fails
+          
+          const displayName = getCategoryDisplayName(c).trim();
+          const lowerName = displayName.toLowerCase();
+          
+          // Hide 'all menu' entirely
+          if (lowerName === 'all menu') return false;
+          
+          // Deduplicate categories with the exact same display name
+          if (uniqueCatNames.has(lowerName)) {
+            return false;
+          }
+          uniqueCatNames.add(lowerName);
+          return true;
+        })
+        .map((c: any) => ({
+          id: c.id,
+          name: getCategoryDisplayName(c),
+          image: getCategoryImage(c.name)
+        }));
+      setCategories(formattedCats);
+
+      // Fetch user profile to get used offers
+      try {
+        const { customerId, phone: authPhone } = useAuthStore.getState();
+        const targetPhone = phone || authPhone;
+        
+        if (customerId) {
+          const profileData = await customerApi.getProfileById(customerId);
+          if (profileData.used_offers) {
+            setUsedOffers(profileData.used_offers);
+          }
+        } else if (targetPhone) {
+          const profileData = await customerApi.getProfile(targetPhone);
+          if (profileData.used_offers) {
+            setUsedOffers(profileData.used_offers);
+          }
         }
       } catch (e) {
-        console.error('Error fetching home screen data', e);
+          // Silently ignore if profile is not found or fails
       }
-    };
+    } catch (e) {
+      console.error('Error fetching home screen data', e);
+    }
+  };
+
+  useEffect(() => {
     fetchData();
-  }, []);
+  }, [selectedOutlet]);
+
+  const onRefresh = async () => {
+    setRefreshing(true);
+    await fetchData();
+    setRefreshing(false);
+  };
 
   const verifyTableAndEnter = async (tableNum: string) => {
     if (!tableNum.trim()) return;
@@ -670,12 +720,15 @@ export default function Home() {
       );
       return;
     }
+    
+    const catName = categories.find(c => c.id === catId)?.name || 'all';
+    
     router.push({
       pathname: '/menu',
       params: {
         orderType: activeTab === 'Dine-in' ? 'Dine In' : activeTab,
         tableNumber: activeTab === 'Dine-in' ? (tableNumber || '') : '',
-        categoryId: catId.toString()
+        categoryName: catName
       }
     });
   };
@@ -683,7 +736,13 @@ export default function Home() {
   return (
     <SafeAreaView style={styles.container}>
       <StatusBar barStyle='dark-content' backgroundColor='#fff' />
-      <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+      <ScrollView
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={['#ff4500']} />
+        }
+      >
 
         {/* Header */}
         <View style={styles.header}>
@@ -894,7 +953,7 @@ export default function Home() {
                   params: {
                     orderType: activeTab === 'Dine-in' ? 'Dine In' : activeTab,
                     tableNumber: activeTab === 'Dine-in' ? (tableNumber || '') : '',
-                    categoryId: cat.id.toString()
+                    categoryName: cat.name
                   }
                 });
               }}

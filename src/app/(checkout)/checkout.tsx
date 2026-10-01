@@ -68,9 +68,24 @@ export default function CheckoutScreen() {
             image: item.image,
           }));
 
-          const activeTable = dineInSession.tableNumber || tableNumber || 'T-01';
+          const restaurantId = selectedOutlet?.restaurant_id;
+          if (!restaurantId) {
+            setSubmitting(false);
+            Alert.alert('No Restaurant Selected', 'Please select a restaurant outlet before ordering.', [
+              { text: 'Select Outlet', onPress: () => router.push('/outlet-selector') },
+            ]);
+            return;
+          }
+
+          const activeTable = dineInSession.tableNumber || tableNumber;
+          if (!activeTable) {
+            setSubmitting(false);
+            Alert.alert('No Table Selected', 'Please scan your table QR or enter a table number before placing a Dine-In order.');
+            return;
+          }
+
           await orderApi.appendOrderItems(dineInSession.activeDbOrderId, {
-            restaurant_id: selectedOutlet?.restaurant_id || 1,
+            restaurant_id: restaurantId,
             cart: formattedCart,
             total_amount: Math.max(finalToPay, 0),
             order_type: 'DINE_IN',
@@ -128,9 +143,24 @@ export default function CheckoutScreen() {
             image: item.image,
           }));
 
-          const activeTable = tableNumber || 'T-01';
+          const restaurantId = selectedOutlet?.restaurant_id;
+          if (!restaurantId) {
+            setSubmitting(false);
+            Alert.alert('No Restaurant Selected', 'Please select a restaurant outlet before ordering.', [
+              { text: 'Select Outlet', onPress: () => router.push('/outlet-selector') },
+            ]);
+            return;
+          }
+
+          const activeTable = tableNumber;
+          if (!activeTable) {
+            setSubmitting(false);
+            Alert.alert('No Table Selected', 'Please scan your table QR or enter a table number before placing a Dine-In order.');
+            return;
+          }
+
           const res = await orderApi.createOrder({
-            restaurant_id: selectedOutlet?.restaurant_id || 1,
+            restaurant_id: restaurantId,
             cart: formattedCart,
             subtotal,
             gst,

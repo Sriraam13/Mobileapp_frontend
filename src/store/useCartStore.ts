@@ -54,6 +54,7 @@ interface CartState {
   clearCart: () => void;
   setOrderType: (type: OrderType) => void;
   setTableNumber: (tableNumber: string) => void;
+  clearTableNumber: () => void;
   setTableStatus: (tableStatus: string | null) => void;
   applyDiscount: (code: string) => void;
   removeDiscount: () => void;
@@ -122,8 +123,16 @@ export const useCartStore = create<CartState>()(
   }),
 
   clearCart: () => set({ items: {}, discountCode: null }),
-  setOrderType: (type) => set({ orderType: type }),
+  setOrderType: (type) => set((state) => {
+    // When leaving Dine In, clear the table number so it cannot leak into
+    // Takeaway or Delivery payloads.
+    if (state.orderType === 'Dine In' && type !== 'Dine In') {
+      return { orderType: type, tableNumber: '', tableStatus: null };
+    }
+    return { orderType: type };
+  }),
   setTableNumber: (tableNumber) => set({ tableNumber }),
+  clearTableNumber: () => set({ tableNumber: '', tableStatus: null }),
   setTableStatus: (tableStatus) => set({ tableStatus }),
   applyDiscount: (code) => set({ discountCode: code }),
   removeDiscount: () => set({ discountCode: null }),

@@ -312,7 +312,7 @@ export default function RazorpayScreen() {
                   params: {
                     orderId: res.orderId || (params.orderId as string),
                     dbOrderId: dbId,
-                    tableNumber: res.tableNumber || 'T-01',
+                    tableNumber: res.tableNumber || (params.tableNumber as string) || '',
                     totalAmount: (res.totalAmount || amt).toString(),
                     paymentMethod: 'Razorpay',
                     cartItems: JSON.stringify(res.items || []),

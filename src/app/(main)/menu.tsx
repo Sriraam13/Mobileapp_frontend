@@ -14,7 +14,7 @@ export default function App() {
   const { phone } = useAuthStore();
   const dineInSession = useDineInSessionStore();
   const [isPlacingOrder, setIsPlacingOrder] = useState(false);
-  const params = useLocalSearchParams<{ orderType?: string; tableNumber?: string; categoryId?: string; search?: string }>();
+  const params = useLocalSearchParams<{ orderType?: string; tableNumber?: string; categoryId?: string; categoryName?: string; search?: string }>();
   const insets = useSafeAreaInsets();
   const { items: cart, addItem, removeItem, incrementQuantity, decrementQuantity, orderType, setOrderType, tableNumber, setTableNumber, getItemCount, getSubtotal, clearCart } = useCartStore();
   
@@ -49,7 +49,7 @@ export default function App() {
   const [menuItems, setMenuItems] = useState<any[]>([]);
   const [regions, setRegions] = useState<string[]>(["All Regions"]);
   const [activeRegion, setActiveRegion] = useState("All Regions");
-  const [activeCat, setActiveCat] = useState((params.categoryId as string) || "all");
+  const [activeCat, setActiveCat] = useState((params.categoryName as string) || (params.categoryId as string) || "all");
   const [searchQuery, setSearchQuery] = useState((params.search as string) || "");
   const [isCartModalVisible, setIsCartModalVisible] = useState(false);
   const [selectedItem, setSelectedItem] = useState<any>(null);
@@ -57,6 +57,7 @@ export default function App() {
   const showAgent = useVoiceAgentStore((state) => state.showAgent);
   const [availabilityFilter, setAvailabilityFilter] = useState("All Items");
   const [priceSort, setPriceSort] = useState("Default");
+  const [isLoading, setIsLoading] = useState(true);
   
   const { selectedOutlet } = useRestaurantStore();
   const restaurantId = selectedOutlet?.restaurant_id;
@@ -242,6 +243,8 @@ export default function App() {
             setMenuItems(formattedItems);
         } catch (e) {
             console.error("Error fetching menu data", e);
+        } finally {
+            setIsLoading(false);
         }
     };
     fetchMenu();
@@ -354,9 +357,9 @@ export default function App() {
       if (itemCat?.region !== activeRegion) return false;
     }
     
-    // Category match
-    if (activeCat !== "all") {
-      if (item.category !== activeCat) return false;
+    // Category match by label
+    if (activeCat.toLowerCase() !== "all") {
+      if (itemCat?.label !== activeCat) return false;
     }
     
     // Search match
@@ -427,10 +430,10 @@ export default function App() {
           {categoriesToShow.map(cat => (
             <TouchableOpacity 
               key={cat.id} 
-              style={[styles.catTab, activeCat === cat.id && styles.catTabActive]}
-              onPress={() => setActiveCat(cat.id)}
+              style={[styles.catTab, activeCat.toLowerCase() === cat.label.toLowerCase() && styles.catTabActive]}
+              onPress={() => setActiveCat(cat.label)}
             >
-              <Text style={[styles.catText, activeCat === cat.id && styles.catTextActive]}>{cat.label}</Text>
+              <Text style={[styles.catText, activeCat.toLowerCase() === cat.label.toLowerCase() && styles.catTextActive]}>{cat.label}</Text>
             </TouchableOpacity>
           ))}
         </ScrollView>
@@ -448,8 +451,14 @@ export default function App() {
         />
       ) : (
         <View style={styles.emptyContainer}>
-          <Ionicons name="fast-food-outline" size={48} color="#ccc" />
-          <Text style={styles.emptyText}>No items found</Text>
+          {isLoading ? (
+            <ActivityIndicator size="large" color="#ff4500" />
+          ) : (
+            <>
+              <Ionicons name="fast-food-outline" size={48} color="#ccc" />
+              <Text style={styles.emptyText}>No items found</Text>
+            </>
+          )}
         </View>
       )}
 
@@ -461,20 +470,6 @@ export default function App() {
         {cartItemCount > 0 && (
           <ViewCartButton />
         )}
-
-        {/* Talk to Chef button */}
-        <TouchableOpacity style={styles.talkToChefBtn} onPress={() => showAgent()}>
-          <View style={styles.chefIconContainer}>
-             <Image source={require('../../../assets/images/chef_mascot.png')} style={styles.talkChefImg} resizeMode="contain" />
-          </View>
-          <View style={styles.talkChefTextCol}>
-            <Text style={styles.talkChefTitle}>Talk to Chef</Text>
-            <View style={styles.talkChefSubRow}>
-              <Ionicons name="mic-outline" size={12} color="#666" />
-              <Text style={styles.talkChefSub}>Tap to speak</Text>
-            </View>
-          </View>
-        </TouchableOpacity>
       </View>
 
       {/* Cart Modal */}

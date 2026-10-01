@@ -1,3 +1,4 @@
+﻿import { API_BASE_URL } from '../../constants/api';
 import React, { useState } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
@@ -85,7 +86,7 @@ export default function AddExtras() {
   const [selectedServices, setSelectedServices] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
 
-  const BASE_URL = process.env.EXPO_PUBLIC_API_BASE_URL || 'http://10.145.32.246:8001';
+  const BASE_URL = API_BASE_URL;
   const authHeaders = {
     'Content-Type': 'application/json',
     ...(auth.token ? { 'Authorization': `Bearer ${auth.token}` } : {})
@@ -323,3 +324,4 @@ const styles = StyleSheet.create({
   reviewBtn: { backgroundColor: '#2d2d2d', paddingVertical: 16, borderRadius: 12, alignItems: 'center' },
   reviewBtnText: { color: '#fff', fontSize: 16, fontWeight: 'bold' },
 });
+

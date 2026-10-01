@@ -1,3 +1,4 @@
+import { API_BASE_URL } from '../../constants/api';
 import React, { useState, useEffect } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
@@ -66,7 +67,7 @@ export default function CustomiseMenu() {
   const [addModalVisible, setAddModalVisible] = useState(false);
   const [addOptions, setAddOptions] = useState<SwapOption[]>([]);
 
-  const BASE_URL = process.env.EXPO_PUBLIC_API_BASE_URL || 'http://10.145.32.246:8001';
+  const BASE_URL = API_BASE_URL;
   const authHeaders = {
     'Content-Type': 'application/json',
     ...(auth.token ? { 'Authorization': `Bearer ${auth.token}` } : {})
@@ -523,3 +524,4 @@ const styles = StyleSheet.create({
   swapOptionName: { flex: 1, fontSize: 14, color: '#333', fontWeight: '500' },
   priceChange: { fontSize: 13, fontWeight: '700', marginLeft: 8 },
 });
+

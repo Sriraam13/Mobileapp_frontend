@@ -1,3 +1,4 @@
+﻿import { API_BASE_URL } from '../../constants/api';
 import React, { useState, useEffect } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
@@ -36,7 +37,7 @@ export default function BalancePayment() {
     setAlertVisible(true);
   };
 
-  const BASE_URL = process.env.EXPO_PUBLIC_API_BASE_URL || 'http://10.145.32.246:8001';
+  const BASE_URL = API_BASE_URL;
   const authHeaders = {
     'Content-Type': 'application/json',
     ...(auth.token ? { 'Authorization': `Bearer ${auth.token}` } : {})
@@ -365,3 +366,4 @@ const styles = StyleSheet.create({
   payBtn: { backgroundColor: '#ff4500', paddingVertical: 17, borderRadius: 14, alignItems: 'center' },
   payBtnText: { color: '#fff', fontSize: 16, fontWeight: 'bold', letterSpacing: 0.5 },
 });
+

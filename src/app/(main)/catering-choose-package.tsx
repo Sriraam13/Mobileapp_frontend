@@ -1,3 +1,4 @@
+import { API_BASE_URL } from '../../constants/api';
 import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, SafeAreaView, Platform, StatusBar, ActivityIndicator, Alert } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
@@ -49,7 +50,7 @@ export default function ChoosePackage() {
 
   const fetchPackages = async () => {
     try {
-      const baseUrl = process.env.EXPO_PUBLIC_API_BASE_URL || 'http://10.145.32.246:8001';
+      const baseUrl = API_BASE_URL;
       const response = await fetch(`${baseUrl}/api/v1/public/catering/packages`);
       const data = await response.json();
       setPackages(data);
@@ -66,7 +67,7 @@ export default function ChoosePackage() {
     
     setCreatingSession(true);
     try {
-      const baseUrl = process.env.EXPO_PUBLIC_API_BASE_URL || 'http://10.145.32.246:8001';
+      const baseUrl = API_BASE_URL;
       const headers = {
         'Content-Type': 'application/json',
         ...(auth.token ? { 'Authorization': `Bearer ${auth.token}` } : {})
@@ -476,3 +477,4 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
   }
 });
+

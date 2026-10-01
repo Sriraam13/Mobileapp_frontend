@@ -8,13 +8,20 @@
     "scheme": "restaurantnative",
     "userInterfaceStyle": "automatic",
     "ios": {
-      "icon": "./assets/images/icon.jpeg"
+      "icon": "./assets/images/icon.jpeg",
+      "infoPlist": {
+        "UIBackgroundModes": [
+          "voip"
+        ],
+        "NSMicrophoneUsageDescription": "Allow Data Udipi App to access your microphone for the voice assistant."
+      }
     },
     "android": {
       "predictiveBackGestureEnabled": false,
       "permissions": [
         "android.permission.CAMERA",
         "android.permission.RECORD_AUDIO",
+        "android.permission.MODIFY_AUDIO_SETTINGS",
         "android.permission.ACCESS_FINE_LOCATION",
         "android.permission.ACCESS_COARSE_LOCATION"
       ],
@@ -57,7 +64,11 @@
         "expo-build-properties",
         {
           "android": {
-            "usesCleartextTraffic": true
+            "usesCleartextTraffic": true,
+            "minSdkVersion": 24
+          },
+          "ios": {
+            "deploymentTarget": "15.1"
           }
         }
       ]

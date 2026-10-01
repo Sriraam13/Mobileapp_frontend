@@ -21,7 +21,8 @@ import {
   useDineInSessionStore,
   useRestaurantStore,
   useFavoritesStore,
-  usePaymentMethodStore
+  usePaymentMethodStore,
+  usePaymentStore
 } from '../../store';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -208,6 +209,7 @@ export default function Profile() {
           onPress: () => {
             useAuthStore.getState().logout();
             useCartStore.getState().clearCart();
+            useCartStore.getState().clearTableNumber();
             useAddressStore.getState().clearAddresses();
             useOrderStore.getState().clearCurrentOrder();
             useLiveOrderStore.getState().setPollingActive(false);
@@ -216,6 +218,7 @@ export default function Profile() {
             useRestaurantStore.getState().setSelectedOutlet(null);
             useFavoritesStore.getState().clearFavorites();
             usePaymentMethodStore.getState().clearPaymentMethods();
+            usePaymentStore.getState().clearPayment();
             router.replace('/login');
           },
         },

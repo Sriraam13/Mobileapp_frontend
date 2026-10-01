@@ -1,3 +1,4 @@
+import { API_BASE_URL } from '../../constants/api';
 import React, { useEffect, useState } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
@@ -64,7 +65,7 @@ export default function CateringOrderSuccess() {
 
   const fetchOrderDetails = async () => {
     try {
-      const baseUrl = process.env.EXPO_PUBLIC_API_BASE_URL || 'http://10.145.32.246:8001';
+      const baseUrl = API_BASE_URL;
       const headers: Record<string, string> = {
         'Content-Type': 'application/json',
         ...(auth.token ? { Authorization: `Bearer ${auth.token}` } : {}),
@@ -87,8 +88,8 @@ export default function CateringOrderSuccess() {
   // Use live order data if available, fallback to passed params
   const displayOrder = {
     id: order?.id || orderId,
-    packageName: order?.package_name || (params.packageName as string) || '—',
-    eventName: order?.event_name || (params.eventName as string) || '—',
+    packageName: order?.package_name || (params.packageName as string) || '-',
+    eventName: order?.event_name || (params.eventName as string) || '-',
     guestCount: order?.guest_count || parseInt(params.guestCount as string || '0', 10),
     paidAmount: order?.paid_amount ?? paidAmount,
     balance: order?.balance_amount ?? (totalAmount - paidAmount),
@@ -162,7 +163,7 @@ export default function CateringOrderSuccess() {
                   <Text style={styles.rowLabel}>Package</Text>
                   <Text style={[styles.rowValue, { flex: 1, textAlign: 'right' }]}>{displayOrder.packageName}</Text>
                 </View>
-                {displayOrder.eventName && displayOrder.eventName !== '—' && (
+                {displayOrder.eventName && displayOrder.eventName !== '-' && (
                   <View style={styles.row}>
                     <Text style={styles.rowLabel}>Event</Text>
                     <Text style={styles.rowValue}>{displayOrder.eventName}</Text>
@@ -466,3 +467,4 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
 });
+

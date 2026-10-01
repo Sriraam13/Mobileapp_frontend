@@ -1,3 +1,4 @@
+import { API_BASE_URL } from '../../constants/api';
 import React, { useState, useEffect } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
@@ -22,7 +23,7 @@ export default function CateringOrderDetails() {
 
   const fetchOrderDetails = async () => {
     try {
-      const BASE_URL = process.env.EXPO_PUBLIC_API_BASE_URL || 'http://10.145.32.246:8001';
+      const BASE_URL = API_BASE_URL;
       const res = await fetch(`${BASE_URL}/api/v1/public/catering/orders/${orderId}`, {
         headers: {
           'Content-Type': 'application/json',
@@ -224,3 +225,4 @@ const styles = StyleSheet.create({
   payHistAmt: { fontSize: 14, fontWeight: 'bold', color: '#333', marginBottom: 4 },
   payHistStatus: { fontSize: 12, fontWeight: '600' }
 });
+

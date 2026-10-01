@@ -15,7 +15,8 @@ const FALLBACK_OUTLETS = [
     address: "Mount-Poonamallee Road, Mugalivakkam, Chennai 600125",
     lat: 13.0210,
     lng: 80.1614,
-    open: true
+    open: true,
+    comingSoon: false
   },
   {
     id: "mgrnagar",
@@ -24,8 +25,18 @@ const FALLBACK_OUTLETS = [
     address: "Anna Main Road, MGR Nagar, Chennai 600078",
     lat: 13.0350,
     lng: 80.1970,
-    open: false,
-    comingSoon: true
+    open: true,
+    comingSoon: false
+  },
+  {
+    id: "banglore",
+    restaurant_id: 3,
+    name: "Data Udipi- Banglore",
+    address: "Ganga block 1st cross, Electronic City, Survey No.33, 12th Cross Rd, Bettadasanapura, Karnataka 560100",
+    lat: 12.8452,
+    lng: 77.6602,
+    open: true,
+    comingSoon: false
   }
 ];
 
@@ -50,16 +61,24 @@ export default function OutletSelectorScreen() {
     const fetchOutlets = async () => {
       try {
         const data = await restaurantApi.getRestaurants();
-        const apiOutlets = data.map((r: any) => ({
-          id: r.id.toString(),
-          restaurant_id: r.id,
-          name: r.name,
-          address: r.address || '',
-          lat: 13.0210, // Default lat since not in API
-          lng: 80.1614, // Default lng since not in API
-          open: true,
-          comingSoon: false,
-        }));
+        const apiOutlets = data.map((r: any) => {
+          // Attempt to match by ID or by name to get appropriate coordinates
+          const fallback = FALLBACK_OUTLETS.find(f => 
+            f.restaurant_id === r.id || 
+            r.name.toLowerCase().includes(f.name.split(' — ')[1]?.toLowerCase() || f.name.split('- ')[1]?.toLowerCase() || 'unknown')
+          );
+          
+          return {
+            id: r.id.toString(),
+            restaurant_id: r.id,
+            name: r.name,
+            address: r.address || '',
+            lat: fallback?.lat ?? 13.0210,
+            lng: fallback?.lng ?? 80.1614,
+            open: fallback?.open ?? true,
+            comingSoon: fallback?.comingSoon ?? false,
+          };
+        });
         setOutlets(apiOutlets.map((o: any) => ({ ...o, dist: null })));
       } catch (error) {
         console.error('Failed to fetch restaurants:', error);
