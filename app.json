@@ -5,11 +5,6 @@
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.jpeg",
-    "splash": {
-      "image": "./assets/images/frontpage_bg.png",
-      "resizeMode": "cover",
-      "backgroundColor": "#000000"
-    },
     "scheme": "restaurantnative",
     "userInterfaceStyle": "automatic",
     "ios": {

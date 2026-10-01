@@ -6,23 +6,7 @@ const getApiUrl = () => {
   if (envUrl) {
     return envUrl;
   }
-
-  // If in production and no explicit URL is provided, fail fast.
-  if (!__DEV__) {
-    throw new Error('EXPO_PUBLIC_API_BASE_URL is not configured for production build.');
-  }
-
-  // Fallbacks for development ONLY
-  const hostUri = Constants.expoConfig?.hostUri;
-  if (hostUri) {
-    const ip = hostUri.split(':')[0];
-    return `http://${ip}:8001`;
-  }
-
-  if (Platform.OS === 'android') {
-    return 'http://10.0.2.2:8001';
-  }
-  return 'http://localhost:8001';
+  return 'http://dev-api.dataudipi.com';
 };
 
 export const API_BASE_URL = getApiUrl();
