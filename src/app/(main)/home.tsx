@@ -4,45 +4,186 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { customerApi, menuApi, tableApi } from '../../services/apiService';
+import { customerApi, menuApi, tableApi, orderApi } from '../../services/apiService';
 import { getFullImageUrl } from '../../constants/api';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { useCartStore } from '../../store/useCartStore';
 import { useAuthStore } from '../../store/useAuthStore';
-import { useRestaurantStore } from '../../store';
+import { useRestaurantStore, useOrderStore, useLiveOrderStore } from '../../store';
+import { useDineInSessionStore } from '../../store/useDineInSessionStore';
+import BottomNavBar from '../../components/layout/BottomNavBar';
+import ViewCartButton from '../../components/layout/ViewCartButton';
+import DineInActiveBanner from '../../components/DineInActiveBanner';
 
 export default function Home() {
   const router = useRouter();
   const params = useLocalSearchParams<{ autoPromptQR?: string }>();
   const { phone } = useAuthStore();
   const { selectedOutlet } = useRestaurantStore();
+  const dineInSession = useDineInSessionStore();
   const scrollRef = useRef<ScrollView>(null);
   const slideIndex = useRef(0);
   const [selectedItem, setSelectedItem] = useState<any>(null);
   const insets = useSafeAreaInsets();
-  const { items: cart, addItem, incrementQuantity, decrementQuantity } = useCartStore();
+  const { 
+    items: cart, 
+    addItem, 
+    removeItem, 
+    incrementQuantity, 
+    decrementQuantity, 
+    getItemCount, 
+    getSubtotal, 
+    orderType, 
+    setOrderType,
+    clearCart,
+  } = useCartStore();
+  const [isCartModalVisible, setIsCartModalVisible] = useState(false);
+  const [isPlacingOrder, setIsPlacingOrder] = useState(false);
+  const cartItemCount = getItemCount();
+  const subtotal = getSubtotal();
 
-  const handleIncrement = (itemId: number | string) => {
-    const numId = Number(itemId);
-    const item = popularDishes.find(i => i.id === numId || i.id === itemId);
-    if (!item) return;
-    if (cart[numId]) {
-      incrementQuantity(numId);
+  const handleDineInOrder = async (payLater: boolean) => {
+    const activeTable = tableNumber || 'T-01';
+    const rawCartItems = Object.values(cart).filter(item => item && item.quantity > 0);
+    if (rawCartItems.length === 0) return;
+
+    setIsPlacingOrder(true);
+    try {
+      const formattedCart = rawCartItems.map(item => ({
+        id: Number(item.id),
+        quantity: item.quantity,
+        price: item.price,
+        name: item.name,
+        image: item.image,
+      }));
+
+      if (dineInSession.isActive && dineInSession.activeDbOrderId) {
+        // Append items to current active dine in order
+        await orderApi.appendOrderItems(dineInSession.activeDbOrderId, {
+          restaurant_id: selectedOutlet?.restaurant_id || 1,
+          cart: formattedCart,
+          total_amount: subtotal,
+          order_type: 'DINE_IN',
+          table_number: activeTable,
+          phone: phone || '',
+        });
+
+        const newAllItems = [...dineInSession.orderedItems, ...formattedCart];
+        const newTotal = (dineInSession.totalAmount || 0) + subtotal;
+        dineInSession.appendItemsToOrder(formattedCart, subtotal);
+        useOrderStore.getState().addPastOrder({
+          orderId: dineInSession.activeOrderId ?? '',
+          dbOrderId: String(dineInSession.activeDbOrderId ?? ''),
+          date: new Date().toISOString(),
+          total: newTotal,
+          itemsCount: newAllItems.length,
+          status: 'Preparing',
+          payment_status: 'Pending',
+          table_number: activeTable,
+          order_type: 'Dine In',
+          customer_phone: phone ?? '',
+          items: newAllItems,
+        });
+        useLiveOrderStore.getState().setLiveOrder('Dine In', dineInSession.activeOrderId ?? '', String(dineInSession.activeDbOrderId ?? ''), 'Preparing');
+        clearCart();
+        setIsCartModalVisible(false);
+
+        // Immediately navigate to Track Order status screen
+        router.push({
+          pathname: '/track-order',
+          params: {
+            orderId: dineInSession.activeOrderId,
+            dbOrderId: String(dineInSession.activeDbOrderId),
+            tableNumber: activeTable,
+            orderType: 'Dine In',
+            cart: JSON.stringify(newAllItems),
+          }
+        });
+      } else if (payLater) {
+        // Place initial dine-in order with Pay Later
+        const res = await orderApi.createOrder({
+          restaurant_id: selectedOutlet?.restaurant_id || 1,
+          cart: formattedCart,
+          subtotal: subtotal,
+          total_amount: subtotal,
+          order_type: 'DINE_IN',
+          table_number: activeTable,
+          payment_method: 'Pay Later',
+          phone: phone || '',
+        });
+
+        dineInSession.startDineInOrder(
+          activeTable,
+          res.orderId,
+          res.dbOrderId,
+          formattedCart,
+          subtotal
+        );
+        useOrderStore.getState().addPastOrder({
+          orderId: res.orderId,
+          dbOrderId: String(res.dbOrderId),
+          date: new Date().toISOString(),
+          total: subtotal,
+          itemsCount: formattedCart.length,
+          status: 'Preparing',
+          payment_status: 'Pending',
+          table_number: activeTable,
+          order_type: 'Dine In',
+          customer_phone: phone ?? '',
+          items: formattedCart,
+        });
+        useLiveOrderStore.getState().setLiveOrder('Dine In', res.orderId, String(res.dbOrderId), 'Preparing');
+        clearCart();
+        setIsCartModalVisible(false);
+
+        // Immediately navigate to Track Order status screen
+        router.push({
+          pathname: '/track-order',
+          params: {
+            orderId: res.orderId,
+            dbOrderId: String(res.dbOrderId),
+            tableNumber: activeTable,
+            orderType: 'Dine In',
+            cart: JSON.stringify(formattedCart),
+          }
+        });
+      } else {
+        setIsCartModalVisible(false);
+        router.push({ pathname: '/checkout' });
+      }
+    } catch (err: any) {
+      Alert.alert('Error', err.message || 'Failed to place dine-in order. Please try again.');
+    } finally {
+      setIsPlacingOrder(false);
+    }
+  };
+
+  const handleIncrement = (itemId: any, itemObj?: any) => {
+    const existing = cart[itemId] || cart[String(itemId)] || cart[Number(itemId)];
+    if (existing) {
+      incrementQuantity(existing.id);
     } else {
+      const item = itemObj || 
+        (selectedItem && String(selectedItem.id) === String(itemId) ? selectedItem : null) ||
+        (popularDishes || []).find((i: any) => String(i.id) === String(itemId));
+      if (!item) return;
       addItem({
-        id: numId,
+        id: item.id,
         name: item.name,
         price: item.price,
         image: item.image,
         quantity: 1,
-        category: 'Popular',
+        category: item.category || 'Popular',
         desc: item.desc
       });
     }
   };
 
-  const handleDecrement = (itemId: number | string) => {
-    decrementQuantity(Number(itemId));
+  const handleDecrement = (itemId: any) => {
+    const existing = cart[itemId] || cart[String(itemId)] || cart[Number(itemId)];
+    if (existing) {
+      decrementQuantity(existing.id);
+    }
   };
 
   useEffect(() => {
@@ -253,8 +394,6 @@ export default function Home() {
         const formattedCats = catData
           .filter((c: any) => {
             if (c.name.toLowerCase() === 'all') return false;
-            // Only show categories that belong to the current branch to hide unwanted/legacy ones
-            if (branchSuffix && !c.name.includes(branchSuffix)) return false;
             return true;
           })
           .map((c: any) => ({
@@ -265,15 +404,23 @@ export default function Home() {
         setCategories(formattedCats);
 
         // Fetch user profile to get used offers
-        if (phone) {
-          try {
-            const profileData = await customerApi.getProfile(phone);
+        try {
+          const { customerId, phone: authPhone } = useAuthStore.getState();
+          const targetPhone = phone || authPhone;
+          
+          if (customerId) {
+            const profileData = await customerApi.getProfileById(customerId);
             if (profileData.used_offers) {
               setUsedOffers(profileData.used_offers);
             }
-          } catch (e) {
-            // Silently ignore if profile is not found or fails
+          } else if (targetPhone) {
+            const profileData = await customerApi.getProfile(targetPhone);
+            if (profileData.used_offers) {
+              setUsedOffers(profileData.used_offers);
+            }
           }
+        } catch (e) {
+            // Silently ignore if profile is not found or fails
         }
       } catch (e) {
         console.error('Error fetching home screen data', e);
@@ -431,7 +578,6 @@ export default function Home() {
           { text: "Scan QR", onPress: handleDineInPress },
           { 
             text: "Search Menu", 
-            style: "default",
             onPress: () => {
               router.push({
                 pathname: '/menu',
@@ -499,7 +645,7 @@ export default function Home() {
         undefined,
         [
           { text: "Scan QR", onPress: handleDineInPress },
-          { text: "Cancel", style: "cancel" }
+          { text: "Search Menu", onPress: () => router.push('/menu') }
         ]
       );
       return;
@@ -519,7 +665,7 @@ export default function Home() {
         undefined,
         [
           { text: "Scan QR", onPress: handleDineInPress },
-          { text: "Cancel", style: "cancel" }
+          { text: "Search Menu", onPress: () => router.push('/menu') }
         ]
       );
       return;
@@ -616,7 +762,7 @@ export default function Home() {
                                     handleDineInPress();
                                   }
                                 },
-                                { text: "Cancel", style: "cancel" }
+                                { text: "Search Menu", onPress: () => router.push('/menu') }
                               ]);
                               return;
                             }
@@ -656,6 +802,23 @@ export default function Home() {
             onPress={() => setActiveTab('Takeaway')}
           >
             <Text style={[styles.tabText, activeTab === 'Takeaway' && styles.activeTabText]}>Takeaway</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.tabBtn, activeTab === 'Delivery' && styles.activeTabBtn]}
+            onPress={() => {
+              setActiveTab('Delivery');
+              router.push('/(address)/add-address');
+            }}
+          >
+            <Text style={[styles.tabText, activeTab === 'Delivery' && styles.activeTabText]}>Delivery</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.tabBtn, activeTab === 'Bulk' && styles.activeTabBtn]}
+            onPress={() => {
+              router.push('/(main)/bulk-catering');
+            }}
+          >
+            <Text style={[styles.tabText, activeTab === 'Bulk' && styles.activeTabText]}>Catering</Text>
           </TouchableOpacity>
         </View>
 
@@ -701,12 +864,12 @@ export default function Home() {
             if (activeTab === 'Dine-in' && !tableNumber) {
               showPopup("Scan QR Code", "Please scan the QR code on your table to view menu and order.", "info", undefined, [
                 { text: "Scan QR", onPress: handleDineInPress },
-                { text: "Cancel", style: "cancel" }
+                { text: "Search Menu", onPress: () => router.push('/menu') }
               ]);
               return;
             }
             router.push({
-              pathname: '/menu',
+              pathname: '/for-you',
               params: { orderType: activeTab === 'Dine-in' ? 'Dine In' : activeTab, tableNumber: activeTab === 'Dine-in' ? (tableNumber || '') : '' }
             });
           }}>
@@ -722,7 +885,7 @@ export default function Home() {
                 if (activeTab === 'Dine-in' && !tableNumber) {
                   showPopup("Scan QR Code", "Please scan the QR code on your table to view menu and order.", "info", undefined, [
                     { text: "Scan QR", onPress: handleDineInPress },
-                    { text: "Cancel", style: "cancel" }
+                    { text: "Search Menu", onPress: () => router.push('/menu') }
                   ]);
                   return;
                 }
@@ -749,7 +912,7 @@ export default function Home() {
             if (activeTab === 'Dine-in' && !tableNumber) {
               showPopup("Scan QR Code", "Please scan the QR code on your table to view menu and order.", "info", undefined, [
                 { text: "Scan QR", onPress: handleDineInPress },
-                { text: "Cancel", style: "cancel" }
+                { text: "Search Menu", onPress: () => router.push('/menu') }
               ]);
               return;
             }
@@ -770,7 +933,7 @@ export default function Home() {
               if (activeTab === 'Dine-in' && !tableNumber) {
                 showPopup("Scan QR Code", "Please scan the QR code on your table to view menu and order.", "info", undefined, [
                   { text: "Scan QR", onPress: handleDineInPress },
-                  { text: "Cancel", style: "cancel" }
+                  { text: "Search Menu", onPress: () => router.push('/menu') }
                 ]);
                 return;
               }
@@ -785,30 +948,52 @@ export default function Home() {
               <Text style={styles.dishDesc} numberOfLines={1}>{dish.desc}</Text>
               <View style={styles.dishFooter}>
                 <Text style={styles.dishPrice}>Rs. {dish.price}</Text>
-                <TouchableOpacity
-                  style={styles.addBtn}
-                  onPress={() => {
-                    const cartItem = {
-                      id: dish.id,
-                      name: dish.name,
-                      price: dish.price,
-                      image: dish.image,
-                      quantity: 1,
-                      category: 'Popular',
-                      desc: dish.desc,
-                    };
-                    useCartStore.getState().addItem(cartItem);
-                    setCustomAlert({
-                      visible: true,
-                      title: "Added to Cart",
-                      message: `${dish.name} has been added to your cart.`,
-                      type: "success",
-                      buttons: [{ text: "OK" }]
-                    });
-                  }}
-                >
-                  <Ionicons name='add' size={20} color='#fff' />
-                </TouchableOpacity>
+                {cart[dish.id] && cart[dish.id].quantity > 0 ? (
+                  <View style={styles.dishStepper}>
+                    <TouchableOpacity
+                      style={styles.dishStepBtnMinus}
+                      onPress={() => decrementQuantity(dish.id)}
+                      activeOpacity={0.7}
+                    >
+                      <Ionicons name="remove" size={14} color="#ff4500" />
+                    </TouchableOpacity>
+                    <Text style={styles.dishStepVal}>{cart[dish.id].quantity}</Text>
+                    <TouchableOpacity
+                      style={styles.dishStepBtnPlus}
+                      onPress={() => incrementQuantity(dish.id)}
+                      activeOpacity={0.7}
+                    >
+                      <Ionicons name="add" size={14} color="#fff" />
+                    </TouchableOpacity>
+                  </View>
+                ) : (
+                  <TouchableOpacity
+                    style={styles.addBtn}
+                    onPress={() => {
+                      if (activeTab === 'Dine-in' && !tableNumber) {
+                        showPopup("Scan QR Code", "Please scan the QR code on your table to view menu and order.", "info", undefined, [
+                          { text: "Scan QR", onPress: handleDineInPress },
+                          { text: "Search Menu", onPress: () => router.push('/menu') }
+                        ]);
+                        return;
+                      }
+                      const cartItem = {
+                        id: dish.id,
+                        name: dish.name,
+                        price: dish.price,
+                        image: dish.image,
+                        quantity: 1,
+                        category: 'Popular',
+                        desc: dish.desc,
+                      };
+                      addItem(cartItem);
+                    }}
+                    activeOpacity={0.8}
+                  >
+                    <Ionicons name="add" size={15} color="#fff" style={{ marginRight: 2 }} />
+                    <Text style={styles.addBtnText}>ADD</Text>
+                  </TouchableOpacity>
+                )}
               </View>
             </View>
           </TouchableOpacity>
@@ -821,8 +1006,8 @@ export default function Home() {
           visible={isScannerVisible}
           onRequestClose={handleCloseScanner}
         >
-          <View style={styles.modalOverlay}>
-            <View style={styles.scannerModalContainer}>
+          <TouchableOpacity style={styles.scannerModalOverlay} activeOpacity={1} onPress={handleCloseScanner}>
+            <TouchableOpacity activeOpacity={1} style={styles.scannerModalContainer}>
               <View style={styles.modalHeader}>
                 <Text style={styles.modalTitle}>Scan Table QR Code</Text>
                 <TouchableOpacity onPress={handleCloseScanner}>
@@ -880,25 +1065,31 @@ export default function Home() {
                   </Text>
                 </View>
               )}
-            </View>
-          </View>
+            </TouchableOpacity>
+          </TouchableOpacity>
         </Modal>
 
       </ScrollView>
 
+      {/* Active Dine-In Session Banner */}
+      <DineInActiveBanner bottomOffset={Math.max(insets.bottom, Platform.OS === 'android' ? 24 : 12) + (cartItemCount > 0 ? 132 : 72)} />
+
+      {/* Floating Buttons (Identical to Search screen) */}
+      <View style={[styles.floatingContainer, { bottom: Math.max(insets.bottom, Platform.OS === 'android' ? 24 : 12) + 76 }]}>
+        {cartItemCount > 0 && (
+          <ViewCartButton />
+        )}
+      </View>
+
       {/* Bottom Navigation */}
-      <View style={styles.bottomNav}>
-        <TouchableOpacity style={styles.navItem} onPress={() => router.replace('/home')}>
-          <Ionicons name='home' size={24} color='#ff4500' />
-          <Text style={[styles.navText, { color: '#ff4500' }]}>Home</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.navItem} onPress={() => {
+      <BottomNavBar
+        activeTab="home"
+        onSearchPress={() => {
           if (activeTab === 'Dine-in' && !tableNumber) {
             showPopup("Scan QR Code", "Please scan the QR code on your table to place dine-in orders, or continue to search the menu.", "info", undefined, [
               { text: "Scan QR", onPress: handleDineInPress },
               { 
                 text: "Search Menu", 
-                style: "default",
                 onPress: () => {
                   router.push({ 
                     pathname: '/menu', 
@@ -914,19 +1105,8 @@ export default function Home() {
             return;
           }
           router.push({ pathname: '/menu', params: { orderType: activeTab === 'Dine-in' ? 'Dine In' : activeTab, tableNumber: activeTab === 'Dine-in' ? (tableNumber || '') : '', search: searchText } });
-        }}>
-          <Ionicons name='search-outline' size={24} color='#888' />
-          <Text style={styles.navText}>Search</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.navItem} onPress={() => router.replace('/orders')}>
-          <Ionicons name='receipt-outline' size={24} color='#888' />
-          <Text style={styles.navText}>Orders</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.navItem} onPress={() => router.replace('/profile')}>
-          <Ionicons name='person-outline' size={24} color='#888' />
-          <Text style={styles.navText}>Profile</Text>
-        </TouchableOpacity>
-      </View>
+        }}
+      />
 
       {/* Item Details Modal */}
       <Modal
@@ -947,42 +1127,61 @@ export default function Home() {
                   <Image source={{ uri: selectedItem.image }} style={styles.itemModalImg} resizeMode="cover" />
                 </View>
                 
-                <ScrollView contentContainerStyle={styles.itemModalBody}>
-                  <View style={[styles.availBadge, !selectedItem.available && styles.unavailBadge, { alignSelf: 'flex-start', marginBottom: 8 }]}>
-                    <View style={[styles.availDot, !selectedItem.available && styles.unavailDot]} />
-                  </View>
-                  <Text style={styles.itemModalTitle}>{selectedItem.name}</Text>
-                  <Text style={{ fontSize: 16, fontWeight: 'bold', color: '#ff4500', marginBottom: 8 }}>Rs. {selectedItem.price}</Text>
-                  {selectedItem.desc ? <Text style={styles.itemModalDesc}>{selectedItem.desc}</Text> : null}
-                </ScrollView>
+                {(() => {
+                  const isAvail = selectedItem.available !== false;
+                  const itemQty = cart[selectedItem.id]?.quantity ?? cart[String(selectedItem.id)]?.quantity ?? 0;
 
-                <View style={[styles.itemModalFooter, { paddingBottom: Math.max(insets.bottom, 16) }]}>
-                  <View style={styles.modalStepper}>
-                    <TouchableOpacity 
-                      style={[styles.modalStepBtnMinus, (!selectedItem.available || (cart[selectedItem.id]?.quantity ?? 0) === 0) && styles.stepBtnDisabled]}
-                      onPress={() => handleDecrement(selectedItem.id)}
-                      disabled={!selectedItem.available || (cart[selectedItem.id]?.quantity ?? 0) === 0}
-                    >
-                      <Ionicons name="remove" size={20} color={(!selectedItem.available || (cart[selectedItem.id]?.quantity ?? 0) === 0) ? "#ccc" : "#f87171"} />
-                    </TouchableOpacity>
-                    <Text style={styles.modalStepVal}>{cart[selectedItem.id]?.quantity ?? 0}</Text>
-                    <TouchableOpacity 
-                      style={[styles.modalStepBtnPlus, !selectedItem.available && styles.stepBtnDisabled]}
-                      onPress={() => handleIncrement(selectedItem.id)}
-                      disabled={!selectedItem.available}
-                    >
-                      <Ionicons name="add" size={20} color="#fff" />
-                    </TouchableOpacity>
-                  </View>
-                  
-                  <TouchableOpacity 
-                    style={styles.itemModalAddBtn} 
-                    onPress={() => handleIncrement(selectedItem.id)}
-                    disabled={!selectedItem.available}
-                  >
-                    <Text style={styles.itemModalAddText}>Add Item <Ionicons name="add" size={16} color="#fff" /></Text>
-                  </TouchableOpacity>
-                </View>
+                  return (
+                    <>
+                      <ScrollView contentContainerStyle={styles.itemModalBody}>
+                        <View style={[styles.availBadge, !isAvail && styles.unavailBadge, { alignSelf: 'flex-start', marginBottom: 8 }]}>
+                          <View style={[styles.availDot, !isAvail && styles.unavailDot]} />
+                          <Text style={[styles.availText, !isAvail && styles.unavailText]}>
+                            {isAvail ? 'Available' : 'Not Available'}
+                          </Text>
+                        </View>
+                        <Text style={styles.itemModalTitle}>{selectedItem.name}</Text>
+                        <Text style={{ fontSize: 16, fontWeight: 'bold', color: '#ff4500', marginBottom: 8 }}>Rs. {selectedItem.price}</Text>
+                        {selectedItem.desc ? <Text style={styles.itemModalDesc}>{selectedItem.desc}</Text> : null}
+                      </ScrollView>
+
+                      <View style={[styles.itemModalFooter, { paddingBottom: Math.max(insets.bottom, 16) }]}>
+                        <View style={styles.modalStepper}>
+                          <TouchableOpacity 
+                            style={[styles.modalStepBtnMinus, (!isAvail || itemQty === 0) && styles.stepBtnDisabled]}
+                            onPress={() => handleDecrement(selectedItem.id)}
+                            disabled={!isAvail || itemQty === 0}
+                            activeOpacity={0.7}
+                          >
+                            <Ionicons name="remove" size={20} color={(!isAvail || itemQty === 0) ? "#ccc" : "#f87171"} />
+                          </TouchableOpacity>
+                          <Text style={styles.modalStepVal}>{itemQty}</Text>
+                          <TouchableOpacity 
+                            style={[styles.modalStepBtnPlus, !isAvail && styles.stepBtnDisabled]}
+                            onPress={() => handleIncrement(selectedItem.id, selectedItem)}
+                            disabled={!isAvail}
+                            activeOpacity={0.7}
+                          >
+                            <Ionicons name="add" size={20} color="#fff" />
+                          </TouchableOpacity>
+                        </View>
+                        
+                        <TouchableOpacity 
+                          style={[styles.itemModalAddBtn, !isAvail && { backgroundColor: '#ccc' }]} 
+                          onPress={() => {
+                            if (!isAvail) return;
+                            handleIncrement(selectedItem.id, selectedItem);
+                            setSelectedItem(null);
+                          }}
+                          disabled={!isAvail}
+                          activeOpacity={0.8}
+                        >
+                          <Text style={styles.itemModalAddText}>Add Item <Ionicons name="add" size={16} color="#fff" /></Text>
+                        </TouchableOpacity>
+                      </View>
+                    </>
+                  );
+                })()}
               </>
             )}
           </TouchableOpacity>
@@ -996,8 +1195,8 @@ export default function Home() {
         visible={customAlert.visible}
         onRequestClose={() => setCustomAlert(prev => ({ ...prev, visible: false }))}
       >
-        <View style={styles.alertOverlay}>
-          <View style={styles.alertBox}>
+        <TouchableOpacity style={styles.alertOverlay} activeOpacity={1} onPress={() => setCustomAlert(prev => ({ ...prev, visible: false }))}>
+          <TouchableOpacity activeOpacity={1} style={styles.alertBox}>
             <View style={[
               styles.alertIconBg,
               customAlert.type === 'success' && { backgroundColor: '#e6ffe6' },
@@ -1070,8 +1269,160 @@ export default function Home() {
                 </TouchableOpacity>
               )}
             </View>
-          </View>
-        </View>
+          </TouchableOpacity>
+        </TouchableOpacity>
+      </Modal>
+
+      {/* Cart Modal (Identical to Search / Menu screen) */}
+      <Modal
+        visible={isCartModalVisible}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => setIsCartModalVisible(false)}
+      >
+        <TouchableOpacity 
+          style={styles.modalOverlay} 
+          activeOpacity={1} 
+          onPress={() => setIsCartModalVisible(false)}
+        >
+          <TouchableOpacity activeOpacity={1} style={styles.bottomSheet}>
+            <View style={styles.dragHandle} />
+            
+             <View style={styles.cartHeaderRow}>
+              <Text style={styles.cartTitle}>Cart</Text>
+              {orderType === "Dine In" && tableNumber ? (
+                <View style={styles.tableSelector}>
+                  <Text style={styles.tableSelectorText}>Table No : {tableNumber.replace('T-', '')}</Text>
+                  <Ionicons name="chevron-down" size={14} color="#00a01d" />
+                </View>
+              ) : null}
+            </View>
+            <Text style={styles.orderIdText}># Order Status : Pending</Text>
+
+            <View style={styles.orderTypeContainer}>
+              <TouchableOpacity 
+                style={[styles.orderTypeBtn, orderType === "Dine In" && styles.orderTypeActive]}
+                onPress={() => setOrderType("Dine In")}
+              >
+                <Ionicons name="restaurant-outline" size={16} color={orderType === "Dine In" ? "#fff" : "#ccc"} />
+                <Text style={orderType === "Dine In" ? styles.orderTypeActiveText : styles.orderTypeInactiveText}>Dine In</Text>
+              </TouchableOpacity>
+              <TouchableOpacity 
+                style={[styles.orderTypeBtn, orderType === "Take Away" && styles.orderTypeActive]}
+                onPress={() => setOrderType("Take Away")}
+              >
+                <Ionicons name="bag-handle-outline" size={16} color={orderType === "Take Away" ? "#fff" : "#ccc"} />
+                <Text style={orderType === "Take Away" ? styles.orderTypeActiveText : styles.orderTypeInactiveText}>Take Away</Text>
+              </TouchableOpacity>
+              <TouchableOpacity 
+                style={[styles.orderTypeBtn, orderType === "Delivery" && styles.orderTypeActive]}
+                onPress={() => setOrderType("Delivery")}
+              >
+                <Ionicons name="bicycle-outline" size={16} color={orderType === "Delivery" ? "#fff" : "#ccc"} />
+                <Text style={orderType === "Delivery" ? styles.orderTypeActiveText : styles.orderTypeInactiveText}>Delivery</Text>
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView style={styles.cartItemsScroll} contentContainerStyle={{ paddingTop: 12, paddingRight: 12, paddingLeft: 4, paddingBottom: 12 }} showsVerticalScrollIndicator={false}>
+              {Object.values(cart).map((item) => {
+                if (!item || item.quantity <= 0) return null;
+                const itemImg = item.image || 'https://via.placeholder.com/150';
+                return (
+                  <View key={item.id} style={styles.cartItemCard}>
+                    <TouchableOpacity 
+                      style={styles.removeBtn} 
+                      onPress={() => removeItem(item.id as any)}
+                    >
+                      <Ionicons name="close" size={14} color="#fff" />
+                    </TouchableOpacity>
+                    <View style={styles.cartItemTop}>
+                      <Image source={{ uri: itemImg }} style={styles.cartItemImg} resizeMode="cover" />
+                      <View style={styles.cartItemInfo}>
+                        <Text style={styles.cartItemName} numberOfLines={1}>{item.name}</Text>
+                        <Text style={styles.cartItemPrice}>Rs. {item.price}</Text>
+                      </View>
+                      <View style={styles.cartItemRight}>
+                        <View style={styles.stepper}>
+                          <TouchableOpacity style={styles.stepBtnMinus} onPress={() => decrementQuantity(item.id as any)}>
+                            <Ionicons name="remove" size={16} color="#f87171" />
+                          </TouchableOpacity>
+                          <Text style={styles.stepVal}>{item.quantity}</Text>
+                          <TouchableOpacity style={styles.stepBtnPlus} onPress={() => incrementQuantity(item.id as any)}>
+                            <Ionicons name="add" size={16} color="#fff" />
+                          </TouchableOpacity>
+                        </View>
+                      </View>
+                    </View>
+                    <TextInput 
+                      style={styles.instructionInput}
+                      placeholder="Please, Just a little bit spicy only...."
+                      placeholderTextColor="#999"
+                    />
+                  </View>
+                );
+              })}
+            </ScrollView>
+
+            <View style={styles.placeOrderContainer}>
+              {orderType === "Dine In" ? (
+                dineInSession.isActive && dineInSession.activeDbOrderId ? (
+                  <TouchableOpacity
+                    style={styles.placeOrderBtn}
+                    onPress={() => handleDineInOrder(true)}
+                    disabled={isPlacingOrder}
+                    activeOpacity={0.85}
+                  >
+                    {isPlacingOrder ? (
+                      <ActivityIndicator size="small" color="#fff" />
+                    ) : (
+                      <Text style={styles.placeOrderText}>
+                        Add to Table Order (#{dineInSession.activeOrderId})
+                      </Text>
+                    )}
+                  </TouchableOpacity>
+                ) : (
+                  <>
+                    <TouchableOpacity
+                      style={styles.placeOrderBtn}
+                      onPress={() => handleDineInOrder(true)}
+                      disabled={isPlacingOrder}
+                      activeOpacity={0.85}
+                    >
+                      {isPlacingOrder ? (
+                        <ActivityIndicator size="small" color="#fff" />
+                      ) : (
+                        <Text style={styles.placeOrderText}>
+                          Order Now (Pay at End of Meal)
+                        </Text>
+                      )}
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={styles.payNowSecondaryBtn}
+                      onPress={() => {
+                        setIsCartModalVisible(false);
+                        router.push({ pathname: '/checkout' });
+                      }}
+                      activeOpacity={0.7}
+                    >
+                      <Text style={styles.payNowSecondaryText}>or Pay Now via Checkout ›</Text>
+                    </TouchableOpacity>
+                  </>
+                )
+              ) : (
+                <TouchableOpacity
+                  style={styles.placeOrderBtn}
+                  onPress={() => {
+                    setIsCartModalVisible(false);
+                    router.push({ pathname: '/checkout' });
+                  }}
+                  activeOpacity={0.85}
+                >
+                  <Text style={styles.placeOrderText}>Place Order</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+          </TouchableOpacity>
+        </TouchableOpacity>
       </Modal>
     </SafeAreaView>
   );
@@ -1081,11 +1432,11 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#fff',
-    paddingTop: Platform.OS === 'android' ? StatusBar.currentHeight : 0,
+    
   },
   scrollContent: {
     paddingHorizontal: 20,
-    paddingBottom: 100,
+    paddingBottom: 130,
   },
   header: {
     flexDirection: 'row',
@@ -1158,11 +1509,12 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0, 0, 0, 0.45)',
     padding: 20,
     justifyContent: 'center',
+    alignItems: 'flex-start',
     borderRadius: 15,
   },
   bannerDiscount: {
     color: '#fff',
-    fontSize: 34,
+    fontSize: 28,
     fontWeight: '900',
     letterSpacing: 0.5,
     textShadowColor: 'rgba(0,0,0,0.6)',
@@ -1171,19 +1523,19 @@ const styles = StyleSheet.create({
   },
   bannerSubtitle: {
     color: '#fff',
-    fontSize: 16,
+    fontSize: 14,
     fontWeight: '700',
     marginTop: 4,
-    marginBottom: 16,
+    marginBottom: 12,
     textShadowColor: 'rgba(0,0,0,0.6)',
     textShadowOffset: { width: 1, height: 1 },
     textShadowRadius: 3,
   },
   orderNowBtn: {
-    backgroundColor: '#ea4a26',
-    paddingVertical: 10,
-    paddingHorizontal: 24,
-    borderRadius: 25,
+    backgroundColor: '#ff3400',
+    paddingVertical: 8,
+    paddingHorizontal: 20,
+    borderRadius: 20,
     alignSelf: 'flex-start',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
@@ -1194,7 +1546,7 @@ const styles = StyleSheet.create({
   orderNowText: {
     color: '#fff',
     fontWeight: 'bold',
-    fontSize: 15,
+    fontSize: 14,
   },
   tabsContainer: {
     flexDirection: 'row',
@@ -1306,11 +1658,249 @@ const styles = StyleSheet.create({
   },
   addBtn: {
     backgroundColor: '#ff4500',
-    width: 30,
-    height: 30,
-    borderRadius: 15,
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+    borderRadius: 16,
+    flexDirection: 'row',
     justifyContent: 'center',
     alignItems: 'center',
+    shadowColor: '#ff4500',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 3,
+    elevation: 3,
+  },
+  addBtnText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: 'bold',
+    letterSpacing: 0.5,
+  },
+  dishStepper: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#fff',
+    borderWidth: 1.5,
+    borderColor: '#ff4500',
+    borderRadius: 16,
+    overflow: 'hidden',
+  },
+  dishStepBtnMinus: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    backgroundColor: '#fff',
+  },
+  dishStepVal: {
+    fontSize: 13,
+    fontWeight: 'bold',
+    color: '#ff4500',
+    minWidth: 20,
+    textAlign: 'center',
+  },
+  dishStepBtnPlus: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    backgroundColor: '#ff4500',
+  },
+  floatingContainer: {
+    position: 'absolute',
+    right: 16,
+    alignItems: 'flex-end',
+    zIndex: 99,
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'flex-end',
+  },
+  bottomSheet: {
+    backgroundColor: '#fff',
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    padding: 20,
+    maxHeight: '85%',
+  },
+  dragHandle: {
+    width: 40,
+    height: 4,
+    backgroundColor: '#e0e0e0',
+    borderRadius: 2,
+    alignSelf: 'center',
+    marginBottom: 16,
+  },
+  cartHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  cartTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#000',
+  },
+  tableSelector: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  tableSelectorText: {
+    color: '#00a01d',
+    fontWeight: 'bold',
+    fontSize: 14,
+  },
+  orderIdText: {
+    color: '#777',
+    fontSize: 12,
+    marginTop: 4,
+    marginBottom: 16,
+  },
+  orderTypeContainer: {
+    flexDirection: 'row',
+    backgroundColor: '#fcfcfc',
+    borderRadius: 8,
+    padding: 4,
+    marginBottom: 20,
+    borderWidth: 1,
+    borderColor: '#f0f0f0',
+  },
+  orderTypeBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 10,
+    borderRadius: 6,
+    gap: 8,
+  },
+  orderTypeActive: {
+    backgroundColor: '#ff3400',
+  },
+  orderTypeActiveText: {
+    color: '#fff',
+    fontWeight: 'bold',
+    fontSize: 14,
+  },
+  orderTypeInactiveText: {
+    color: '#ccc',
+    fontWeight: 'bold',
+    fontSize: 14,
+  },
+  cartItemsScroll: {
+    marginBottom: 16,
+  },
+  cartItemCard: {
+    backgroundColor: '#fff',
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#f0f0f0',
+    padding: 12,
+    marginBottom: 12,
+    position: 'relative',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  removeBtn: {
+    position: 'absolute',
+    top: -8,
+    right: -8,
+    zIndex: 10,
+    backgroundColor: '#000',
+    borderRadius: 14,
+    width: 28,
+    height: 28,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 2,
+    borderColor: '#fff',
+  },
+  cartItemTop: {
+    flexDirection: 'row',
+    marginBottom: 12,
+  },
+  cartItemImg: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    marginRight: 12,
+  },
+  cartItemInfo: {
+    flex: 1,
+    justifyContent: 'center',
+  },
+  cartItemName: {
+    fontSize: 14,
+    fontWeight: 'bold',
+    color: '#000',
+    marginBottom: 4,
+  },
+  cartItemPrice: {
+    fontSize: 14,
+    fontWeight: 'bold',
+    color: '#ff3400',
+  },
+  cartItemRight: {
+    alignItems: 'flex-end',
+    justifyContent: 'center',
+  },
+  stepper: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#f9f9f9',
+    borderRadius: 4,
+    borderWidth: 1,
+    borderColor: '#f4f4f4',
+    padding: 2,
+  },
+  stepBtnMinus: {
+    backgroundColor: '#f2f2f2',
+    padding: 2,
+    borderRadius: 2,
+  },
+  stepBtnPlus: {
+    backgroundColor: '#ff3400',
+    padding: 2,
+    borderRadius: 2,
+  },
+  stepVal: {
+    fontSize: 12,
+    color: '#000',
+    width: 24,
+    textAlign: 'center',
+  },
+  instructionInput: {
+    backgroundColor: '#f9f9f9',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    fontSize: 12,
+    color: '#333',
+  },
+  placeOrderContainer: {
+    paddingTop: 12,
+  },
+  placeOrderBtn: {
+    backgroundColor: '#00a01d',
+    borderRadius: 24,
+    paddingVertical: 14,
+    alignItems: 'center',
+  },
+  placeOrderText: {
+    color: '#fff',
+    fontWeight: 'bold',
+    fontSize: 16,
+  },
+  payNowSecondaryBtn: {
+    alignItems: 'center',
+    paddingVertical: 10,
+    marginTop: 4,
+  },
+  payNowSecondaryText: {
+    color: '#666',
+    fontSize: 13,
+    fontWeight: '600',
   },
   bottomNav: {
     position: 'absolute',
@@ -1374,7 +1964,7 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     color: '#ff4500',
   },
-  modalOverlay: {
+  scannerModalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0, 0, 0, 0.7)',
     justifyContent: 'center',
@@ -1666,7 +2256,16 @@ const styles = StyleSheet.create({
     borderRadius: 5,
     backgroundColor: '#00cc66',
   },
+  availText: {
+    fontSize: 12,
+    color: '#00cc66',
+    fontWeight: '600',
+    marginLeft: 4,
+  },
+  unavailText: {
+    color: '#ff4500',
+  },
   unavailDot: {
     backgroundColor: '#ff4500',
-  }
+  },
 });

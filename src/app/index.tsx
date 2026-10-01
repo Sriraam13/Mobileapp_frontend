@@ -1,5 +1,5 @@
 import React, { useEffect, useRef } from 'react';
-import { View, Text, Image, StyleSheet, Dimensions, StatusBar, TouchableOpacity, ImageBackground, Animated, Easing } from 'react-native';
+import { View, Text, Image, StyleSheet, Dimensions, StatusBar, TouchableOpacity, ImageBackground, Animated, Easing, Platform } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useAuthStore, useRestaurantStore } from '../store';
 
@@ -131,7 +131,7 @@ export default function SplashScreen() {
         {/* Dark overlay for contrast and premium aesthetic */}
         <View style={styles.overlay} />
 
-        <TouchableOpacity activeOpacity={1} style={styles.container} onPress={navigateToHome}>
+        <TouchableOpacity activeOpacity={1} style={styles.touchableContainer} onPress={navigateToHome}>
           <StatusBar barStyle="light-content" backgroundColor="transparent" translucent />
 
           {/* Top Hanging Banner */}
@@ -149,18 +149,18 @@ export default function SplashScreen() {
               Welcome To
             </Animated.Text>
 
-            <Animated.Text style={[styles.subtitleText, { opacity: subOpacity, transform: [{ translateY: subTranslateY }] }, { marginBottom: 25 }]}>
-              {"40 YEARS OF EXCELLENCE IN SOUTH INDIAN\nVEGETARIAN CUISINE"}
-            </Animated.Text>
-
             <Animated.Image
               source={require('../../assets/images/Dataudupi.png')}
               style={[styles.logo, { opacity: logoOpacity, transform: [{ scale: logoScale }] }]}
               resizeMode="contain"
             />
+
+            <Animated.Text style={[styles.subtitleText, { opacity: subOpacity, transform: [{ translateY: subTranslateY }] }, { marginBottom: 25 }]}>
+              {"40 YEARS OF EXCELLENCE IN SOUTH INDIAN\nVEGETARIAN CUISINE"}
+            </Animated.Text>
           </View>
 
-          {/* Footer Area: Large Mascot + Loading Symbol at the very bottom */}
+          {/* Footer Area: Large Mascot + Loading Symbol at the bottom */}
           <Animated.View style={[styles.footerContainer, { opacity: mascotOpacity, transform: [{ translateY: mascotTranslateY }] }]}>
             <Image
               source={require('../../assets/images/chef_mascot.png')}
@@ -188,62 +188,68 @@ const styles = StyleSheet.create({
   },
   overlay: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(0, 0, 0, 0.84)', // Sleek, dark transparent overlay to resolve brightness
+    backgroundColor: 'rgba(0, 0, 0, 0.84)',
   },
-  container: {
+  touchableContainer: {
     flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  middleContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
     width: '100%',
+    alignItems: 'center',
+    justifyContent: 'space-between',
     paddingHorizontal: 20,
-  },
-  welcomeText: {
-    color: '#fff',
-    fontSize: 22,
-    fontWeight: '600',
-    letterSpacing: 3,
-    marginBottom: 20,
-    textTransform: 'uppercase',
-    textAlign: 'center',
-  },
-  logo: {
-    width: width * 0.85,
-    height: 140,
-  },
-  subtitleText: {
-    color: 'rgba(255, 255, 255, 0.75)',
-    fontSize: 12,
-    fontWeight: 'bold',
-    letterSpacing: 1.5,
-    textAlign: 'center',
-    lineHeight: 18,
-  },
-  footerContainer: {
-    width: '100%',
-    alignItems: 'center',
-    justifyContent: 'flex-end',
-    paddingBottom: 40,
-  },
-  mascot: {
-    width: 220,
-    height: 220,
-    marginBottom: 10,
+    paddingVertical: 10,
   },
   topBoardWrapper: {
     position: 'absolute',
-    top: 25,
+    top: Platform.OS === 'android' ? 25 : 40,
     alignSelf: 'center',
     zIndex: 10,
     alignItems: 'center',
   },
   topBannerImage: {
-    width: width * 0.8,
-    height: 80,
+    width: Math.min(width * 0.7, 240),
+    height: 70,
+  },
+  middleContainer: {
+    width: '100%',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: Platform.OS === 'android' ? 120 : 140,
+    paddingHorizontal: 16,
+  },
+  welcomeText: {
+    color: '#fff',
+    fontSize: 20,
+    fontWeight: '600',
+    fontFamily: Platform.OS === 'ios' ? 'Georgia' : 'serif',
+    letterSpacing: 4,
+    marginBottom: 14,
+    textTransform: 'uppercase',
+    textAlign: 'center',
+  },
+  logo: {
+    width: Math.min(width * 0.82, 300),
+    height: 95,
+    marginBottom: 16,
+  },
+  subtitleText: {
+    color: 'rgba(255, 255, 255, 0.82)',
+    fontSize: 11,
+    fontWeight: '700',
+    fontFamily: Platform.OS === 'ios' ? 'Georgia' : 'serif',
+    letterSpacing: 2,
+    lineHeight: 18,
+    textAlign: 'center',
+  },
+  footerContainer: {
+    width: '100%',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    paddingBottom: 25,
+  },
+  mascot: {
+    width: 200,
+    height: 200,
+    marginBottom: 10,
   },
   loadingContainer: {
     alignItems: 'center',
@@ -251,20 +257,21 @@ const styles = StyleSheet.create({
     height: 40,
   },
   spinnerRing: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
+    width: 34,
+    height: 34,
+    borderRadius: 17,
     borderWidth: 3,
-    borderColor: 'rgba(255, 255, 255, 0.2)',
+    borderColor: 'rgba(255, 69, 0, 0.2)',
     borderTopColor: '#ff4500',
     alignItems: 'center',
     justifyContent: 'flex-start',
   },
   spinnerDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: '#ff8c00',
-    marginTop: -3,
+    width: 5,
+    height: 5,
+    borderRadius: 2.5,
+    backgroundColor: '#ff4500',
+    position: 'absolute',
+    top: 2,
   },
 });

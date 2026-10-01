@@ -1,11 +1,40 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Platform, StatusBar, Image } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';;
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Platform, StatusBar, Image, RefreshControl, ActivityIndicator } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter, useNavigation } from 'expo-router';
-import { orderApi } from '../../services/apiService';
+import { orderApi, cateringOrderApi } from '../../services/apiService';
 import { getFullImageUrl } from '../../constants/api';
 import { useAuthStore, useCartStore, useOrderStore, useRestaurantStore } from '../../store';
+import { useDineInSessionStore } from '../../store/useDineInSessionStore';
+import BottomNavBar from '../../components/layout/BottomNavBar';
+
+const parseOrderTypeAndTable = (rawTypeInput: any, rawTableInput: any) => {
+  const rawType = String(rawTypeInput || '').toUpperCase();
+  const rawTable = String(rawTableInput || '').trim();
+  const upperTable = rawTable.toUpperCase();
+
+  if (rawType.includes('DELIV') || upperTable === 'DELIVERY') {
+    return { mappedType: 'Delivery', tableNumber: null };
+  }
+  
+  if (rawType.includes('TAKE') || rawType.includes('PICK') || upperTable.includes('TAKE') || upperTable.includes('PICK')) {
+    return { mappedType: 'Takeaway', tableNumber: null };
+  }
+
+  let tableNumber: string | null = null;
+  if (rawTable && !['DELIVERY', 'TAKE AWAY', 'TAKEAWAY', 'PICKUP', 'NULL', 'UNDEFINED'].includes(upperTable)) {
+    if (/^\d+$/.test(rawTable)) {
+      tableNumber = `T-${rawTable.padStart(2, '0')}`;
+    } else if (rawTable.toLowerCase().startsWith('t-') || rawTable.toLowerCase().startsWith('t')) {
+      tableNumber = rawTable.toUpperCase();
+    } else {
+      tableNumber = rawTable;
+    }
+  }
+
+  return { mappedType: 'Dine In', tableNumber };
+};
 
 export default function Orders() {
   const router = useRouter();
@@ -14,67 +43,172 @@ export default function Orders() {
   const { clearCart, addItem, setOrderType } = useCartStore();
   const [activeTab, setActiveTab] = useState('All');
   const [orders, setOrders] = useState<any[]>([]);
+  const [refreshing, setRefreshing] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
+
+  const onRefresh = async () => {
+    setRefreshing(true);
+    await loadOrders();
+    setRefreshing(false);
+  };
   const { pastOrders } = useOrderStore();
   const { selectedOutlet } = useRestaurantStore();
+  const dineInSession = useDineInSessionStore();
 
   const loadOrders = async () => {
+    setIsLoading(true);
     try {
-      const userPhone = phone || '+919876543210';
-      if (userPhone) {
-        // Fetch from both Mugalivakkam (1) and MGR Nagar (2)
+      const userPhone = phone?.trim();
+      const rawUserDigits = (userPhone || '').replace(/\D/g, '');
+      const userLast10 = rawUserDigits.length >= 10 ? rawUserDigits.slice(-10) : rawUserDigits;
+
+      let formattedOrders: any[] = [];
+
+      // Fetch online customer orders for this specific phone from backend
+      if (userPhone && rawUserDigits.length >= 10 && !['1234567890', '9876543210'].includes(userLast10)) {
         const [data1, data2] = await Promise.all([
           orderApi.getCustomerOrders(userPhone, 1).catch(() => []),
           orderApi.getCustomerOrders(userPhone, 2).catch(() => [])
         ]);
-        
+
         let allData: any[] = [];
         if (Array.isArray(data1)) allData = [...allData, ...data1];
         if (Array.isArray(data2)) allData = [...allData, ...data2];
-        
-        if (allData.length > 0) {
-          // Sort combined orders by created_at descending
-          allData.sort((a, b) => new Date(b.order?.created_at || 0).getTime() - new Date(a.order?.created_at || 0).getTime());
 
-          const formattedOrders = allData.map((entry: any) => {
+        if (allData.length > 0) {
+          formattedOrders = allData.map((entry: any) => {
             const o = entry.order;
             const items = entry.items;
-            
-            // Format for UI
             const finalOrderId = o.orderId || `ORD-${String(o.id).padStart(6, '0')}`;
+            const { mappedType, tableNumber } = parseOrderTypeAndTable(o.order_type, o.table_number);
+
+            const isDineIn = mappedType === 'Dine In';
+            const normPayMethod = (o.payment_method || '').toLowerCase().replace(/[\s_-]/g, '');
+            const isCounterPaid = normPayMethod === 'payatcounter' || normPayMethod === 'counter';
+            const isPaidStatus = (o.payment_status || '').toUpperCase() === 'PAID' || isCounterPaid;
+
             return {
               id: finalOrderId,
               dbId: o.id,
               restaurant: o.restaurant_id === 2 ? 'MGR Nagar' : 'Mugalivakkam',
               date: o.created_at || new Date().toISOString(),
-              status: o.status || 'Pending',
+              status: (isCounterPaid && isDineIn) ? 'SERVED' : (o.status || 'Pending'),
+              payment_status: isPaidStatus ? 'Paid' : (o.payment_status || 'Pending'),
+              payment_method: o.payment_method,
+              table_number: tableNumber,
               items: items || [],
               total: o.total_amount || 0,
               image: items?.[0]?.image_url ? getFullImageUrl(items[0].image_url) : 'https://via.placeholder.com/150',
-              order_type: o.order_type || 'Dine In'
-            }
+              order_type: mappedType,
+              isCatering: false
+            };
           });
-          setOrders(formattedOrders);
-          return;
+        }
+      }
+      
+      const { customerId } = useAuthStore.getState();
+      if (customerId) {
+        const cateringDataRes = await cateringOrderApi.getCateringOrders(customerId).catch(() => ({ data: [] }));
+        const rawCatering = Array.isArray(cateringDataRes) ? cateringDataRes : (Array.isArray(cateringDataRes?.data) ? cateringDataRes.data : []);
+        
+        if (rawCatering.length > 0) {
+          const cateringOrders = rawCatering.map((cOrder: any) => {
+            return {
+              id: `CAT-${String(cOrder.id).padStart(6, '0')}`,
+              dbId: cOrder.id,
+              restaurant: 'Data Udipi Catering',
+              date: cOrder.created_at || new Date().toISOString(),
+              status: cOrder.order_status || 'Pending',
+              payment_status: cOrder.payment_status || 'Pending',
+              payment_method: 'Online',
+              table_number: null,
+              items: [{ name: cOrder.package_name, quantity: cOrder.guest_count, price: cOrder.package_price }],
+              total: cOrder.total_amount || 0,
+              paid_amount: cOrder.paid_amount || 0,
+              balance_amount: cOrder.balance_amount || 0,
+              image: 'https://via.placeholder.com/150', // Replace with catering icon if desired
+              order_type: 'Catering',
+              isCatering: true,
+              payments: cOrder.payments || []
+            };
+          });
+          formattedOrders = [...formattedOrders, ...cateringOrders];
         }
       }
 
-      // Fallback if backend fetch fails or no phone
-      const formattedOrders = pastOrders.map((o: any) => {
-        return {
-          id: o.orderId || `ORD-${String(o.id || 0).padStart(6, '0')}`,
-          restaurant: 'Data Udipi',
-          date: o.date || new Date().toISOString(),
-          status: o.status || 'Pending',
-          items: o.items || o.cart || [],
-          total: o.total || 0,
-          image: o.items?.[0]?.image ? getFullImageUrl(o.items[0].image) : 'https://via.placeholder.com/150',
-          order_type: o.orderType || 'Dine In'
+      // Fallback to local pastOrders strictly if offline and matching user phone
+      if (formattedOrders.length === 0 && userPhone && rawUserDigits.length >= 10 && !['1234567890', '9876543210'].includes(userLast10)) {
+        const accountPastOrders = (pastOrders || []).filter((o: any) => {
+          if (o.customer_phone) {
+            const ordPhone = String(o.customer_phone).replace(/\D/g, '');
+            return ordPhone.endsWith(userLast10) || ordPhone === rawUserDigits;
+          }
+          return false;
+        });
+
+        formattedOrders = accountPastOrders.map((o: any) => {
+          const { mappedType, tableNumber } = parseOrderTypeAndTable(o.orderType || o.order_type, o.table_number);
+          const isDineIn = mappedType === 'Dine In';
+          const normPayMethod = (o.payment_method || '').toLowerCase().replace(/[\s_-]/g, '');
+          const isCounterPaid = normPayMethod === 'payatcounter' || normPayMethod === 'counter';
+          const isPaidStatus = (o.payment_status || '').toUpperCase() === 'PAID' || isCounterPaid;
+
+          return {
+            id: o.orderId || `ORD-${String(o.dbOrderId || o.id || 0).padStart(6, '0')}`,
+            dbId: o.dbOrderId || o.id,
+            restaurant: 'Data Udipi',
+            date: o.date || new Date().toISOString(),
+            status: (isCounterPaid && isDineIn) ? 'SERVED' : (o.status || 'Pending'),
+            payment_status: isPaidStatus ? 'Paid' : (o.payment_status || 'Pending'),
+            payment_method: o.payment_method,
+            table_number: tableNumber,
+            items: o.items || o.cart || [],
+            total: o.total || 0,
+            image: o.items?.[0]?.image ? getFullImageUrl(o.items[0].image) : 'https://via.placeholder.com/150',
+            order_type: mappedType,
+          };
+        });
+      }
+
+      // Sort by date descending
+      formattedOrders.sort((a, b) => new Date(b.date || 0).getTime() - new Date(a.date || 0).getTime());
+
+      // Merge active ongoing dine-in order under ONE single order ID
+      if (dineInSession.isActive && dineInSession.activeOrderId) {
+        const existingIndex = formattedOrders.findIndex(
+          (o: any) => o.id === dineInSession.activeOrderId || String(o.dbId) === String(dineInSession.activeDbOrderId)
+        );
+        const activeOrderCard = {
+          id: dineInSession.activeOrderId,
+          dbId: dineInSession.activeDbOrderId,
+          restaurant: selectedOutlet?.name || 'Data Udipi',
+          date: new Date().toISOString(),
+          status: 'PREPARING',
+          payment_status: 'Pending',
+          table_number: dineInSession.tableNumber,
+          items: dineInSession.orderedItems || [],
+          total: dineInSession.totalAmount || 0,
+          image: dineInSession.orderedItems?.[0]?.image ? getFullImageUrl(dineInSession.orderedItems[0].image) : 'https://via.placeholder.com/150',
+          order_type: 'Dine In',
+          isOngoingDineIn: true,
         };
-      });
-      
+
+        if (existingIndex >= 0) {
+          formattedOrders[existingIndex] = {
+            ...formattedOrders[existingIndex],
+            ...activeOrderCard,
+            status: formattedOrders[existingIndex].status || 'PREPARING',
+          };
+        } else {
+          formattedOrders.unshift(activeOrderCard);
+        }
+      }
+
       setOrders(formattedOrders);
     } catch (e) {
       console.error("Error loading local orders", e);
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -90,7 +224,7 @@ export default function Orders() {
     
     const status = (order.status || '').toUpperCase();
     if (activeTab === 'Delivered' || activeTab === 'Completed') {
-      return ['SERVED', 'COMPLETED', 'DELIVERED'].includes(status);
+      return ['SERVED', 'COMPLETED', 'DELIVERED'].includes(status) && order.payment_status?.toUpperCase() === 'PAID';
     }
     if (activeTab === 'Cancelled' || activeTab === 'CANCELLED') {
       return status === 'CANCELLED';
@@ -105,26 +239,76 @@ export default function Orders() {
     else if (order.order_type === 'Delivery') setOrderType('Delivery');
     else setOrderType('Dine In');
 
-    if (order.raw_items && order.raw_items.length > 0) {
-      order.raw_items.forEach((item: any) => addItem(item));
+    if (Array.isArray(order.items)) {
+      order.items.forEach((item: any) => {
+        addItem({
+          id: String(item.menu_item_id || item.id),
+          name: item.name || 'Item',
+          price: item.price || 0,
+          quantity: item.quantity || 1,
+          image: item.image_url || item.image || '',
+          category: item.category || 'General',
+        });
+      });
     }
-    router.push('/checkout');
+    router.replace('/checkout');
   };
 
   const handleOrderPress = (order: any) => {
-    const activeStatuses = ['PENDING', 'CONFIRMED', 'PREPARING', 'ALMOST_READY', 'READY'];
-    if (activeStatuses.includes((order.status || '').toUpperCase())) {
-      router.push({ 
-        pathname: '/track-order', 
-        params: { 
-          dbOrderId: order.dbOrderId,
+    if (order.order_type === 'Delivery') {
+      router.push({
+        pathname: '/delivery-success',
+        params: {
+          dbOrderId: String(order.dbOrderId || order.dbId || ''),
           orderId: order.id,
-          orderType: order.order_type || 'Take Away'
-        } 
+          orderType: 'Delivery',
+          total: String(order.total || 0),
+          paymentMethod: order.payment_method || 'Cash',
+          phone: phone || '',
+          cart: typeof order.items === 'string' ? order.items : JSON.stringify(order.items || []),
+        }
+      });
+    } else if (order.order_type === 'Takeaway' || order.order_type === 'Take Away') {
+      router.push({
+        pathname: '/order-success',
+        params: {
+          dbOrderId: String(order.dbOrderId || order.dbId || ''),
+          orderId: order.id,
+          orderType: 'Takeaway',
+          tableNumber: 'Take Away',
+          total: String(order.total || 0),
+          paymentMethod: order.payment_method || 'UPI',
+          phone: phone || '',
+          cart: typeof order.items === 'string' ? order.items : JSON.stringify(order.items || []),
+        }
       });
     } else {
-      router.push({ pathname: '/order-details', params: { orderId: order.dbOrderId || order.id } });
+      const isUnpaid = (order.payment_status || '').toUpperCase() !== 'PAID';
+      if (isUnpaid || order.isOngoingDineIn) {
+        router.push({ 
+          pathname: '/track-order', 
+          params: { 
+            dbOrderId: String(order.dbOrderId || order.dbId || ''),
+            orderId: order.id,
+            orderType: 'Dine In',
+            tableNumber: order.table_number || 'T-01',
+          } 
+        });
+      } else {
+        router.push({ pathname: '/order-details', params: { orderId: order.dbOrderId || order.id || order.dbId } });
+      }
     }
+  };
+
+  const handlePayBalance = (order: any) => {
+    router.push({
+      pathname: '/catering-balance-payment',
+      params: {
+        orderId: String(order.dbId),
+        balanceAmount: String(order.balance_amount || 0),
+        packageName: Array.isArray(order.items) && order.items[0] ? order.items[0].name : 'Catering Package'
+      }
+    });
   };
 
   const getDisplayStatus = (status: string, type: string) => {
@@ -147,7 +331,12 @@ export default function Orders() {
 
   const formatDate = (isoString: string) => {
     try {
-      const d = new Date(isoString);
+      let parsedString = isoString;
+      if (parsedString && parsedString.includes('T') && !parsedString.endsWith('Z') && !parsedString.includes('+')) {
+        parsedString += 'Z';
+      }
+      const d = new Date(parsedString);
+      if (isNaN(d.getTime())) return isoString;
       const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
       const date = d.getDate();
       const month = months[d.getMonth()];
@@ -195,12 +384,24 @@ export default function Orders() {
         })}
       </View>
 
-      <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-        {filteredOrders.map(order => (
+      <ScrollView 
+        contentContainerStyle={styles.scrollContent} 
+        showsVerticalScrollIndicator={false}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={['#ff4500']} />}
+      >
+        {isLoading ? (
+          <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', marginTop: 100 }}>
+            <ActivityIndicator size="large" color="#ff4500" />
+            <Text style={{ marginTop: 10, color: '#666' }}>Loading your orders...</Text>
+          </View>
+        ) : filteredOrders.map(order => (
           <TouchableOpacity 
             key={order.id} 
             style={styles.orderCard}
-            onPress={() => handleOrderPress(order)}
+            onPress={() => {
+              if (order.isCatering) return; // Ignore full card press for catering, use buttons instead
+              handleOrderPress(order);
+            }}
           >
             <View style={styles.orderHeader}>
               <View style={{ flex: 1, paddingRight: 12 }}>
@@ -218,54 +419,137 @@ export default function Orders() {
               </View>
             </View>
 
-            <View style={{ flexDirection: 'row', gap: 12, marginBottom: 15 }}>
-              <View style={styles.infoBadge}>
-                <Text style={styles.infoBadgeLabel}>Order ID</Text>
-                <Text style={styles.infoBadgeValue}>{order.id}</Text>
-              </View>
-              <View style={styles.infoBadge}>
-                <Text style={styles.infoBadgeLabel}>Type</Text>
-                <Text style={styles.infoBadgeValue}>{order.order_type}</Text>
-              </View>
-            </View>
+            {(() => {
+              const isDineIn = order.order_type === 'Dine In';
+              const isCatering = order.isCatering;
+              const normPayMethod = (order.payment_method || '').toLowerCase().replace(/[\s_-]/g, '');
+              const isCounterPaid = normPayMethod === 'payatcounter' || normPayMethod === 'counter';
+              const isPartiallyPaid = (order.payment_status || '').toUpperCase() === 'PARTIALLY_PAID';
+              const isPaid = (order.payment_status || '').toUpperCase() === 'PAID' || (isDineIn && isCounterPaid);
+              const isUnpaidDineIn = isDineIn && (!isPaid || order.isOngoingDineIn);
 
-            <View style={styles.orderDetails}>
-              <Image source={{ uri: order.image }} style={styles.orderImage} />
-              <View style={styles.orderInfo}>
-                <Text style={styles.orderItems} numberOfLines={2}>
-                  {Array.isArray(order.items) 
-                    ? order.items.map((i: any) => `${i.quantity || 1}x ${i.name || 'Item'}`).join(', ') 
-                    : 'Items'}
-                </Text>
-                <Text style={styles.orderPrice}>Rs. {order.total}</Text>
-              </View>
-              <TouchableOpacity style={styles.reorderBtn} onPress={() => handleReorder(order)}>
-                <Text style={styles.reorderText}>Reorder</Text>
-              </TouchableOpacity>
-            </View>
+              return (
+                <>
+                  <View style={{ flexDirection: 'row', gap: 12, marginBottom: 15, flexWrap: 'wrap' }}>
+                    <View style={styles.infoBadge}>
+                      <Text style={styles.infoBadgeLabel}>Order ID</Text>
+                      <Text style={styles.infoBadgeValue}>{order.id}</Text>
+                    </View>
+                    <View style={styles.infoBadge}>
+                      <Text style={styles.infoBadgeLabel}>Type</Text>
+                      <Text style={styles.infoBadgeValue}>
+                        {isDineIn
+                          ? `Dine In${order.table_number ? ` (${order.table_number})` : ''}`
+                          : order.order_type}
+                      </Text>
+                    </View>
+                    <View style={[styles.infoBadge, isPaid ? { backgroundColor: '#e8f5e9' } : (isPartiallyPaid ? {backgroundColor: '#e3f2fd'} : { backgroundColor: '#fff3e0' })]}>
+                      <Text style={styles.infoBadgeLabel}>Payment</Text>
+                      <Text style={[styles.infoBadgeValue, { color: isPaid ? '#16a34a' : (isPartiallyPaid ? '#0284c7' : '#ff4500'), fontWeight: 'bold' }]}>
+                        {isPaid ? 'Paid' : (isPartiallyPaid ? 'Partially Paid' : (order.order_type === 'Delivery' ? 'Cash on Delivery' : 'Pay Later'))}
+                      </Text>
+                    </View>
+                  </View>
+
+                  <View style={styles.orderDetails}>
+                    {order.image && order.image !== 'https://via.placeholder.com/150' ? (
+                      <Image source={{ uri: order.image }} style={styles.orderImage} />
+                    ) : (
+                      <View style={[styles.orderImage, { backgroundColor: '#fff0eb', alignItems: 'center', justifyContent: 'center' }]}>
+                        {isCatering ? (
+                          <Ionicons name="people-outline" size={26} color="#ff4500" />
+                        ) : (
+                          <Ionicons name="restaurant-outline" size={26} color="#ff4500" />
+                        )}
+                      </View>
+                    )}
+                    <View style={styles.orderInfo}>
+                      <Text style={styles.orderItems} numberOfLines={2}>
+                        {isCatering && Array.isArray(order.items) && order.items[0]
+                          ? `${order.items[0].name} (x${order.items[0].quantity} Guests)`
+                          : Array.isArray(order.items) 
+                          ? order.items.map((i: any) => `${i.quantity || 1}x ${i.name || 'Item'}`).join(', ') 
+                          : (typeof order.items === 'string' ? order.items : 'Items')}
+                      </Text>
+                      <Text style={styles.orderPrice}>Rs. {order.total}</Text>
+                      {isCatering && isPartiallyPaid && (
+                        <Text style={{ fontSize: 12, color: '#666', marginTop: 4 }}>
+                          Paid: Rs. {order.paid_amount || 0} • Bal: Rs. {order.balance_amount || 0}
+                        </Text>
+                      )}
+                    </View>
+                    {isCatering && isPartiallyPaid ? (
+                      <TouchableOpacity 
+                        style={[styles.reorderBtn, { backgroundColor: '#3395FF', borderColor: '#3395FF', minWidth: 100, alignItems: 'center', justifyContent: 'center' }]} 
+                        onPress={(e) => {
+                          e.stopPropagation();
+                          handlePayBalance(order);
+                        }}
+                        activeOpacity={0.8}
+                      >
+                        <Text style={[styles.reorderText, { color: '#ffffff', fontWeight: 'bold' }]}>Pay Balance</Text>
+                      </TouchableOpacity>
+                    ) : isUnpaidDineIn ? (
+                      <TouchableOpacity 
+                        style={[styles.reorderBtn, { backgroundColor: '#ff4500', borderColor: '#ff4500', minWidth: 100, alignItems: 'center', justifyContent: 'center' }]} 
+                        onPress={() => handleOrderPress(order)}
+                        activeOpacity={0.8}
+                      >
+                        <Text style={[styles.reorderText, { color: '#ffffff', fontWeight: 'bold' }]}>Track / Pay</Text>
+                      </TouchableOpacity>
+                    ) : (order.order_type === 'Delivery' || order.order_type === 'Takeaway' || order.order_type === 'Take Away') ? (
+                      <TouchableOpacity 
+                        style={[styles.reorderBtn, { backgroundColor: '#ff4500', borderColor: '#ff4500', minWidth: 100, alignItems: 'center', justifyContent: 'center' }]} 
+                        onPress={() => handleOrderPress(order)}
+                        activeOpacity={0.8}
+                      >
+                        <Text style={[styles.reorderText, { color: '#ffffff', fontWeight: 'bold' }]}>Track / Pay</Text>
+                      </TouchableOpacity>
+                    ) : (
+                      <TouchableOpacity 
+                        style={[styles.reorderBtn, { backgroundColor: '#fff', borderColor: '#ff4500', minWidth: 100, alignItems: 'center', justifyContent: 'center' }]} 
+                        onPress={() => {
+                          if (isCatering) {
+                            router.push({ pathname: '/catering-order-details', params: { orderId: order.dbId } });
+                          } else {
+                            router.push({ pathname: '/order-details', params: { orderId: order.dbId || order.id } });
+                          }
+                        }}
+                        activeOpacity={0.8}
+                      >
+                        <Text style={[styles.reorderText, { color: '#ff4500', fontWeight: 'bold' }]}>View Details</Text>
+                      </TouchableOpacity>
+                    )}
+                  </View>
+
+                  {/* Payment History for Catering */}
+                  {isCatering && order.payments && order.payments.length > 0 && (
+                    <View style={{ marginTop: 12, paddingTop: 12, borderTopWidth: 1, borderTopColor: '#f0f0f0' }}>
+                      <Text style={{ fontSize: 13, fontWeight: 'bold', color: '#444', marginBottom: 8 }}>Payment History</Text>
+                      {order.payments.map((p: any) => (
+                        <View key={p.id} style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6, backgroundColor: '#f9f9f9', padding: 8, borderRadius: 6 }}>
+                          <View>
+                            <Text style={{ fontSize: 12, fontWeight: 'bold', color: '#333' }}>{p.payment_type} ({p.payment_method})</Text>
+                            <Text style={{ fontSize: 10, color: '#777', marginTop: 2 }}>Txn: {p.transaction_id || 'N/A'}</Text>
+                            <Text style={{ fontSize: 10, color: '#777' }}>{formatDate(p.created_at)}</Text>
+                          </View>
+                          <View style={{ alignItems: 'flex-end', justifyContent: 'center' }}>
+                            <Text style={{ fontSize: 13, fontWeight: 'bold', color: p.payment_status === 'SUCCESS' ? '#16a34a' : '#ff4500' }}>Rs. {p.amount}</Text>
+                            <Text style={{ fontSize: 10, color: p.payment_status === 'SUCCESS' ? '#16a34a' : '#ff4500', marginTop: 2 }}>{p.payment_status}</Text>
+                          </View>
+                        </View>
+                      ))}
+                    </View>
+                  )}
+                </>
+              );
+            })()}
           </TouchableOpacity>
         ))}
       </ScrollView>
 
       {/* Bottom Navigation */}
-      <View style={styles.bottomNav}>
-        <TouchableOpacity style={styles.navItem} onPress={() => router.replace('/home')}>
-          <Ionicons name='home-outline' size={24} color='#888' />
-          <Text style={styles.navText}>Home</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.navItem} onPress={() => router.replace('/menu')}>
-          <Ionicons name='search-outline' size={24} color='#888' />
-          <Text style={styles.navText}>Search</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.navItem}>
-          <Ionicons name='receipt' size={24} color='#ff4500' />
-          <Text style={[styles.navText, { color: '#ff4500' }]}>Orders</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.navItem} onPress={() => router.replace('/profile')}>
-          <Ionicons name='person-outline' size={24} color='#888' />
-          <Text style={styles.navText}>Profile</Text>
-        </TouchableOpacity>
-      </View>
+      <BottomNavBar activeTab="orders" />
     </SafeAreaView>
   );
 }
@@ -274,7 +558,7 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#fafafa',
-    paddingTop: Platform.OS === 'android' ? StatusBar.currentHeight : 0,
+    
   },
   header: {
     flexDirection: 'row',
@@ -321,7 +605,7 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     padding: 20,
-    paddingBottom: 100,
+    paddingBottom: 120,
   },
   orderCard: {
     backgroundColor: '#fff',

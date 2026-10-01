@@ -1,11 +1,13 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, Platform, StatusBar, Image, Alert, ActivityIndicator } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, Platform, StatusBar, Image, Alert, ActivityIndicator, RefreshControl, Modal, Pressable } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
+import { useRouter, useLocalSearchParams } from 'expo-router';
 import * as Location from 'expo-location';
 import { API_BASE_URL } from '../../constants/api';
 import { useAuthStore, useAddressStore } from '../../store';
+import BottomNavBar from '../../components/layout/BottomNavBar';
+import { isWithinDeliveryArea } from '../../utils/deliveryArea';
 
 const MapView = Platform.OS !== 'web' ? require('react-native-maps').default : null;
 const { PROVIDER_GOOGLE } = Platform.OS !== 'web' ? require('react-native-maps') : { PROVIDER_GOOGLE: 'google' };
@@ -13,137 +15,85 @@ const Marker = Platform.OS !== 'web' ? require('react-native-maps').Marker : nul
 
 export default function AddAddress() {
   const router = useRouter();
-  const { phone } = useAuthStore();
-  const { addAddress, addresses } = useAddressStore();
-  const mapRef = useRef<any>(null);
-  const [addressType, setAddressType] = useState('Home');
+  const params = useLocalSearchParams<{ predefinedAddress?: string; latitude?: string; longitude?: string; addressType?: string }>();
+  const { phone, customerId, customerName } = useAuthStore();
+  const { addAddress, addresses, setSelectedDeliveryAddress } = useAddressStore();
+  
+  const [addressType, setAddressType] = useState(params.addressType as string || 'Home');
   const [flat, setFlat] = useState('');
   const [floor, setFloor] = useState('');
   const [building, setBuilding] = useState('');
   const [landmark, setLandmark] = useState('');
-  const [fullAddress, setFullAddress] = useState('');
+  const [fullAddress, setFullAddress] = useState(params.predefinedAddress || '');
   const [isLocating, setIsLocating] = useState(false);
   const [region, setRegion] = useState({
-    latitude: 13.0405,
-    longitude: 80.2036,
+    latitude: params.latitude ? Number(params.latitude) : 13.0223,
+    longitude: params.longitude ? Number(params.longitude) : 80.2229,
     latitudeDelta: 0.015,
     longitudeDelta: 0.015,
   });
-  const [markerCoord, setMarkerCoord] = useState({
-    latitude: 13.0405,
-    longitude: 80.2036,
-  });
-  const [isGeocoding, setIsGeocoding] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchResults, setSearchResults] = useState<any[]>([]);
+  const [isSearching, setIsSearching] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [hasConfirmedLocation, setHasConfirmedLocation] = useState(Boolean(params.latitude && params.longitude));
+  const [showDeliveryUnavailable, setShowDeliveryUnavailable] = useState(false);
+  const mapRef = useRef<any>(null);
 
-  const reverseGeocode = async (latitude: number, longitude: number) => {
-    setIsGeocoding(true);
-    let resolvedAddress = '';
-    let streetNumber = '';
-    let route = '';
-    let sublocality = '';
-    let locality = '';
-
-    // 1. Try Google Maps Geocoding API
-    try {
-      const apiKey = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY || 'AIzaSyA2qxAJag8F89Q_TdtjqU_42W6JAVJ5_qg';
-      const geocodeUrl = `https://maps.googleapis.com/maps/api/geocode/json?latlng=${latitude},${longitude}&key=${apiKey}`;
-      const response = await fetch(geocodeUrl);
-      const data = await response.json();
-      if (data.status === 'OK' && data.results && data.results.length > 0) {
-        const result = data.results[0];
-        if (result.formatted_address) {
-          resolvedAddress = result.formatted_address;
-        }
-        result.address_components.forEach((comp: any) => {
-          if (comp.types.includes('street_number')) streetNumber = comp.long_name;
-          if (comp.types.includes('route')) route = comp.long_name;
-          if (comp.types.includes('sublocality') || comp.types.includes('sublocality_level_1')) sublocality = comp.long_name;
-          if (comp.types.includes('locality')) locality = comp.long_name;
-        });
-      }
-    } catch (e) {
-      console.warn("Google reverse geocoding error:", e);
-    }
-
-    // 2. Try OpenStreetMap Nominatim if empty
-    if (!resolvedAddress) {
+  const handleSearch = async (text: string) => {
+    setSearchQuery(text);
+    if (text.length > 2) {
+      setIsSearching(true);
       try {
-        const osmUrl = `https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}&zoom=18&addressdetails=1`;
-        const res = await fetch(osmUrl, { headers: { 'User-Agent': 'DataUdipiApp/1.0' } });
-        const osmData = await res.json();
-        if (osmData && osmData.display_name) {
-          resolvedAddress = osmData.display_name;
-          if (osmData.address) {
-            route = osmData.address.road || route;
-            sublocality = osmData.address.suburb || osmData.address.neighbourhood || sublocality;
-            locality = osmData.address.city || osmData.address.town || locality;
-          }
+        const apiKey = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY || 'AIzaSyA2qxAJag8F89Q_TdtjqU_42W6JAVJ5_qg';
+        const url = `https://maps.googleapis.com/maps/api/place/autocomplete/json?input=${encodeURIComponent(text)}&key=${apiKey}&components=country:in`;
+        const response = await fetch(url);
+        const data = await response.json();
+        if (data.status === 'OK') {
+          setSearchResults(data.predictions);
+        } else {
+          setSearchResults([]);
         }
       } catch (e) {
-        console.warn("OSM reverse geocoding error:", e);
+        console.error("Error fetching places:", e);
+      } finally {
+        setIsSearching(false);
       }
+    } else {
+      setSearchResults([]);
     }
-
-    // 3. Try Expo native Location reverseGeocodeAsync
-    if (!resolvedAddress) {
-      try {
-        const expoResults = await Location.reverseGeocodeAsync({ latitude, longitude });
-        if (expoResults && expoResults.length > 0) {
-          const item = expoResults[0];
-          streetNumber = item.streetNumber || '';
-          route = item.street || item.name || '';
-          sublocality = item.district || item.subregion || '';
-          locality = item.city || item.subregion || '';
-
-          const fullParts = [
-            item.name && item.name !== item.street ? item.name : '',
-            item.streetNumber,
-            item.street,
-            item.district,
-            item.subregion,
-            item.city,
-            item.region,
-            item.postalCode,
-          ].filter(Boolean);
-
-          const deduped = fullParts.filter((p, i, arr) => arr.indexOf(p) === i);
-          if (deduped.length > 0) {
-            resolvedAddress = deduped.join(', ');
-          }
-        }
-      } catch (e) {
-        console.warn("Expo reverse geocoding error:", e);
-      }
-    }
-
-    if (resolvedAddress) {
-      setFullAddress(resolvedAddress);
-    }
-    setFlat(streetNumber || '');
-    setBuilding(route || '');
-    setLandmark(sublocality || locality || '');
-
-    setIsGeocoding(false);
   };
 
-  const handleSelectCoordinate = (coordinate: { latitude: number; longitude: number }) => {
-    if (!coordinate || !coordinate.latitude || !coordinate.longitude) return;
-    setMarkerCoord({
-      latitude: coordinate.latitude,
-      longitude: coordinate.longitude,
-    });
-    setRegion(prev => ({
-      ...prev,
-      latitude: coordinate.latitude,
-      longitude: coordinate.longitude,
-    }));
-    mapRef.current?.animateToRegion({
-      latitude: coordinate.latitude,
-      longitude: coordinate.longitude,
-      latitudeDelta: region.latitudeDelta || 0.015,
-      longitudeDelta: region.longitudeDelta || 0.015,
-    }, 300);
-    reverseGeocode(coordinate.latitude, coordinate.longitude);
+  const handleSelectPlace = async (placeId: string, description: string) => {
+    setSearchQuery(description);
+    setSearchResults([]);
+    try {
+      const apiKey = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY || 'AIzaSyA2qxAJag8F89Q_TdtjqU_42W6JAVJ5_qg';
+      const url = `https://maps.googleapis.com/maps/api/place/details/json?place_id=${placeId}&fields=geometry&key=${apiKey}`;
+      const response = await fetch(url);
+      const data = await response.json();
+      if (data.status === 'OK' && data.result?.geometry?.location) {
+        const { lat, lng } = data.result.geometry.location;
+        const selectedRegion = {
+          latitude: lat,
+          longitude: lng,
+          latitudeDelta: 0.015,
+          longitudeDelta: 0.015,
+        };
+        setRegion(selectedRegion);
+        mapRef.current?.animateToRegion(selectedRegion, 500);
+        setHasConfirmedLocation(true);
+        setFullAddress(description);
+      }
+    } catch (e) {
+      console.error("Error fetching place details:", e);
+    }
+  };
+
+  const onRefresh = async () => {
+    setRefreshing(true);
+    setRefreshing(false);
   };
 
   const detectLocation = async () => {
@@ -151,29 +101,54 @@ export default function AddAddress() {
     try {
       let { status } = await Location.requestForegroundPermissionsAsync();
       if (status !== 'granted') {
-        Alert.alert("Permission Denied", "Could not request location permission. Please tap on the map or fill details manually.");
+        Alert.alert("Permission Denied", "Could not request location permission. Please fill in details manually.");
         setIsLocating(false);
         return;
       }
       
-      let location = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
+      let location = await Location.getCurrentPositionAsync({});
       const { latitude, longitude } = location.coords;
       
-      setMarkerCoord({ latitude, longitude });
-      setRegion({
+      const detectedRegion = {
         latitude,
         longitude,
         latitudeDelta: 0.015,
         longitudeDelta: 0.015,
-      });
-      mapRef.current?.animateToRegion({
-        latitude,
-        longitude,
-        latitudeDelta: 0.015,
-        longitudeDelta: 0.015,
-      }, 400);
+      };
+      setRegion(detectedRegion);
+      mapRef.current?.animateToRegion(detectedRegion, 500);
+      setHasConfirmedLocation(true);
       
-      await reverseGeocode(latitude, longitude);
+      const apiKey = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY || 'AIzaSyA2qxAJag8F89Q_TdtjqU_42W6JAVJ5_qg';
+      const geocodeUrl = `https://maps.googleapis.com/maps/api/geocode/json?latlng=${latitude},${longitude}&key=${apiKey}`;
+      
+      const response = await fetch(geocodeUrl);
+      const data = await response.json();
+      
+      if (data.status === 'OK' && data.results && data.results.length > 0) {
+        const result = data.results[0];
+        const formatted = result.formatted_address;
+        
+        setFullAddress(formatted);
+        
+        let streetNumber = '';
+        let route = '';
+        let sublocality = '';
+        let locality = '';
+        
+        result.address_components.forEach((comp: any) => {
+          if (comp.types.includes('street_number')) streetNumber = comp.long_name;
+          if (comp.types.includes('route')) route = comp.long_name;
+          if (comp.types.includes('sublocality') || comp.types.includes('sublocality_level_1')) sublocality = comp.long_name;
+          if (comp.types.includes('locality')) locality = comp.long_name;
+        });
+        
+        if (streetNumber) setFlat(streetNumber);
+        if (route) setBuilding(route);
+        if (sublocality || locality) setLandmark(sublocality || locality);
+      } else {
+        console.warn("Geocoding failed:", data.status, data.error_message);
+      }
     } catch (e) {
       console.error("Error detecting location:", e);
     } finally {
@@ -182,66 +157,90 @@ export default function AddAddress() {
   };
 
   useEffect(() => {
-    detectLocation();
-  }, []);
+    if (isLocating) return;
+    const parts = [
+      flat ? `${flat}` : '',
+      floor ? `${floor}` : '',
+      building ? `${building}` : '',
+      landmark ? `${landmark}` : ''
+    ].filter(Boolean);
+    if (parts.length > 0) {
+       setFullAddress(parts.join(', '));
+    }
+  }, [flat, floor, building, landmark]);
 
-  const { customerId, customerName, phone: authPhone } = useAuthStore();
   const handleSave = async () => {
     if (!fullAddress.trim()) {
       Alert.alert("Error", "Please fill in address details.");
       return;
     }
-    if (!customerId) {
-      Alert.alert("Error", "You must be logged in to add an address.");
+
+    if (!hasConfirmedLocation || !isWithinDeliveryArea(region.latitude, region.longitude)) {
+      setShowDeliveryUnavailable(true);
       return;
     }
     
-    try {
-      const response = await fetch(`${API_BASE_URL}/api/v1/public/customers/${customerId}/addresses`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
+    setIsSaving(true);
+    const newId = Date.now();
+    const payload = {
+      id: newId,
+      type: addressType,
+      address: fullAddress.trim(),
+      full_address: fullAddress.trim(),
+      latitude: region.latitude,
+      longitude: region.longitude,
+      flat_house_no: flat || '',
+      floor: floor || '',
+      building_apartment_name: building || '',
+      landmark: landmark || '',
+      contact_name: customerName || 'Customer',
+      contact_phone: phone || '',
+      city: 'Chennai',
+      state: 'Tamil Nadu',
+      pincode: '600001',
+      icon: addressType === 'Home' ? 'home' : addressType === 'Work' ? 'briefcase' : 'location',
+      iconBg: addressType === 'Home' ? '#ff4500' : addressType === 'Work' ? '#e6f2ff' : '#e6ffe6',
+      iconColor: addressType === 'Home' ? '#fff' : addressType === 'Work' ? '#1e90ff' : '#00cc66',
+      isDefault: addresses.length === 0
+    };
+
+    if (customerId) {
+      try {
+        const { customerApi } = await import('../../services/apiService');
+        const resp = await customerApi.addAddress(customerId, {
           address_type: addressType,
-          flat_house_no: flat || '',
-          floor: floor || '',
-          building_apartment_name: building || '',
-          landmark: landmark || '',
+          flat_house_no: flat || 'N/A',
+          floor: floor || null,
+          building_apartment_name: building || null,
+          landmark: landmark || null,
           full_address: fullAddress.trim(),
           latitude: region.latitude,
           longitude: region.longitude,
           city: 'Chennai',
           state: 'Tamil Nadu',
-          pincode: '600001', // Example pincode
-          contact_name: customerName || 'Guest',
-          contact_phone: authPhone || '',
+          pincode: '600001',
+          contact_name: customerName || 'Customer',
+          contact_phone: phone || '',
           is_default: addresses.length === 0
-        })
-      });
-      
-      if (!response.ok) {
-        throw new Error("Failed to save address to backend.");
+        });
+        
+        // Update store only after backend success
+        const finalId = resp?.address?.id || resp?.id || newId;
+        payload.id = finalId;
+        addAddress(payload);
+        setSelectedDeliveryAddress(fullAddress.trim(), finalId);
+        setIsSaving(false);
+        router.replace({ pathname: '/menu', params: { orderType: 'Delivery' } });
+      } catch (e: any) {
+        setIsSaving(false);
+        console.warn('Address backend sync note:', e);
+        Alert.alert("Unable to save address", e?.message || "The address could not be saved. Please try again.");
       }
-      
-      const savedAddress = await response.json();
-      
-      const payload = {
-        id: savedAddress.id.toString(),
-        type: addressType,
-        address: fullAddress.trim(),
-        full_address: fullAddress.trim(),
-        icon: addressType === 'Home' ? 'home' : addressType === 'Office' ? 'briefcase' : 'location',
-        iconBg: addressType === 'Home' ? '#ff4500' : addressType === 'Office' ? '#e6f2ff' : '#e6ffe6',
-        iconColor: addressType === 'Home' ? '#fff' : addressType === 'Office' ? '#1e90ff' : '#00cc66',
-        isDefault: savedAddress.is_default
-      };
-
+    } else {
       addAddress(payload);
-      router.back();
-    } catch (e) {
-      console.error("Failed to save address:", e);
-      Alert.alert("Error", "Failed to save address. Please try again.");
+      setSelectedDeliveryAddress(fullAddress.trim(), newId);
+      setIsSaving(false);
+      router.replace({ pathname: '/menu', params: { orderType: 'Delivery' } });
     }
   };
 
@@ -257,13 +256,46 @@ export default function AddAddress() {
         <Text style={styles.headerTitle}>Add Address</Text>
       </View>
 
-      <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps='handled'>
+      <ScrollView 
+        contentContainerStyle={styles.scrollContent} 
+        showsVerticalScrollIndicator={false} 
+        keyboardShouldPersistTaps='handled'
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={['#ff4500']} />}
+      >
         
+        {/* Search Bar */}
+        <View style={styles.searchContainer}>
+          <Ionicons name="search-outline" size={20} color="#888" style={styles.searchIcon} />
+          <TextInput 
+            style={styles.searchInput}
+            placeholder="Search for area, street..."
+            placeholderTextColor="#999"
+            value={searchQuery}
+            onChangeText={handleSearch}
+          />
+        </View>
+
+        {/* Search Results Dropdown */}
+        {searchResults.length > 0 && (
+          <View style={styles.searchResultsContainer}>
+            {searchResults.map((item, index) => (
+              <TouchableOpacity 
+                key={item.place_id} 
+                style={[styles.searchResultItem, index < searchResults.length - 1 && styles.searchResultBorder]}
+                onPress={() => handleSelectPlace(item.place_id, item.description)}
+              >
+                <Ionicons name="location-outline" size={18} color="#666" style={{marginRight: 10}} />
+                <Text style={styles.searchResultText} numberOfLines={2}>{item.description}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        )}
+
         {/* Map View */}
         <View style={styles.mapContainer}>
           {Platform.OS === 'web' ? (
             <Image 
-              source={{ uri: `https://maps.googleapis.com/maps/api/staticmap?center=${region.latitude},${region.longitude}&zoom=16&size=600x400&markers=color:red%7C${region.latitude},${region.longitude}&key=${process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY || 'AIzaSyA2qxAJag8F89Q_TdtjqU_42W6JAVJ5_qg'}` }} 
+              source={{ uri: `https://maps.googleapis.com/maps/api/staticmap?center=${region.latitude},${region.longitude}&zoom=16&size=600x300&markers=color:red%7C${region.latitude},${region.longitude}&key=${process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY || 'AIzaSyA2qxAJag8F89Q_TdtjqU_42W6JAVJ5_qg'}` }} 
               style={styles.mapImage} 
               resizeMode="cover"
             />
@@ -271,51 +303,33 @@ export default function AddAddress() {
             <MapView
               ref={mapRef}
               style={styles.mapImage}
-              provider={PROVIDER_GOOGLE}
               region={region}
-              onPress={(e: any) => {
-                if (e?.nativeEvent?.coordinate) {
-                  handleSelectCoordinate(e.nativeEvent.coordinate);
-                }
-              }}
-              onPoiClick={(e: any) => {
-                if (e?.nativeEvent?.coordinate) {
-                  handleSelectCoordinate(e.nativeEvent.coordinate);
-                }
-              }}
-              onRegionChangeComplete={(newRegion: any) => {
+              onRegionChangeComplete={async (newRegion: any, details: any) => {
                 setRegion(newRegion);
+                if (!isLocating && details?.isGesture) {
+                  setHasConfirmedLocation(true);
+                  try {
+                    const apiKey = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY || 'AIzaSyA2qxAJag8F89Q_TdtjqU_42W6JAVJ5_qg';
+                    const geocodeUrl = `https://maps.googleapis.com/maps/api/geocode/json?latlng=${newRegion.latitude},${newRegion.longitude}&key=${apiKey}`;
+                    const response = await fetch(geocodeUrl);
+                    const data = await response.json();
+                    
+                    if (data.status === 'OK' && data.results && data.results.length > 0) {
+                      const result = data.results[0];
+                      setFullAddress(result.formatted_address);
+                    }
+                  } catch (e) {
+                    console.error("Geocoding on pan failed:", e);
+                  }
+                }
               }}
             >
               <Marker
-                coordinate={markerCoord}
-                draggable
-                onDragEnd={(e: any) => {
-                  if (e?.nativeEvent?.coordinate) {
-                    handleSelectCoordinate(e.nativeEvent.coordinate);
-                  }
-                }}
-                anchor={{ x: 0.5, y: 1 }}
-                title="Delivery Location"
-                description={fullAddress || "Selected Location"}
-              >
-                <View style={styles.modernMarkerContainer}>
-                  <View style={styles.markerPin}>
-                    <Ionicons name="location" size={22} color="#fff" />
-                  </View>
-                  <View style={styles.markerPinTip} />
-                  <View style={styles.markerShadow} />
-                </View>
-              </Marker>
+                coordinate={{ latitude: region.latitude, longitude: region.longitude }}
+                title="Your Location"
+              />
             </MapView>
           )}
-
-          {/* Map Helper Guide Badge */}
-          <View style={styles.mapHelperBadge} pointerEvents="none">
-            <Ionicons name="hand-left-outline" size={13} color="#ff4500" />
-            <Text style={styles.mapHelperText}>Tap map or drag pin to select location</Text>
-          </View>
-
           {isLocating && (
             <View style={[StyleSheet.absoluteFillObject, { backgroundColor: 'rgba(255,255,255,0.85)', justifyContent: 'center', alignItems: 'center' }]}>
               <ActivityIndicator size="large" color="#ff4500" />
@@ -323,29 +337,11 @@ export default function AddAddress() {
             </View>
           )}
           
-          {/* Live Address Preview on Map */}
-          <View style={styles.mapAddressBar} pointerEvents="none">
-            {isGeocoding ? (
-              <View style={styles.geocodingRow}>
-                <ActivityIndicator size="small" color="#ff4500" />
-                <Text style={styles.geocodingText}>Fetching address at location...</Text>
-              </View>
-            ) : (
-              <View style={styles.geocodingRow}>
-                <Ionicons name="checkmark-circle" size={16} color="#00a01d" />
-                <Text style={styles.mapAddressText} numberOfLines={1}>
-                  {fullAddress || "Tap anywhere on map"}
-                </Text>
-              </View>
-            )}
-          </View>
-
           {/* Locate Me Button */}
           {!isLocating && (
             <TouchableOpacity 
-              style={styles.locateMeBtn} 
+              style={{ position: 'absolute', bottom: 16, right: 16, backgroundColor: '#fff', width: 44, height: 44, borderRadius: 22, justifyContent: 'center', alignItems: 'center', shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.2, shadowRadius: 4, elevation: 5 }} 
               onPress={detectLocation}
-              activeOpacity={0.8}
             >
               <Ionicons name="locate" size={24} color="#ff4500" />
             </TouchableOpacity>
@@ -355,7 +351,7 @@ export default function AddAddress() {
         {/* Address Type */}
         <Text style={styles.sectionLabel}>ADDRESS TYPE</Text>
         <View style={styles.typeContainer}>
-          {['Home', 'Office', 'Other'].map(type => (
+          {['Home', 'Work', 'Other'].map(type => (
             <TouchableOpacity 
               key={type}
               style={[styles.typeBtn, addressType === type && styles.typeBtnActive]}
@@ -421,31 +417,44 @@ export default function AddAddress() {
           />
         </View>
 
-        <TouchableOpacity style={styles.saveBtn} onPress={handleSave}>
-          <Text style={styles.saveBtnText}>Save Address</Text>
+        <TouchableOpacity style={styles.saveBtn} onPress={handleSave} disabled={isSaving}>
+          {isSaving ? (
+            <ActivityIndicator color="#fff" size="small" />
+          ) : (
+            <Text style={styles.saveBtnText}>Confirm and Save Address</Text>
+          )}
         </TouchableOpacity>
 
       </ScrollView>
 
+      <Modal
+        visible={showDeliveryUnavailable}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowDeliveryUnavailable(false)}
+      >
+        <Pressable style={styles.deliveryModalBackdrop} onPress={() => setShowDeliveryUnavailable(false)}>
+          <Pressable style={styles.deliveryModalCard} onPress={() => undefined}>
+            <View style={styles.deliveryModalIcon}>
+              <Ionicons name="location-outline" size={26} color="#0BA01E" />
+            </View>
+            <Text style={styles.deliveryModalTitle}>Delivery unavailable</Text>
+            <Text style={styles.deliveryModalMessage}>Data Udipi isn&apos;t available here.</Text>
+            <TouchableOpacity
+              style={styles.deliveryModalButton}
+              onPress={() => {
+                setShowDeliveryUnavailable(false);
+                setSearchQuery('');
+              }}
+            >
+              <Text style={styles.deliveryModalButtonText}>Try another location</Text>
+            </TouchableOpacity>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
       {/* Bottom Navigation */}
-      <View style={styles.bottomNav}>
-        <TouchableOpacity style={styles.navItem} onPress={() => router.push('/home')}>
-          <Ionicons name='home-outline' size={24} color='#888' />
-          <Text style={styles.navText}>Home</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.navItem} onPress={() => router.push('/menu')}>
-          <Ionicons name='search-outline' size={24} color='#888' />
-          <Text style={styles.navText}>Search</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.navItem} onPress={() => router.push('/orders')}>
-          <Ionicons name='receipt-outline' size={24} color='#888' />
-          <Text style={styles.navText}>Orders</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.navItem} onPress={() => router.push('/profile')}>
-          <Ionicons name='person' size={24} color='#ff4500' />
-          <Text style={[styles.navText, { color: '#ff4500' }]}>Profile</Text>
-        </TouchableOpacity>
-      </View>
+      <BottomNavBar activeTab="profile" />
     </SafeAreaView>
   );
 }
@@ -454,7 +463,7 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#fff',
-    paddingTop: Platform.OS === 'android' ? StatusBar.currentHeight : 0,
+    
   },
   header: {
     flexDirection: 'row',
@@ -471,129 +480,74 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
   },
   scrollContent: {
-    paddingBottom: 100,
+    paddingBottom: 350,
+  },
+  searchContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginHorizontal: 20,
+    marginBottom: 15,
+    gap: 10,
+    zIndex: 2,
+  },
+  searchInput: {
+    flex: 1,
+    backgroundColor: '#f9f9f9',
+    borderRadius: 25,
+    paddingHorizontal: 40,
+    paddingVertical: 12,
+    fontSize: 14,
+    color: '#333',
+    borderWidth: 1,
+    borderColor: '#eee',
+  },
+  searchIcon: {
+    position: 'absolute',
+    left: 15,
+    zIndex: 1,
+  },
+  searchResultsContainer: {
+    marginHorizontal: 20,
+    marginTop: -10,
+    marginBottom: 15,
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#eee',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.1,
+    shadowRadius: 12,
+    elevation: 3,
+    maxHeight: 200,
+    zIndex: 1000,
+    overflow: 'hidden',
+  },
+  searchResultItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 12,
+    backgroundColor: '#fff',
+  },
+  searchResultBorder: {
+    borderBottomWidth: 1,
+    borderBottomColor: '#f0f0f0',
+  },
+  searchResultText: {
+    flex: 1,
+    fontSize: 13,
+    color: '#333',
   },
   mapContainer: {
-    height: 320,
+    height: 300,
     width: '100%',
     backgroundColor: '#eee',
     marginBottom: 20,
-    position: 'relative',
-    overflow: 'hidden',
+    zIndex: 1,
   },
   mapImage: {
     width: '100%',
     height: '100%',
-  },
-  modernMarkerContainer: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    width: 60,
-    height: 70,
-  },
-  markerPin: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: '#ff4500',
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 3,
-    borderColor: '#ffffff',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.35,
-    shadowRadius: 6,
-    elevation: 8,
-    zIndex: 2,
-  },
-  markerPinTip: {
-    width: 0,
-    height: 0,
-    borderLeftWidth: 8,
-    borderRightWidth: 8,
-    borderTopWidth: 12,
-    borderLeftColor: 'transparent',
-    borderRightColor: 'transparent',
-    borderTopColor: '#ff4500',
-    marginTop: -3,
-    zIndex: 1,
-  },
-  markerShadow: {
-    width: 14,
-    height: 5,
-    borderRadius: 7,
-    backgroundColor: 'rgba(0, 0, 0, 0.25)',
-    marginTop: 2,
-  },
-  mapHelperBadge: {
-    position: 'absolute',
-    top: 14,
-    alignSelf: 'center',
-    backgroundColor: 'rgba(255, 255, 255, 0.95)',
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    paddingVertical: 7,
-    paddingHorizontal: 14,
-    borderRadius: 20,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.15,
-    shadowRadius: 4,
-    elevation: 3,
-  },
-  mapHelperText: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#333',
-  },
-  mapAddressBar: {
-    position: 'absolute',
-    bottom: 16,
-    left: 16,
-    right: 74,
-    backgroundColor: 'rgba(255, 255, 255, 0.96)',
-    paddingVertical: 10,
-    paddingHorizontal: 12,
-    borderRadius: 12,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.15,
-    shadowRadius: 4,
-    elevation: 4,
-  },
-  geocodingRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  geocodingText: {
-    fontSize: 12,
-    color: '#ff4500',
-    fontWeight: '600',
-  },
-  mapAddressText: {
-    fontSize: 12,
-    color: '#333',
-    fontWeight: '600',
-    flex: 1,
-  },
-  locateMeBtn: {
-    position: 'absolute',
-    bottom: 16,
-    right: 16,
-    backgroundColor: '#fff',
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    justifyContent: 'center',
-    alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.25,
-    shadowRadius: 5,
-    elevation: 6,
   },
   sectionLabel: {
     fontSize: 12,
@@ -662,6 +616,59 @@ const styles = StyleSheet.create({
   multilineInput: {
     height: 80,
     paddingTop: 12,
+  },
+  deliveryModalBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.45)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 24,
+  },
+  deliveryModalCard: {
+    width: '100%',
+    maxWidth: 360,
+    backgroundColor: '#fff',
+    borderRadius: 18,
+    padding: 24,
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.2,
+    shadowRadius: 18,
+    elevation: 10,
+  },
+  deliveryModalIcon: {
+    width: 54,
+    height: 54,
+    borderRadius: 27,
+    backgroundColor: '#e8f7eb',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 14,
+  },
+  deliveryModalTitle: {
+    color: '#111',
+    fontSize: 21,
+    fontWeight: '800',
+    marginBottom: 8,
+  },
+  deliveryModalMessage: {
+    color: '#555',
+    fontSize: 16,
+    textAlign: 'center',
+    marginBottom: 22,
+  },
+  deliveryModalButton: {
+    width: '100%',
+    backgroundColor: '#0BA01E',
+    borderRadius: 10,
+    paddingVertical: 13,
+    alignItems: 'center',
+  },
+  deliveryModalButtonText: {
+    color: '#fff',
+    fontSize: 15,
+    fontWeight: '700',
   },
   saveBtn: {
     backgroundColor: '#ff4500',

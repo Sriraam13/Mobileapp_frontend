@@ -10,7 +10,6 @@ export default function LoginScreen() {
   const router = useRouter();
   const { login } = useAuthStore();
   
-  const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
@@ -19,12 +18,8 @@ export default function LoginScreen() {
     setError('');
     
     // Basic validation
-    if (!name || name.trim().length === 0) {
-      setError('Please enter your name');
-      return;
-    }
-    if (!phone || phone.length < 10) {
-      setError('Please enter a valid mobile number');
+    if (!phone || phone.length !== 10) {
+      setError('Please enter a valid 10-digit mobile number');
       return;
     }
     setIsLoading(true);
@@ -37,7 +32,6 @@ export default function LoginScreen() {
       }
 
       const data = await customerApi.login({
-        name: name.trim(),
         phone: formattedPhone,
         otp: '1234'
       });
@@ -78,19 +72,6 @@ export default function LoginScreen() {
           <View style={styles.form}>
             {error ? <Text style={styles.errorText}>{error}</Text> : null}
             
-            <View style={styles.inputContainer}>
-              <Ionicons name="person-outline" size={20} color="#666" style={styles.inputIcon} />
-              <TextInput
-                style={styles.input}
-                placeholder="Full Name"
-                placeholderTextColor="#999"
-                value={name}
-                onChangeText={(text) => {
-                  setName(text);
-                  setError('');
-                }}
-              />
-            </View>
 
             <View style={styles.inputContainer}>
               <Ionicons name="call-outline" size={20} color="#666" style={styles.inputIcon} />
@@ -104,7 +85,7 @@ export default function LoginScreen() {
                   setPhone(text);
                   setError('');
                 }}
-                maxLength={15}
+                maxLength={10}
               />
             </View>
 
@@ -122,7 +103,16 @@ export default function LoginScreen() {
               )}
             </TouchableOpacity>
             
-            <Text style={styles.hintText}>Enter your name and mobile number to proceed.</Text>
+            <View style={styles.signupContainer}>
+              <Text style={styles.signupText}>Don&apos;t have an account? </Text>
+              <Link href="/signup" asChild>
+                <TouchableOpacity>
+                  <Text style={styles.signupLink}>Sign Up</Text>
+                </TouchableOpacity>
+              </Link>
+            </View>
+            
+            <Text style={styles.hintText}>Enter your mobile number to proceed.</Text>
           </View>
         </View>
       </KeyboardAvoidingView>

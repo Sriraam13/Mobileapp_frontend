@@ -1,18 +1,22 @@
-import { View, Text, StyleSheet, TextInput, ScrollView, TouchableOpacity, FlatList, Platform, StatusBar, Image, Modal, BackHandler } from 'react-native';
+import { View, Text, StyleSheet, TextInput, ScrollView, TouchableOpacity, FlatList, Platform, StatusBar, Image, Modal, BackHandler, Alert, ActivityIndicator } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useState, useEffect } from 'react';
 import { useRouter, useLocalSearchParams } from 'expo-router';
-import { menuApi } from '../../services/apiService';
+import { useVoiceAgentStore, useAuthStore, useOrderStore, useCartStore, useLiveOrderStore, useDineInSessionStore, useRestaurantStore } from '../../store';
+import { menuApi, orderApi } from '../../services/apiService';
 import { getFullImageUrl } from '../../constants/api';
-import { useRestaurantStore } from '../../store';
-import { useCartStore } from '../../store/useCartStore';
+import DineInActiveBanner from '../../components/DineInActiveBanner';
+import ViewCartButton from '../../components/layout/ViewCartButton';
 
 export default function App() {
   const router = useRouter();
+  const { phone } = useAuthStore();
+  const dineInSession = useDineInSessionStore();
+  const [isPlacingOrder, setIsPlacingOrder] = useState(false);
   const params = useLocalSearchParams<{ orderType?: string; tableNumber?: string; categoryId?: string; search?: string }>();
   const insets = useSafeAreaInsets();
-  const { items: cart, addItem, removeItem, incrementQuantity, decrementQuantity, orderType, setOrderType, tableNumber, setTableNumber, getItemCount, getSubtotal } = useCartStore();
+  const { items: cart, addItem, removeItem, incrementQuantity, decrementQuantity, orderType, setOrderType, tableNumber, setTableNumber, getItemCount, getSubtotal, clearCart } = useCartStore();
   
   useEffect(() => {
     const onBackPress = () => {
@@ -28,11 +32,17 @@ export default function App() {
   }, [router]);
 
   useEffect(() => {
-    const initialOrderType = (params.orderType as string) || "Dine In";
-    const mappedOrderType = initialOrderType === "Takeaway" ? "Take Away" : (initialOrderType === "Dine-in" ? "Dine In" : initialOrderType) as "Dine In" | "Take Away";
-    if (mappedOrderType) setOrderType(mappedOrderType);
-    if (params.tableNumber) setTableNumber(params.tableNumber as string);
-    if (params.search !== undefined) setSearchQuery(params.search as string);
+    if (params.orderType) {
+      const initialOrderType = params.orderType as string;
+      const mappedOrderType = initialOrderType === "Takeaway" ? "Take Away" : (initialOrderType === "Dine-in" ? "Dine In" : initialOrderType) as "Dine In" | "Take Away" | "Delivery";
+      if (mappedOrderType) setOrderType(mappedOrderType);
+    }
+    if (params.tableNumber) {
+      setTableNumber(params.tableNumber as string);
+    }
+    if (params.search !== undefined) {
+      setSearchQuery(params.search as string);
+    }
   }, [params.orderType, params.tableNumber, params.search, setOrderType, setTableNumber]);
 
   const [allCategories, setAllCategories] = useState<any[]>([]);
@@ -44,14 +54,140 @@ export default function App() {
   const [isCartModalVisible, setIsCartModalVisible] = useState(false);
   const [selectedItem, setSelectedItem] = useState<any>(null);
   const [isFilterModalVisible, setIsFilterModalVisible] = useState(false);
+  const showAgent = useVoiceAgentStore((state) => state.showAgent);
   const [availabilityFilter, setAvailabilityFilter] = useState("All Items");
   const [priceSort, setPriceSort] = useState("Default");
   
   const { selectedOutlet } = useRestaurantStore();
-  const restaurantId = selectedOutlet?.restaurant_id || 1;
+  const restaurantId = selectedOutlet?.restaurant_id;
+
+  useEffect(() => {
+    if (!restaurantId) {
+      Alert.alert('No Outlet Selected', 'Please select a restaurant location first.', [
+        { text: 'OK', onPress: () => router.replace('/home') }
+      ]);
+    }
+  }, [restaurantId, router]);
+
+  const handleDineInOrder = async (payLater: boolean) => {
+    const activeTable = tableNumber || 'T-01';
+    const rawCartItems = Object.values(cart).filter(item => item && item.quantity > 0);
+    if (rawCartItems.length === 0) return;
+
+    setIsPlacingOrder(true);
+    try {
+      const formattedCart = rawCartItems.map(item => ({
+        id: Number(item.id),
+        quantity: item.quantity,
+        price: item.price,
+        name: item.name,
+        image: item.image,
+      }));
+
+      const subtotal = getSubtotal();
+
+      if (dineInSession.isActive && dineInSession.activeDbOrderId) {
+        // Append items to current active dine in order
+        await orderApi.appendOrderItems(dineInSession.activeDbOrderId, {
+          cart: formattedCart,
+          total_amount: subtotal,
+          order_type: 'DINE_IN',
+          table_number: activeTable,
+          phone: phone || '',
+        });
+
+        const newAllItems = [...dineInSession.orderedItems, ...formattedCart];
+        const newTotal = (dineInSession.totalAmount || 0) + subtotal;
+        dineInSession.appendItemsToOrder(formattedCart, subtotal);
+        useOrderStore.getState().addPastOrder({
+          orderId: dineInSession.activeOrderId ?? '',
+          dbOrderId: String(dineInSession.activeDbOrderId ?? ''),
+          date: new Date().toISOString(),
+          total: newTotal,
+          itemsCount: newAllItems.length,
+          status: 'Preparing',
+          payment_status: 'Pending',
+          table_number: activeTable,
+          order_type: 'Dine In',
+          customer_phone: phone ?? '',
+          items: newAllItems,
+        });
+        useLiveOrderStore.getState().setLiveOrder('Dine In', dineInSession.activeOrderId ?? '', String(dineInSession.activeDbOrderId ?? ''), 'Preparing');
+        clearCart();
+        setIsCartModalVisible(false);
+
+        // Immediately navigate to Track Order status screen
+        router.push({
+          pathname: '/track-order',
+          params: {
+            orderId: dineInSession.activeOrderId ?? '',
+            dbOrderId: String(dineInSession.activeDbOrderId ?? ''),
+            tableNumber: activeTable,
+            orderType: 'Dine In',
+            cart: JSON.stringify(newAllItems),
+          }
+        });
+      } else if (payLater) {
+        // Place initial dine-in order with Pay Later
+        const res = await orderApi.createOrder({
+          cart: formattedCart,
+          subtotal: subtotal,
+          total_amount: subtotal,
+          order_type: 'DINE_IN',
+          table_number: activeTable,
+          payment_method: 'Pay Later',
+          phone: phone || '',
+        });
+
+        dineInSession.startDineInOrder(
+          activeTable,
+          res.orderId,
+          res.dbOrderId,
+          formattedCart,
+          subtotal
+        );
+        useOrderStore.getState().addPastOrder({
+          orderId: res.orderId,
+          dbOrderId: String(res.dbOrderId),
+          date: new Date().toISOString(),
+          total: subtotal,
+          itemsCount: formattedCart.length,
+          status: 'Preparing',
+          payment_status: 'Pending',
+          table_number: activeTable,
+          order_type: 'Dine In',
+          customer_phone: phone || '',
+          items: formattedCart,
+        });
+        useLiveOrderStore.getState().setLiveOrder('Dine In', res.orderId, String(res.dbOrderId), 'Preparing');
+        clearCart();
+        setIsCartModalVisible(false);
+
+        // Immediately navigate to Track Order status screen
+        router.push({
+          pathname: '/track-order',
+          params: {
+            orderId: res.orderId,
+            dbOrderId: String(res.dbOrderId),
+            tableNumber: activeTable,
+            orderType: 'Dine In',
+            cart: JSON.stringify(formattedCart),
+          }
+        });
+      } else {
+        setIsCartModalVisible(false);
+        router.push({ pathname: '/checkout' });
+      }
+    } catch (err: any) {
+      Alert.alert('Error', err.message || 'Failed to place dine-in order. Please try again.');
+    } finally {
+      setIsPlacingOrder(false);
+    }
+  };
 
   useEffect(() => {
     const fetchMenu = async () => {
+        if (!restaurantId) return;
         try {
             // Fetch items first so we know which categories are actually used
             const itemData = await menuApi.getItems(restaurantId);
@@ -111,20 +247,24 @@ export default function App() {
     fetchMenu();
   }, [restaurantId]);
 
-  const handleIncrement = (id: number) => {
-    if (!cart[id]) {
-      const item = menuItems.find(m => m.id === id);
+  const handleIncrement = (id: any, itemObj?: any) => {
+    const existing = cart[id] || cart[String(id)] || cart[Number(id)];
+    if (existing) {
+      incrementQuantity(existing.id);
+    } else {
+      const item = itemObj || 
+        (selectedItem && (String(selectedItem.id) === String(id)) ? selectedItem : null) ||
+        menuItems.find(m => String(m.id) === String(id));
       if (item) {
         addItem({ id: item.id, name: item.name, price: item.price, image: item.image, category: item.category, desc: item.desc, quantity: 1 });
       }
-    } else {
-      incrementQuantity(id);
     }
   };
 
-  const handleDecrement = (id: number) => {
-    if (cart[id]) {
-      decrementQuantity(id);
+  const handleDecrement = (id: any) => {
+    const existing = cart[id] || cart[String(id)] || cart[Number(id)];
+    if (existing) {
+      decrementQuantity(existing.id);
     }
   };
 
@@ -136,14 +276,17 @@ export default function App() {
         </TouchableOpacity>
 
         {/* Table No */}
-        {orderType === "Dine In" && (
-          <View style={styles.tableBadge}>
-            <Text style={styles.tableText}>Table no : </Text>
+        {orderType === "Dine In" && tableNumber ? (
+          <View style={styles.tableBadgeContainer}>
+            <View style={styles.tableTextContainer}>
+              <Text style={styles.tableText}>Table no : </Text>
+            </View>
+            <View style={styles.tableLine} />
             <View style={styles.tableCircle}>
               <Text style={styles.tableCircleText}>{tableNumber.replace('T-', '')}</Text>
             </View>
           </View>
-        )}
+        ) : null}
       </View>
       
       {/* Logo */}
@@ -310,19 +453,28 @@ export default function App() {
         </View>
       )}
 
+      {/* Active Dine-In Session Banner */}
+      <DineInActiveBanner bottomOffset={24 + insets.bottom + (cartItemCount > 0 ? 116 : 60)} />
+
       {/* Floating Buttons */}
       <View style={[styles.floatingContainer, { bottom: 24 + insets.bottom }]}>
         {cartItemCount > 0 && (
-          <TouchableOpacity style={styles.viewCartBtn} onPress={() => setIsCartModalVisible(true)}>
-            <Ionicons name="cart-outline" size={18} color="#fff" />
-            <Text style={styles.viewCartText}>View Cart</Text>
-            <View style={styles.viewCartBadge}>
-              <Text style={styles.viewCartBadgeText}>{cartItemCount}</Text>
-            </View>
-          </TouchableOpacity>
+          <ViewCartButton />
         )}
 
-        {/* Talk to Chef button removed */}
+        {/* Talk to Chef button */}
+        <TouchableOpacity style={styles.talkToChefBtn} onPress={() => showAgent()}>
+          <View style={styles.chefIconContainer}>
+             <Image source={require('../../../assets/images/chef_mascot.png')} style={styles.talkChefImg} resizeMode="contain" />
+          </View>
+          <View style={styles.talkChefTextCol}>
+            <Text style={styles.talkChefTitle}>Talk to Chef</Text>
+            <View style={styles.talkChefSubRow}>
+              <Ionicons name="mic-outline" size={12} color="#666" />
+              <Text style={styles.talkChefSub}>Tap to speak</Text>
+            </View>
+          </View>
+        </TouchableOpacity>
       </View>
 
       {/* Cart Modal */}
@@ -366,7 +518,13 @@ export default function App() {
                 <Ionicons name="bag-handle-outline" size={16} color={orderType === "Take Away" ? "#fff" : "#ccc"} />
                 <Text style={orderType === "Take Away" ? styles.orderTypeActiveText : styles.orderTypeInactiveText}>Take Away</Text>
               </TouchableOpacity>
-
+              <TouchableOpacity 
+                style={[styles.orderTypeBtn, orderType === "Delivery" && styles.orderTypeActive]}
+                onPress={() => setOrderType("Delivery")}
+              >
+                <Ionicons name="bicycle-outline" size={16} color={orderType === "Delivery" ? "#fff" : "#ccc"} />
+                <Text style={orderType === "Delivery" ? styles.orderTypeActiveText : styles.orderTypeInactiveText}>Delivery</Text>
+              </TouchableOpacity>
             </View>
 
             <ScrollView style={styles.cartItemsScroll} contentContainerStyle={{ paddingTop: 12, paddingRight: 12, paddingLeft: 4, paddingBottom: 12 }} showsVerticalScrollIndicator={false}>
@@ -390,11 +548,11 @@ export default function App() {
                       </View>
                       <View style={styles.cartItemRight}>
                         <View style={styles.stepper}>
-                          <TouchableOpacity style={styles.stepBtnMinus} onPress={() => handleDecrement(item.id)}>
+                          <TouchableOpacity style={styles.stepBtnMinus} onPress={() => decrementQuantity(item.id as any)}>
                             <Ionicons name="remove" size={16} color="#f87171" />
                           </TouchableOpacity>
                           <Text style={styles.stepVal}>{item.quantity}</Text>
-                          <TouchableOpacity style={styles.stepBtnPlus} onPress={() => handleIncrement(item.id)}>
+                          <TouchableOpacity style={styles.stepBtnPlus} onPress={() => incrementQuantity(item.id as any)}>
                             <Ionicons name="add" size={16} color="#fff" />
                           </TouchableOpacity>
                         </View>
@@ -411,12 +569,62 @@ export default function App() {
             </ScrollView>
 
             <View style={styles.placeOrderContainer}>
-              <TouchableOpacity style={styles.placeOrderBtn} onPress={() => {
-                 setIsCartModalVisible(false);
-                 router.push({ pathname: '/checkout' });
-              }}>
-                <Text style={styles.placeOrderText}>Place Order</Text>
-              </TouchableOpacity>
+              {orderType === "Dine In" ? (
+                dineInSession.isActive && dineInSession.activeDbOrderId ? (
+                  <TouchableOpacity
+                    style={styles.placeOrderBtn}
+                    onPress={() => handleDineInOrder(true)}
+                    disabled={isPlacingOrder}
+                    activeOpacity={0.85}
+                  >
+                    {isPlacingOrder ? (
+                      <ActivityIndicator size="small" color="#fff" />
+                    ) : (
+                      <Text style={styles.placeOrderText}>
+                        Add to Table Order (#{dineInSession.activeOrderId})
+                      </Text>
+                    )}
+                  </TouchableOpacity>
+                ) : (
+                  <>
+                    <TouchableOpacity
+                      style={styles.placeOrderBtn}
+                      onPress={() => handleDineInOrder(true)}
+                      disabled={isPlacingOrder}
+                      activeOpacity={0.85}
+                    >
+                      {isPlacingOrder ? (
+                        <ActivityIndicator size="small" color="#fff" />
+                      ) : (
+                        <Text style={styles.placeOrderText}>
+                          Order Now (Pay at End of Meal)
+                        </Text>
+                      )}
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={styles.payNowSecondaryBtn}
+                      onPress={() => {
+                        setIsCartModalVisible(false);
+                        router.push({ pathname: '/checkout' });
+                      }}
+                      activeOpacity={0.7}
+                    >
+                      <Text style={styles.payNowSecondaryText}>or Pay Now via Checkout ›</Text>
+                    </TouchableOpacity>
+                  </>
+                )
+              ) : (
+                <TouchableOpacity
+                  style={styles.placeOrderBtn}
+                  onPress={() => {
+                    setIsCartModalVisible(false);
+                    router.push({ pathname: '/checkout' });
+                  }}
+                  activeOpacity={0.85}
+                >
+                  <Text style={styles.placeOrderText}>Place Order</Text>
+                </TouchableOpacity>
+              )}
             </View>
           </TouchableOpacity>
         </TouchableOpacity>
@@ -441,42 +649,61 @@ export default function App() {
                   <Image source={{ uri: selectedItem.image }} style={styles.itemModalImg} resizeMode="cover" />
                 </View>
                 
-                <ScrollView contentContainerStyle={styles.itemModalBody}>
-                  <View style={[styles.availBadge, !selectedItem.available && styles.unavailBadge, { alignSelf: 'flex-start', marginBottom: 8 }]}>
-                    <View style={[styles.availDot, !selectedItem.available && styles.unavailDot]} />
-                  </View>
-                  <Text style={styles.itemModalTitle}>{selectedItem.name}</Text>
-                  <Text style={{ fontSize: 16, fontWeight: 'bold', color: '#ff4500', marginBottom: 8 }}>Rs. {selectedItem.price}</Text>
-                  {selectedItem.desc ? <Text style={styles.itemModalDesc}>{selectedItem.desc}</Text> : null}
-                </ScrollView>
+                {(() => {
+                  const isAvail = selectedItem.available !== false;
+                  const itemQty = cart[selectedItem.id]?.quantity ?? cart[String(selectedItem.id)]?.quantity ?? 0;
 
-                <View style={[styles.itemModalFooter, { paddingBottom: Math.max(insets.bottom, 16) }]}>
-                  <View style={styles.modalStepper}>
-                    <TouchableOpacity 
-                      style={[styles.modalStepBtnMinus, (!selectedItem.available || (cart[selectedItem.id]?.quantity ?? 0) === 0) && styles.stepBtnDisabled]}
-                      onPress={() => handleDecrement(selectedItem.id)}
-                      disabled={!selectedItem.available || (cart[selectedItem.id]?.quantity ?? 0) === 0}
-                    >
-                      <Ionicons name="remove" size={20} color={(!selectedItem.available || (cart[selectedItem.id]?.quantity ?? 0) === 0) ? "#ccc" : "#f87171"} />
-                    </TouchableOpacity>
-                    <Text style={styles.modalStepVal}>{cart[selectedItem.id]?.quantity ?? 0}</Text>
-                    <TouchableOpacity 
-                      style={[styles.modalStepBtnPlus, !selectedItem.available && styles.stepBtnDisabled]}
-                      onPress={() => handleIncrement(selectedItem.id)}
-                      disabled={!selectedItem.available}
-                    >
-                      <Ionicons name="add" size={20} color="#fff" />
-                    </TouchableOpacity>
-                  </View>
-                  
-                  <TouchableOpacity 
-                    style={styles.itemModalAddBtn} 
-                    onPress={() => handleIncrement(selectedItem.id)}
-                    disabled={!selectedItem.available}
-                  >
-                    <Text style={styles.itemModalAddText}>Add Item <Ionicons name="add" size={16} color="#fff" /></Text>
-                  </TouchableOpacity>
-                </View>
+                  return (
+                    <>
+                      <ScrollView contentContainerStyle={styles.itemModalBody}>
+                        <View style={[styles.availBadge, !isAvail && styles.unavailBadge, { alignSelf: 'flex-start', marginBottom: 8 }]}>
+                          <View style={[styles.availDot, !isAvail && styles.unavailDot]} />
+                          <Text style={[styles.availText, !isAvail && styles.unavailText]}>
+                            {isAvail ? 'Available' : 'Not Available'}
+                          </Text>
+                        </View>
+                        <Text style={styles.itemModalTitle}>{selectedItem.name}</Text>
+                        <Text style={{ fontSize: 16, fontWeight: 'bold', color: '#ff4500', marginBottom: 8 }}>Rs. {selectedItem.price}</Text>
+                        {selectedItem.desc ? <Text style={styles.itemModalDesc}>{selectedItem.desc}</Text> : null}
+                      </ScrollView>
+
+                      <View style={[styles.itemModalFooter, { paddingBottom: Math.max(insets.bottom, 16) }]}>
+                        <View style={styles.modalStepper}>
+                          <TouchableOpacity 
+                            style={[styles.modalStepBtnMinus, (!isAvail || itemQty === 0) && styles.stepBtnDisabled]}
+                            onPress={() => handleDecrement(selectedItem.id)}
+                            disabled={!isAvail || itemQty === 0}
+                            activeOpacity={0.7}
+                          >
+                            <Ionicons name="remove" size={20} color={(!isAvail || itemQty === 0) ? "#ccc" : "#f87171"} />
+                          </TouchableOpacity>
+                          <Text style={styles.modalStepVal}>{itemQty}</Text>
+                          <TouchableOpacity 
+                            style={[styles.modalStepBtnPlus, !isAvail && styles.stepBtnDisabled]}
+                            onPress={() => handleIncrement(selectedItem.id, selectedItem)}
+                            disabled={!isAvail}
+                            activeOpacity={0.7}
+                          >
+                            <Ionicons name="add" size={20} color="#fff" />
+                          </TouchableOpacity>
+                        </View>
+                        
+                        <TouchableOpacity 
+                          style={[styles.itemModalAddBtn, !isAvail && { backgroundColor: '#ccc' }]} 
+                          onPress={() => {
+                            if (!isAvail) return;
+                            handleIncrement(selectedItem.id, selectedItem);
+                            setSelectedItem(null);
+                          }}
+                          disabled={!isAvail}
+                          activeOpacity={0.8}
+                        >
+                          <Text style={styles.itemModalAddText}>Add Item <Ionicons name="add" size={16} color="#fff" /></Text>
+                        </TouchableOpacity>
+                      </View>
+                    </>
+                  );
+                })()}
               </>
             )}
           </TouchableOpacity>
@@ -560,30 +787,35 @@ const styles = StyleSheet.create({
     marginRight: -4,
   },
   homeBtn: { width: 36, height: 36, borderRadius: 18, backgroundColor: 'rgba(255,255,255,0.2)', alignItems: 'center', justifyContent: 'center' },
-  tableBadge: {
+  tableBadgeContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#fff',
-    borderRadius: 20,
-    paddingLeft: 10,
-    paddingRight: 2,
-    paddingVertical: 2,
-    borderWidth: 1,
-    borderColor: '#dfdfdf'
   },
-  tableText: { fontSize: 10, fontWeight: '600', color: '#000' },
-  tableCircle: {
-    backgroundColor: '#ff3400',
-    borderRadius: 12,
-    width: 24,
-    height: 24,
-    alignItems: 'center',
-    justifyContent: 'center',
+  tableTextContainer: {
+    backgroundColor: '#fff',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 14,
     borderWidth: 1,
     borderColor: '#dfdfdf',
-    marginLeft: 4,
   },
-  tableCircleText: { color: '#fff', fontSize: 14, fontWeight: 'bold' },
+  tableText: { fontSize: 10, fontWeight: '600', color: '#000' },
+  tableLine: {
+    width: 10,
+    height: 2,
+    backgroundColor: '#fff',
+  },
+  tableCircle: {
+    backgroundColor: '#ff3400',
+    borderRadius: 16,
+    width: 32,
+    height: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1.5,
+    borderColor: '#fff',
+  },
+  tableCircleText: { color: '#fff', fontSize: 16, fontWeight: 'bold', fontFamily: 'serif' },
   logoContainer: { flexDirection: 'row', alignItems: 'center', flex: 1, justifyContent: 'center' },
   logoImageFull: { width: 140, height: 36, resizeMode: 'contain' },
   globeIcon: {
@@ -694,38 +926,52 @@ const styles = StyleSheet.create({
     alignItems: 'flex-end',
     gap: 12,
   },
-  viewCartBtn: {
+  talkToChefBtn: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#00a01d',
-    paddingVertical: 10,
+    backgroundColor: '#fff',
+    paddingVertical: 8,
     paddingHorizontal: 16,
-    borderRadius: 24,
+    borderRadius: 30,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.2,
+    shadowOpacity: 0.15,
     shadowRadius: 6,
     elevation: 6,
-    gap: 8,
+    gap: 12,
+    borderWidth: 1,
+    borderColor: '#eee',
+    marginTop: 12,
   },
-  viewCartText: {
-    color: '#fff',
-    fontWeight: 'bold',
-    fontSize: 14,
-  },
-  viewCartBadge: {
-    backgroundColor: '#32d366',
-    width: 20,
-    height: 20,
-    borderRadius: 10,
+  chefIconContainer: {
+    width: 36,
+    height: 36,
+    backgroundColor: '#f5f5f5',
+    borderRadius: 18,
     alignItems: 'center',
     justifyContent: 'center',
-    marginLeft: 4,
   },
-  viewCartBadgeText: {
-    color: '#fff',
+  talkChefImg: {
+    width: 28,
+    height: 28,
+  },
+  talkChefTextCol: {
+    justifyContent: 'center',
+  },
+  talkChefTitle: {
     fontSize: 12,
     fontWeight: 'bold',
+    color: '#333',
+  },
+  talkChefSubRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 2,
+    marginTop: 2,
+  },
+  talkChefSub: {
+    fontSize: 10,
+    color: '#666',
   },
   modalOverlay: {
     flex: 1,
@@ -904,6 +1150,16 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontWeight: 'bold',
     fontSize: 16,
+  },
+  payNowSecondaryBtn: {
+    alignItems: 'center',
+    paddingVertical: 10,
+    marginTop: 4,
+  },
+  payNowSecondaryText: {
+    color: '#666',
+    fontSize: 13,
+    fontWeight: '600',
   },
   itemModalOverlay: {
     flex: 1,

@@ -33,6 +33,10 @@ export interface PastOrder {
   total: number;
   itemsCount: number;
   status: string;
+  payment_status?: string;
+  table_number?: string;
+  order_type?: string;
+  customer_phone?: string;
   items?: any[];
 }
 
@@ -51,7 +55,26 @@ export const useOrderStore = create<OrderState>()(
       pastOrders: [],
       currentOrder: null,
 
-      addPastOrder: (order) => set((state) => ({ pastOrders: [order, ...state.pastOrders] })),
+      addPastOrder: (order) => set((state) => {
+        const existingIdx = state.pastOrders.findIndex(
+          (o) => (order.dbOrderId && String(o.dbOrderId) === String(order.dbOrderId)) ||
+                 (order.orderId && o.orderId === order.orderId)
+        );
+        if (existingIdx >= 0) {
+          const updated = [...state.pastOrders];
+          updated[existingIdx] = {
+            ...updated[existingIdx],
+            ...order,
+            total: order.total !== undefined ? order.total : updated[existingIdx].total,
+            itemsCount: order.itemsCount !== undefined ? order.itemsCount : updated[existingIdx].itemsCount,
+            items: order.items || updated[existingIdx].items,
+            status: order.status || updated[existingIdx].status,
+            payment_status: order.payment_status || updated[existingIdx].payment_status,
+          };
+          return { pastOrders: updated };
+        }
+        return { pastOrders: [order, ...state.pastOrders] };
+      }),
       setCurrentOrder: (currentOrder) => set({ currentOrder }),
       clearCurrentOrder: () => set({ currentOrder: null })
     }),

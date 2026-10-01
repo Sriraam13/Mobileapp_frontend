@@ -8,6 +8,18 @@ export interface Address {
   type: string;
   address: string;
   full_address: string;
+  latitude?: number;
+  longitude?: number;
+  flat_house_no?: string;
+  building_apartment_name?: string;
+  floor?: string;
+  landmark?: string;
+  city?: string;
+  state?: string;
+  pincode?: string;
+  contact_name?: string;
+  contact_phone?: string;
+  delivery_instructions?: string;
   icon: string;
   iconBg: string;
   iconColor: string;
@@ -17,7 +29,7 @@ export interface Address {
 interface AddressState {
   addresses: Address[];
   selectedDeliveryAddress: string | null;
-  selectedAddressId: number | null;
+  selectedAddressId?: number;
 
   setAddresses: (addresses: Address[]) => void;
   setSelectedDeliveryAddress: (address: string, id?: number) => void;
@@ -54,12 +66,12 @@ export const useAddressStore = create<AddressState>()(
     (set) => ({
       addresses: [],
       selectedDeliveryAddress: null,
-      selectedAddressId: null as any,
+      selectedAddressId: undefined,
 
       setAddresses: (addresses) => set({ addresses }),
-      setSelectedDeliveryAddress: (selectedDeliveryAddress, selectedAddressId = null) => set({ selectedDeliveryAddress, selectedAddressId }),
+      setSelectedDeliveryAddress: (selectedDeliveryAddress, selectedAddressId) => set({ selectedDeliveryAddress, selectedAddressId }),
       addAddress: (address) => set((state) => ({ addresses: [...state.addresses, address] })),
-      clearAddresses: () => set({ addresses: [], selectedDeliveryAddress: null, selectedAddressId: null as any }),
+      clearAddresses: () => set({ addresses: [], selectedDeliveryAddress: null, selectedAddressId: undefined }),
     }),
     {
       name: 'address-storage',

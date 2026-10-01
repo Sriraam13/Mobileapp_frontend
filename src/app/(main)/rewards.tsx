@@ -5,34 +5,35 @@ import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useAuthStore } from '../../store';
 import { customerApi } from '../../services/apiService';
+import BottomNavBar from '../../components/layout/BottomNavBar';
 
 export default function Rewards() {
   const router = useRouter();
-  const { phone } = useAuthStore();
+  const { customerId } = useAuthStore();
   const [loyaltyPoints, setLoyaltyPoints] = useState(0);
-  const [ordersProgress, setOrdersProgress] = useState(0);
+  const [transactions, setTransactions] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [showHowItWorks, setShowHowItWorks] = useState(false);
 
-  const fetchProfile = async () => {
+  const fetchLoyalty = async () => {
+    if (!customerId) return;
     try {
       setLoading(true);
-      const testPhone = phone || '+919876543210';
-      let profileData = await customerApi.getProfile(testPhone).catch(() => null);
-      if (profileData) {
-        setLoyaltyPoints(profileData.loyalty_points || 0);
-        setOrdersProgress(profileData.orders_progress || 0);
+      const res = await customerApi.getLoyalty(customerId);
+      if (res) {
+        setLoyaltyPoints(res.balance || 0);
+        setTransactions(res.transactions || []);
       }
     } catch (e) {
-      console.error("Failed to fetch profile", e);
+      console.error("Failed to fetch loyalty data", e);
     } finally {
       setLoading(false);
     }
   };
 
   useEffect(() => {
-    fetchProfile();
-  }, []);
+    fetchLoyalty();
+  }, [customerId]);
 
   return (
     <SafeAreaView style={styles.container}>
@@ -70,64 +71,30 @@ export default function Rewards() {
           </View>
         </View>
 
-        {/* Milestones & Quests */}
-        <Text style={styles.sectionTitle}>Milestones & Quests</Text>
-        <View style={styles.questCard}>
-          <View style={styles.questIconContainer}>
-            <Ionicons name="trending-up" size={20} color="#00cc66" />
-          </View>
-          <View style={styles.questInfo}>
-            <Text style={styles.questTitle}>Order 3 times this week</Text>
-            <Text style={styles.questProgress}>Progress: {ordersProgress}/3 orders  Get 100 pts</Text>
-          </View>
-        </View>
+        {/* Transaction History */}
+        <Text style={styles.sectionTitle}>Recent History</Text>
 
-        {/* Available Rewards */}
-        <Text style={styles.sectionTitle}>Available Rewards</Text>
-
-        <View style={styles.rewardCard}>
-          <Image source={{ uri: 'https://via.placeholder.com/100' }} style={styles.rewardImage} />
-          <View style={styles.rewardInfo}>
-            <Text style={styles.rewardTitle}>Free Filter Coffee</Text>
-            <Text style={styles.rewardPoints}>150 Points required</Text>
-          </View>
-          <TouchableOpacity style={styles.redeemBtn}>
-            <Text style={styles.redeemText}>Redeem</Text>
-          </TouchableOpacity>
-        </View>
-
-        <View style={styles.rewardCard}>
-          <Image source={{ uri: 'https://via.placeholder.com/100' }} style={styles.rewardImage} />
-          <View style={styles.rewardInfo}>
-            <Text style={styles.rewardTitle}>Free Medu Vada (1 Pc)</Text>
-            <Text style={styles.rewardPoints}>250 Points required</Text>
-          </View>
-          <TouchableOpacity style={styles.redeemBtn}>
-            <Text style={styles.redeemText}>Redeem</Text>
-          </TouchableOpacity>
-        </View>
+        {transactions.length === 0 ? (
+          <Text style={{ color: '#666', textAlign: 'center', marginTop: 20 }}>No transactions yet.</Text>
+        ) : (
+          transactions.map(tx => (
+            <View key={tx.id} style={styles.transactionCard}>
+              <View style={styles.txIconContainer}>
+                <Ionicons name={tx.type === 'ORDER_CREDIT' ? 'restaurant-outline' : 'gift-outline'} size={20} color="#00cc66" />
+              </View>
+              <View style={styles.txInfo}>
+                <Text style={styles.txTitle}>{tx.description}</Text>
+                <Text style={styles.txDate}>{new Date(tx.date).toLocaleDateString()}</Text>
+              </View>
+              <Text style={styles.txPoints}>+{tx.points} pts</Text>
+            </View>
+          ))
+        )}
 
       </ScrollView>
 
       {/* Bottom Navigation */}
-      <View style={styles.bottomNav}>
-        <TouchableOpacity style={styles.navItem} onPress={() => router.replace('/home')}>
-          <Ionicons name='home-outline' size={24} color='#888' />
-          <Text style={styles.navText}>Home</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.navItem} onPress={() => router.replace('/menu')}>
-          <Ionicons name='search-outline' size={24} color='#888' />
-          <Text style={styles.navText}>Search</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.navItem} onPress={() => router.replace('/orders')}>
-          <Ionicons name='receipt-outline' size={24} color='#888' />
-          <Text style={styles.navText}>Orders</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.navItem} onPress={() => router.replace('/profile')}>
-          <Ionicons name='person' size={24} color='#ff4500' />
-          <Text style={[styles.navText, { color: '#ff4500' }]}>Profile</Text>
-        </TouchableOpacity>
-      </View>
+      <BottomNavBar activeTab="profile" />
       {/* How it works Modal */}
       <Modal
         visible={showHowItWorks}
@@ -142,9 +109,9 @@ export default function Rewards() {
               <Text style={styles.modalTitle}>How It Works</Text>
             </View>
             <Text style={styles.modalText}>
-              • Order 3 times in a week to earn 100 loyalty points.{"\n\n"}
-              • Each point is worth Rs.10.{"\n\n"}
-              • Redeem your accumulated points for free food items and exclusive discounts!
+              • Earn 1 loyalty point for every Rs.10 spent on food.{"\n\n"}
+              • Points are automatically credited when your order is delivered or served.{"\n\n"}
+              • Redeem your accumulated points for exclusive discounts!
             </Text>
             <TouchableOpacity
               style={styles.modalCloseBtn}
@@ -164,7 +131,7 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#fafafa',
-    paddingTop: Platform.OS === 'android' ? StatusBar.currentHeight : 0,
+    
   },
   header: {
     flexDirection: 'row',
@@ -229,41 +196,7 @@ const styles = StyleSheet.create({
     marginBottom: 15,
     color: '#333',
   },
-  questCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    padding: 15,
-    marginBottom: 25,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 3,
-    elevation: 2,
-  },
-  questIconContainer: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: '#e6ffe6',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 15,
-  },
-  questInfo: {
-    flex: 1,
-  },
-  questTitle: {
-    fontSize: 14,
-    fontWeight: 'bold',
-    marginBottom: 4,
-  },
-  questProgress: {
-    fontSize: 12,
-    color: '#888',
-  },
-  rewardCard: {
+  transactionCard: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: '#fff',
@@ -276,34 +209,32 @@ const styles = StyleSheet.create({
     shadowRadius: 3,
     elevation: 2,
   },
-  rewardImage: {
-    width: 60,
-    height: 60,
-    borderRadius: 8,
+  txIconContainer: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#e6ffe6',
+    justifyContent: 'center',
+    alignItems: 'center',
     marginRight: 15,
   },
-  rewardInfo: {
+  txInfo: {
     flex: 1,
   },
-  rewardTitle: {
+  txTitle: {
     fontSize: 14,
     fontWeight: 'bold',
     marginBottom: 4,
+    color: '#333',
   },
-  rewardPoints: {
+  txDate: {
     fontSize: 12,
     color: '#888',
   },
-  redeemBtn: {
-    backgroundColor: '#ff4500',
-    paddingHorizontal: 15,
-    paddingVertical: 8,
-    borderRadius: 20,
-  },
-  redeemText: {
-    color: '#fff',
-    fontSize: 12,
+  txPoints: {
+    fontSize: 14,
     fontWeight: 'bold',
+    color: '#00cc66',
   },
   bottomNav: {
     position: 'absolute',
