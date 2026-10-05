@@ -230,7 +230,7 @@ export default function OrderSuccessScreen() {
         description: i.description,
         price: i.price,
         quantity: i.quantity,
-        image_url: getFullImageUrl(i.image_url)
+        image_url: getFullImageUrl(i.image_url, i.name || i.item_name || 'Item')
       }));
     }
     if (params.cart) {
@@ -242,8 +242,8 @@ export default function OrderSuccessScreen() {
           price: i.price,
           quantity: i.quantity,
           image_url: i.image_url 
-            ? getFullImageUrl(i.image_url)
-            : getFullImageUrl(i.image)
+            ? getFullImageUrl(i.image_url, i.name || i.title || 'Item')
+            : getFullImageUrl(i.image, i.name || i.title || 'Item')
         }));
       } catch (e) {}
     }

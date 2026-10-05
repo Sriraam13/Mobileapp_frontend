@@ -235,7 +235,7 @@ export default function RazorpayScreen() {
         var options = {
           key: '${RAZORPAY_KEY}',
           amount: ${amountInPaise},
-          ${razorpayOrderId ? `order_id: '${razorpayOrderId}',` : ''}
+          ${razorpayOrderId && !razorpayOrderId.toString().startsWith('test_') ? `order_id: '${razorpayOrderId}',` : ''}
           currency: 'INR',
           name: 'Udupi Restaurant',
           description: '${orderType || 'Food'} Order Payment',

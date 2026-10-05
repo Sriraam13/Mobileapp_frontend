@@ -98,7 +98,7 @@ export default function Orders() {
               table_number: tableNumber,
               items: items || [],
               total: o.total_amount || 0,
-              image: items?.[0]?.image_url ? getFullImageUrl(items[0].image_url) : 'https://via.placeholder.com/150',
+              image: items?.[0]?.image_url ? getFullImageUrl(items[0].image_url, items[0].name) : 'https://via.placeholder.com/150',
               order_type: mappedType,
               isCatering: false
             };
@@ -164,7 +164,7 @@ export default function Orders() {
             table_number: tableNumber,
             items: o.items || o.cart || [],
             total: o.total || 0,
-            image: o.items?.[0]?.image ? getFullImageUrl(o.items[0].image) : 'https://via.placeholder.com/150',
+            image: o.items?.[0]?.image ? getFullImageUrl(o.items[0].image, o.items[0].name) : 'https://via.placeholder.com/150',
             order_type: mappedType,
           };
         });
@@ -188,7 +188,7 @@ export default function Orders() {
           table_number: dineInSession.tableNumber,
           items: dineInSession.orderedItems || [],
           total: dineInSession.totalAmount || 0,
-          image: dineInSession.orderedItems?.[0]?.image ? getFullImageUrl(dineInSession.orderedItems[0].image) : 'https://via.placeholder.com/150',
+          image: dineInSession.orderedItems?.[0]?.image ? getFullImageUrl(dineInSession.orderedItems[0].image, dineInSession.orderedItems[0].name) : 'https://via.placeholder.com/150',
           order_type: 'Dine In',
           isOngoingDineIn: true,
         };

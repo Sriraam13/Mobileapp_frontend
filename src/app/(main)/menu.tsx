@@ -1,4 +1,4 @@
-import { View, Text, StyleSheet, TextInput, ScrollView, TouchableOpacity, FlatList, Platform, StatusBar, Image, Modal, BackHandler, Alert, ActivityIndicator } from 'react-native';
+import { View, Text, StyleSheet, TextInput, ScrollView, TouchableOpacity, FlatList, Platform, StatusBar, Image, Modal, BackHandler, Alert, ActivityIndicator, RefreshControl } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useState, useEffect } from 'react';
@@ -58,6 +58,7 @@ export default function App() {
   const [availabilityFilter, setAvailabilityFilter] = useState("All Items");
   const [priceSort, setPriceSort] = useState("Default");
   const [isLoading, setIsLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   
   const { selectedOutlet } = useRestaurantStore();
   const restaurantId = selectedOutlet?.restaurant_id;
@@ -186,10 +187,9 @@ export default function App() {
     }
   };
 
-  useEffect(() => {
-    const fetchMenu = async () => {
-        if (!restaurantId) return;
-        try {
+  const fetchMenu = async () => {
+      if (!restaurantId) return;
+      try {
             // Fetch items first so we know which categories are actually used
             const itemData = await menuApi.getItems(restaurantId);
             const formattedItems = itemData.map((item: any) => ({
@@ -244,11 +244,19 @@ export default function App() {
         } catch (e) {
             console.error("Error fetching menu data", e);
         } finally {
-            setIsLoading(false);
-        }
-    };
+          setIsLoading(false);
+      }
+  };
+
+  useEffect(() => {
     fetchMenu();
   }, [restaurantId]);
+
+  const onRefresh = async () => {
+    setRefreshing(true);
+    await fetchMenu();
+    setRefreshing(false);
+  };
 
   const handleIncrement = (id: any, itemObj?: any) => {
     const existing = cart[id] || cart[String(id)] || cart[Number(id)];
@@ -448,6 +456,7 @@ export default function App() {
           columnWrapperStyle={styles.gridRow}
           renderItem={renderMenuItem}
           showsVerticalScrollIndicator={false}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={['#ff4500']} />}
         />
       ) : (
         <View style={styles.emptyContainer}>

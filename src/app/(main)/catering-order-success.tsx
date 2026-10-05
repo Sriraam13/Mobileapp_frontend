@@ -8,6 +8,7 @@ import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuthStore } from '../../store/useAuthStore';
+import { useCateringSessionStore } from '../../store/useCateringSessionStore';
 
 interface CateringOrder {
   id: number;
@@ -36,6 +37,7 @@ export default function CateringOrderSuccess() {
   const params = useLocalSearchParams();
   const insets = useSafeAreaInsets();
   const auth = useAuthStore();
+  const { orderType } = useCateringSessionStore();
 
   const orderId = parseInt(params.orderId as string || '0', 10);
   const advanceAmount = parseFloat(params.advanceAmount as string || '0');
@@ -124,7 +126,7 @@ export default function CateringOrderSuccess() {
             <Ionicons name="checkmark" size={36} color="#2ecc71" />
           </Animated.View>
 
-          <Text style={styles.bannerTitle}>Bulk Order Booked Successfully!</Text>
+          <Text style={styles.bannerTitle}>{orderType} Booked Successfully!</Text>
           <View style={styles.orderIdPill}>
             <Text style={styles.orderIdText}>ID: {displayOrderId}</Text>
           </View>

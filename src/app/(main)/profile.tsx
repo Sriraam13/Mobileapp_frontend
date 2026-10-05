@@ -2,7 +2,7 @@ import React, { useState, useCallback } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
   Platform, StatusBar, Image, ActivityIndicator,
-  TextInput, Alert, Modal
+  TextInput, Alert, Modal, RefreshControl
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
@@ -62,6 +62,7 @@ export default function Profile() {
     setCustomAlert({ visible: true, title, message, type, buttons: buttons || (onConfirm ? [{ text: 'Continue', onPress: onConfirm }] : [{ text: 'Continue' }]) });
   };
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [editName, setEditName] = useState('');
   const [editEmail, setEditEmail] = useState('');
@@ -102,6 +103,12 @@ export default function Profile() {
       fetchProfile();
     }, [fetchProfile])
   );
+
+  const onRefresh = async () => {
+    setRefreshing(true);
+    await fetchProfile();
+    setRefreshing(false);
+  };
 
   // ── Profile save ──
   const handleSaveProfile = async () => {
@@ -255,7 +262,11 @@ export default function Profile() {
         <Text style={styles.headerTitle}>My Profile</Text>
       </View>
 
-      <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+      <ScrollView 
+        contentContainerStyle={styles.scrollContent} 
+        showsVerticalScrollIndicator={false}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={['#ff4500']} />}
+      >
 
         {/* User Card */}
         <View style={styles.userCard}>

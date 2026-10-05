@@ -59,7 +59,7 @@ export default function OrderDetails() {
         name: item.name,
         price: item.price,
         quantity: item.quantity,
-        image: getFullImageUrl(item.image_url),
+        image: getFullImageUrl(item.image_url, item.name),
         category: 'Special',
       });
     });
@@ -194,7 +194,7 @@ export default function OrderDetails() {
         {/* Items */}
         {items.map((item, index) => (
           <View key={index} style={styles.itemRow}>
-            <Image source={{ uri: getFullImageUrl(item.image_url) }} style={styles.itemImage} />
+            <Image source={{ uri: getFullImageUrl(item.image_url, item.name) }} style={styles.itemImage} />
             <View style={styles.itemInfo}>
               <Text style={styles.itemName}>{item.name}</Text>
               <Text style={styles.itemQty}>Qty: {item.quantity} • Rs. {item.price} each</Text>

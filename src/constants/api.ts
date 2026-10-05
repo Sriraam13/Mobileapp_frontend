@@ -15,6 +15,9 @@ export const IMAGE_BASE_URL = getApiUrl();
 // Helper to construct image URLs directly from database
 export const getFullImageUrl = (url: string | null | undefined, dishName?: string): string => {
   if (!url || typeof url !== 'string' || url.trim() === '') {
+    if (dishName) {
+      return `https://image.pollinations.ai/prompt/Delicious%20${encodeURIComponent(dishName)}%20food%20plating?width=800&height=600&nologo=true`;
+    }
     return 'https://via.placeholder.com/150?text=No+Image';
   }
   

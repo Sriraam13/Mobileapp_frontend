@@ -5,17 +5,24 @@ import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Location from 'expo-location';
 
+import { useCateringSessionStore } from '../../store/useCateringSessionStore';
+
 export default function CateringEventDetails() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   
-  const [eventName, setEventName] = useState('');
-  const [date, setDate] = useState('');
-  const [time, setTime] = useState('');
-  const [occasion, setOccasion] = useState('');
-  const [guestCount, setGuestCount] = useState('50');
-  const [serviceType, setServiceType] = useState('Delivery Only');
-  const [address, setAddress] = useState('');
+  const { 
+    orderType, setOrderType,
+    eventName, 
+    date, 
+    time, 
+    occasion, 
+    guestCount, 
+    serviceType, 
+    address, 
+    setEventDetails 
+  } = useCateringSessionStore();
+
   
   // Google Places Autocomplete state
   const [addressPredictions, setAddressPredictions] = useState<any[]>([]);
@@ -40,7 +47,7 @@ export default function CateringEventDetails() {
   };
 
   const fetchAddressPredictions = async (text: string) => {
-    setAddress(text);
+    setEventDetails({ address: text });
     if (text.length > 2) {
       try {
         const apiKey = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY;
@@ -176,7 +183,7 @@ export default function CateringEventDetails() {
                     style={[styles.calendarDay, isPast && { opacity: 0.3 }]} 
                     disabled={isPast}
                     onPress={() => {
-                      setDate(`${d} ${monthName} ${year}`);
+                      setEventDetails({ date: `${d} ${monthName} ${year}` });
                       setShowDatePicker(false);
                     }}
                   >
@@ -261,7 +268,7 @@ export default function CateringEventDetails() {
                 let h = selectedHour || '12';
                 let m = selectedMinute.padStart(2, '0');
                 if (m === '0' || m === '00' || !selectedMinute) m = '00';
-                setTime(`${h}:${m} ${selectedAmPm}`);
+                setEventDetails({ time: `${h}:${m} ${selectedAmPm}` });
                 setShowTimePicker(false);
               }}>
                 <Text style={styles.alertBtnText}>Confirm</Text>
@@ -331,13 +338,32 @@ export default function CateringEventDetails() {
         keyboardDismissMode="on-drag"
       >
         
+        {/* Order Type Toggle */}
+        <View style={styles.inputGroup}>
+          <Text style={styles.label}>Order Type <Text style={styles.asterisk}>*</Text></Text>
+          <View style={styles.segmentControl}>
+            <TouchableOpacity 
+              style={[styles.segmentBtn, orderType === 'Catering Order' && styles.segmentBtnActive]}
+              onPress={() => setOrderType('Catering Order')}
+            >
+              <Text style={[styles.segmentText, orderType === 'Catering Order' && styles.segmentTextActive]}>CATERING ORDER</Text>
+            </TouchableOpacity>
+            <TouchableOpacity 
+              style={[styles.segmentBtn, orderType === 'Party Order' && styles.segmentBtnActive]}
+              onPress={() => setOrderType('Party Order')}
+            >
+              <Text style={[styles.segmentText, orderType === 'Party Order' && styles.segmentTextActive]}>PARTY ORDER</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+
         {/* Event Name */}
         <View style={styles.inputGroup}>
           <Text style={styles.label}>Event Name <Text style={styles.asterisk}>*</Text></Text>
           <TextInput 
             style={styles.input} 
             value={eventName}
-            onChangeText={setEventName}
+            onChangeText={(text) => setEventDetails({ eventName: text })}
             placeholder="e.g. Birthday Party"
             placeholderTextColor="#999"
           />
@@ -374,7 +400,7 @@ export default function CateringEventDetails() {
             <TextInput 
               style={styles.input} 
               value={occasion}
-              onChangeText={setOccasion}
+              onChangeText={(text) => setEventDetails({ occasion: text })}
               placeholder="e.g. Wedding"
               placeholderTextColor="#999"
             />
@@ -385,7 +411,7 @@ export default function CateringEventDetails() {
               <TextInput
                 style={styles.guestInput}
                 value={guestCount}
-                onChangeText={setGuestCount}
+                onChangeText={(text) => setEventDetails({ guestCount: text })}
                 keyboardType="numeric"
                 maxLength={4}
               />
@@ -399,13 +425,13 @@ export default function CateringEventDetails() {
           <View style={styles.segmentControl}>
             <TouchableOpacity 
               style={[styles.segmentBtn, serviceType === 'Delivery Only' && styles.segmentBtnActive]}
-              onPress={() => setServiceType('Delivery Only')}
+              onPress={() => setEventDetails({ serviceType: 'Delivery Only' })}
             >
               <Text style={[styles.segmentText, serviceType === 'Delivery Only' && styles.segmentTextActive]}>Delivery Only</Text>
             </TouchableOpacity>
             <TouchableOpacity 
               style={[styles.segmentBtn, serviceType === 'Full Service' && styles.segmentBtnActive]}
-              onPress={() => setServiceType('Full Service')}
+              onPress={() => setEventDetails({ serviceType: 'Full Service' })}
             >
               <Text style={[styles.segmentText, serviceType === 'Full Service' && styles.segmentTextActive]}>Full Service</Text>
             </TouchableOpacity>
@@ -432,7 +458,7 @@ export default function CateringEventDetails() {
                   key={prediction.place_id} 
                   style={[styles.predictionItem, index === addressPredictions.length - 1 && {borderBottomWidth: 0}]}
                   onPress={() => {
-                    setAddress(prediction.description);
+                    setEventDetails({ address: prediction.description });
                     setShowPredictions(false);
                   }}
                 >
