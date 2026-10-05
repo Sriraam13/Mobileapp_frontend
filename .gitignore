@@ -42,3 +42,6 @@ example
 # generated native folders
 /ios
 /android
+
+# Basalt generated files (compile-time source mapping)
+.basalt/
