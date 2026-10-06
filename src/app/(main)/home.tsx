@@ -7,6 +7,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { customerApi, menuApi, tableApi, orderApi } from '../../services/apiService';
 import { getFullImageUrl } from '../../constants/api';
 import { CameraView, useCameraPermissions } from 'expo-camera';
+import * as Device from 'expo-device';
 import { useCartStore } from '../../store/useCartStore';
 import { useAuthStore } from '../../store/useAuthStore';
 import { useRestaurantStore, useOrderStore, useLiveOrderStore } from '../../store';
@@ -257,6 +258,8 @@ export default function Home() {
   const [tableNumber, setTableNumber] = useState<string | null>(null);
   const [tableStatus, setTableStatus] = useState<string | null>(null);
   const [isScannerVisible, setIsScannerVisible] = useState(false);
+  const [modalReady, setModalReady] = useState(false);
+  const [cameraReady, setCameraReady] = useState(false);
   const [scanned, setScanned] = useState(false);
   const [isVerifyingTable, setIsVerifyingTable] = useState(false);
   const [permission, requestPermission] = useCameraPermissions();
@@ -559,39 +562,45 @@ export default function Home() {
     if (scanned || isVerifyingTable) return;
     setScanned(true);
 
-    let tableNum = data;
-    if (data.includes('?table=')) {
-      const match = data.match(/\?table=([^&]+)/);
+    let tableNum = data ? data.trim() : '';
+    if (tableNum.includes('?table=')) {
+      const match = tableNum.match(/\?table=([^&]+)/);
+      if (match) {
+        tableNum = match[1];
+      }
+    } else if (tableNum.includes('&table=')) {
+      const match = tableNum.match(/&table=([^&]+)/);
+      if (match) {
+        tableNum = match[1];
+      }
+    } else if (tableNum.includes('table=')) {
+      const match = tableNum.match(/table=([^&]+)/);
       if (match) {
         tableNum = match[1];
       }
     }
+    tableNum = decodeURIComponent(tableNum);
     verifyTableAndEnter(tableNum);
   };
 
   const handleCloseScanner = () => {
     setIsScannerVisible(false);
     setScanned(false);
+    setModalReady(false);
+    setCameraReady(false);
   };
 
   const handleDineInPress = async () => {
-    // Request permission on all platforms (including web)
+    setIsScannerVisible(true);
+    setScanned(false);
+    setCameraReady(false);
     if (!permission || !permission.granted) {
       try {
-        const status = await requestPermission();
-        if (!status.granted) {
-          showPopup("Permission Denied", "Camera permission is required to scan table QR codes. Showing test panel instead.", "info", () => {
-            setIsScannerVisible(true);
-          });
-          return;
-        }
+        await requestPermission();
       } catch (e) {
         console.warn("Failed to request camera permission:", e);
-        setIsScannerVisible(true);
-        return;
       }
     }
-    setIsScannerVisible(true);
   };
 
   const handleClearTable = async () => {
@@ -1064,68 +1073,142 @@ export default function Home() {
           transparent={true}
           visible={isScannerVisible}
           onRequestClose={handleCloseScanner}
+          onShow={() => setModalReady(true)}
         >
-          <TouchableOpacity style={styles.scannerModalOverlay} activeOpacity={1} onPress={handleCloseScanner}>
-            <TouchableOpacity activeOpacity={1} style={styles.scannerModalContainer}>
+          <View style={styles.scannerModalOverlay}>
+            <View style={styles.scannerModalContainer}>
               <View style={styles.modalHeader}>
-                <Text style={styles.modalTitle}>Scan Table QR Code</Text>
-                <TouchableOpacity onPress={handleCloseScanner}>
-                  <Ionicons name="close-circle" size={28} color="#666" />
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                  <Ionicons name="qr-code-outline" size={22} color="#ff4500" />
+                  <Text style={styles.modalTitle}>Scan Table QR Code</Text>
+                </View>
+                <TouchableOpacity onPress={handleCloseScanner} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+                  <Ionicons name="close-circle" size={28} color="#888" />
                 </TouchableOpacity>
               </View>
 
-              {/* Camera view on all platforms when permission is granted */}
-              {permission && permission.granted ? (
-                <>
-                  <View style={styles.cameraWrapper}>
-                    <CameraView
-                      style={StyleSheet.absoluteFillObject}
-                      facing="back"
-                      onBarcodeScanned={handleBarcodeScanned}
-                      barcodeScannerSettings={{ barcodeTypes: ['qr'] as any }}
-                    />
-                    <View style={styles.scanTargetFrame} />
-                    <Text style={styles.scanInstructionText}>
-                      Align the QR Code inside the square
-                    </Text>
+              {/* Camera view on physical devices or Simulated View on iOS Simulator */}
+              {!Device.isDevice && Platform.OS === 'ios' ? (
+                <View style={styles.simulatorFallbackContainer}>
+                  <View style={styles.simulatedViewfinder}>
+                    <Ionicons name="qr-code" size={56} color="#ff4500" />
+                    <View style={styles.simulatedScanFrame} />
                   </View>
-
-                  {/* Camera Fallback for Emulators/Broken Expo Go */}
-                  <View style={{ marginTop: 20, width: '100%', alignSelf: 'center', backgroundColor: '#f9f9f9', padding: 15, borderRadius: 12, alignItems: 'center', shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.1, shadowRadius: 4, elevation: 2 }}>
-                    <Text style={{ fontSize: 13, fontWeight: 'bold', color: '#ff3400', marginBottom: 8 }}>Camera Not Working? Enter Table Manually:</Text>
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, width: '100%' }}>
-                      <TextInput
-                        placeholder="e.g. T-04"
-                        style={{ flex: 1, borderWidth: 1, borderColor: '#ddd', borderRadius: 8, paddingHorizontal: 12, height: 44, backgroundColor: '#fff', color: '#000' }}
-                        onChangeText={setMockTableNumber}
-                        value={mockTableNumber}
-                      />
-                      <TouchableOpacity
-                        style={{ backgroundColor: '#ff4500', paddingHorizontal: 16, height: 44, justifyContent: 'center', borderRadius: 8 }}
-                        onPress={() => verifyTableAndEnter(mockTableNumber || 'T-06')}
-                        disabled={isVerifyingTable}
-                      >
-                        {isVerifyingTable ? (
-                          <ActivityIndicator color="#fff" size="small" />
-                        ) : (
-                          <Text style={{ color: '#fff', fontWeight: 'bold' }}>Enter</Text>
-                        )}
-                      </TouchableOpacity>
-                    </View>
+                  <View style={styles.simBadge}>
+                    <Ionicons name="desktop-outline" size={13} color="#444" />
+                    <Text style={styles.simBadgeText}>iOS Simulator (No Physical Camera Feed)</Text>
                   </View>
-                </>
-              ) : (
-                <View style={styles.webFallbackContainer}>
-                  <Ionicons name="camera-reverse-outline" size={48} color="#ccc" style={{ marginBottom: 15 }} />
-                  <Text style={styles.webFallbackText}>
-                    {Platform.OS === 'web'
-                      ? 'Camera scanning is simulated on Web'
-                      : 'Camera permission not granted'}
+                  <Text style={styles.simFallbackText}>
+                    Tap any table below to test the dine-in menu immediately:
                   </Text>
                 </View>
+              ) : permission && permission.granted ? (
+                <View style={styles.cameraWrapper}>
+                  {modalReady && (
+                    <CameraView
+                      key={isScannerVisible ? 'scanner-active' : 'scanner-idle'}
+                      style={styles.cameraPreview}
+                      facing="back"
+                      autofocus="on"
+                      onCameraReady={() => setCameraReady(true)}
+                      onBarcodeScanned={scanned ? undefined : handleBarcodeScanned}
+                      barcodeScannerSettings={{
+                        barcodeTypes: ['qr'],
+                      }}
+                    />
+                  )}
+                  {!cameraReady && (
+                    <View style={styles.cameraLoadingOverlay}>
+                      <ActivityIndicator size="large" color="#ff4500" />
+                      <Text style={{ color: '#fff', fontSize: 12, marginTop: 8, fontWeight: '600' }}>
+                        Starting camera...
+                      </Text>
+                    </View>
+                  )}
+                  <View style={styles.scanOverlayContainer} pointerEvents="none">
+                    <View style={styles.scanTargetFrame} />
+                    <Text style={styles.scanInstructionText}>
+                      Align the Table QR Code inside the square
+                    </Text>
+                  </View>
+                </View>
+              ) : (
+                <View style={styles.webFallbackContainer}>
+                  <Ionicons name="camera-outline" size={44} color="#ff4500" style={{ marginBottom: 10 }} />
+                  <Text style={{ fontSize: 16, fontWeight: '700', color: '#222', marginBottom: 6, textAlign: 'center' }}>
+                    Camera Access Needed
+                  </Text>
+                  <Text style={styles.webFallbackText}>
+                    Allow camera access to scan your table QR code, or select a table below.
+                  </Text>
+                  <TouchableOpacity
+                    style={styles.enableCameraBtn}
+                    onPress={async () => {
+                      try {
+                        await requestPermission();
+                      } catch (e) {
+                        console.warn(e);
+                      }
+                    }}
+                  >
+                    <Ionicons name="camera" size={16} color="#fff" style={{ marginRight: 6 }} />
+                    <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 14 }}>Enable Camera</Text>
+                  </TouchableOpacity>
+                </View>
               )}
-            </TouchableOpacity>
-          </TouchableOpacity>
+
+              {/* Quick Table Selection & Manual Input */}
+              <View style={{ marginTop: 16, width: '100%', backgroundColor: '#fcfcfc', padding: 14, borderRadius: 12, borderWidth: 1, borderColor: '#eee' }}>
+                <Text style={{ fontSize: 12, fontWeight: 'bold', color: '#555', marginBottom: 8, textTransform: 'uppercase', letterSpacing: 0.5 }}>
+                  Or Select / Enter Table Number:
+                </Text>
+
+                {/* Quick Chips for Tables */}
+                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 10 }}>
+                  {['T-01', 'T-02', 'T-03', 'T-04', 'T-05', 'T-06'].map((tbl) => (
+                    <TouchableOpacity
+                      key={tbl}
+                      style={{
+                        paddingHorizontal: 12,
+                        paddingVertical: 6,
+                        borderRadius: 6,
+                        backgroundColor: mockTableNumber === tbl ? '#ff4500' : '#f0f0f0',
+                      }}
+                      onPress={() => {
+                        setMockTableNumber(tbl);
+                        verifyTableAndEnter(tbl);
+                      }}
+                    >
+                      <Text style={{ fontSize: 12, fontWeight: '700', color: mockTableNumber === tbl ? '#fff' : '#333' }}>
+                        {tbl}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+
+                {/* Manual Input Field */}
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, width: '100%' }}>
+                  <TextInput
+                    placeholder="e.g. T-04"
+                    style={{ flex: 1, borderWidth: 1, borderColor: '#ddd', borderRadius: 8, paddingHorizontal: 12, height: 40, backgroundColor: '#fff', color: '#000', fontSize: 13 }}
+                    onChangeText={setMockTableNumber}
+                    value={mockTableNumber}
+                  />
+                  <TouchableOpacity
+                    style={{ backgroundColor: '#ff4500', paddingHorizontal: 16, height: 40, justifyContent: 'center', borderRadius: 8 }}
+                    onPress={() => verifyTableAndEnter(mockTableNumber || 'T-01')}
+                    disabled={isVerifyingTable}
+                  >
+                    {isVerifyingTable ? (
+                      <ActivityIndicator color="#fff" size="small" />
+                    ) : (
+                      <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 13 }}>Check In</Text>
+                    )}
+                  </TouchableOpacity>
+                </View>
+              </View>
+            </View>
+          </View>
         </Modal>
 
       </ScrollView>
@@ -1564,7 +1647,7 @@ const styles = StyleSheet.create({
     borderRadius: 15,
   },
   bannerOverlay: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     backgroundColor: 'rgba(0, 0, 0, 0.45)',
     padding: 20,
     justifyContent: 'center',
@@ -2052,48 +2135,132 @@ const styles = StyleSheet.create({
   },
   cameraWrapper: {
     width: '100%',
-    aspectRatio: 1,
-    borderRadius: 15,
-    overflow: 'hidden',
+    height: 280,
+    borderRadius: 16,
+    overflow: Platform.OS === 'ios' ? 'hidden' : 'visible',
     position: 'relative',
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#111',
+  },
+  cameraPreview: {
+    width: '100%',
+    height: 280,
+    borderRadius: Platform.OS === 'ios' ? 16 : 8,
+  },
+  cameraLoadingOverlay: {
+    ...StyleSheet.absoluteFill,
+    backgroundColor: 'rgba(0, 0, 0, 0.75)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderRadius: 16,
+    zIndex: 2,
+  },
+  scanOverlayContainer: {
+    ...StyleSheet.absoluteFill,
     justifyContent: 'center',
     alignItems: 'center',
   },
   scanTargetFrame: {
-    width: '60%',
-    aspectRatio: 1,
-    borderWidth: 3,
+    width: 190,
+    height: 190,
+    borderWidth: 2.5,
     borderColor: '#ff4500',
-    borderRadius: 12,
+    borderRadius: 14,
     backgroundColor: 'transparent',
   },
   scanInstructionText: {
     position: 'absolute',
-    bottom: 15,
+    bottom: 12,
     color: '#fff',
-    backgroundColor: 'rgba(0, 0, 0, 0.6)',
-    paddingHorizontal: 10,
+    backgroundColor: 'rgba(0, 0, 0, 0.65)',
+    paddingHorizontal: 12,
     paddingVertical: 5,
-    borderRadius: 5,
+    borderRadius: 6,
     fontSize: 12,
-    fontWeight: '500',
+    fontWeight: '600',
     textAlign: 'center',
+  },
+  simulatorFallbackContainer: {
+    width: '100%',
+    backgroundColor: '#fdf8f5',
+    borderRadius: 16,
+    padding: 16,
+    alignItems: 'center',
+    borderWidth: 1.5,
+    borderColor: '#ffd5cc',
+  },
+  simulatedViewfinder: {
+    width: 120,
+    height: 120,
+    backgroundColor: '#fff',
+    borderRadius: 16,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 2,
+    borderColor: '#ff4500',
+    marginBottom: 12,
+    shadowColor: '#ff4500',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 6,
+    elevation: 3,
+  },
+  simulatedScanFrame: {
+    ...StyleSheet.absoluteFill,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 69, 0, 0.3)',
+    borderRadius: 14,
+    margin: 6,
+  },
+  simBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: '#eee',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
+    marginBottom: 8,
+  },
+  simBadgeText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#444',
+  },
+  simFallbackText: {
+    fontSize: 13,
+    color: '#666',
+    textAlign: 'center',
+    lineHeight: 18,
   },
   webFallbackContainer: {
     width: '100%',
-    aspectRatio: 1.5,
-    backgroundColor: '#f5f5f5',
-    borderRadius: 15,
+    height: 200,
+    backgroundColor: '#fafafa',
+    borderRadius: 16,
     justifyContent: 'center',
     alignItems: 'center',
-    borderWidth: 1,
-    borderColor: '#e0e0e0',
+    paddingHorizontal: 20,
+    borderWidth: 1.5,
+    borderColor: '#e5e5e5',
     borderStyle: 'dashed',
   },
   webFallbackText: {
-    fontSize: 14,
-    color: '#888',
+    fontSize: 13,
+    color: '#666',
     textAlign: 'center',
+    lineHeight: 18,
+  },
+  enableCameraBtn: {
+    marginTop: 12,
+    backgroundColor: '#ff4500',
+    paddingHorizontal: 18,
+    paddingVertical: 9,
+    borderRadius: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   mockSelectorContainer: {
     marginTop: 20,

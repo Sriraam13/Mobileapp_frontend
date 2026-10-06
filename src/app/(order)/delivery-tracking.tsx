@@ -4,7 +4,7 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { deliveryApi, orderApi } from '../../services/apiService';
-import { useRestaurantStore } from '../../store';
+import { useRestaurantStore, useLiveOrderStore } from '../../store';
 import {
   DELIVERY_STATUS,
   getDeliveryContextText,
@@ -175,17 +175,13 @@ export default function DeliveryTrackingScreen() {
           }
         }
       } catch (err: any) {
-        console.error('Tracking poll error', err);
+        console.warn('Tracking poll status:', err?.message || err);
         if (err?.message?.includes("404") || err?.message?.includes("not found")) {
           if (interval) clearInterval(interval);
-          import('../../store/useLiveOrderStore').then(({ useLiveOrderStore }) => {
-            useLiveOrderStore.getState().clearLiveOrder();
-          });
-          import('react-native').then(({ Alert }) => {
-            Alert.alert("Order Not Found", "Your order could not be found on the server.", [
-              { text: "OK", onPress: () => router.replace('/(main)/home') }
-            ]);
-          });
+          useLiveOrderStore.getState().clearLiveOrder();
+          Alert.alert("Order Not Found", "Your order could not be found on the server.", [
+            { text: "OK", onPress: () => router.replace('/(main)/home') }
+          ]);
         } else {
           setNetworkError(true);
         }
@@ -280,7 +276,7 @@ export default function DeliveryTrackingScreen() {
         <View style={styles.mapContainer}>
           {Platform.OS !== 'web' && MapView && !isTerminalStatus(deliveryStatus) && hasCompleteMapData ? (
             <MapView
-              style={StyleSheet.absoluteFillObject}
+              style={StyleSheet.absoluteFill}
               region={{
                 latitude: mapCenterLat,
                 longitude: mapCenterLng,

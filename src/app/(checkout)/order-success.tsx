@@ -1,12 +1,12 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Image, Platform, StatusBar, ScrollView, BackHandler, Linking } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Image, Platform, StatusBar, ScrollView, BackHandler, Linking, Alert } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { orderApi } from '../../services/apiService';
 import { getFullImageUrl } from '../../constants/api';
-import { useRestaurantStore } from '../../store';
+import { useRestaurantStore, useLiveOrderStore } from '../../store';
 import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from '../(order)/_MapComponents';
 import MapViewDirections from 'react-native-maps-directions';
 import * as Location from 'expo-location';
@@ -179,17 +179,13 @@ export default function OrderSuccessScreen() {
           }
         }
       } catch (err: any) {
-        console.error("Failed to fetch order details", err);
+        console.warn("Failed to fetch order details", err?.message || err);
         if (err?.message?.includes("404") || err?.message?.includes("not found")) {
           if (intervalId) clearInterval(intervalId);
-          import('../../store/useLiveOrderStore').then(({ useLiveOrderStore }) => {
-            useLiveOrderStore.getState().clearLiveOrder();
-          });
-          import('react-native').then(({ Alert }) => {
-            Alert.alert("Order Not Found", "Your order could not be found on the server.", [
-              { text: "OK", onPress: () => router.replace('/(main)/home') }
-            ]);
-          });
+          useLiveOrderStore.getState().clearLiveOrder();
+          Alert.alert("Order Not Found", "Your order could not be found on the server.", [
+            { text: "OK", onPress: () => router.replace('/(main)/home') }
+          ]);
         }
       } finally {
         setLoading(false);

@@ -13,8 +13,10 @@
         "UIBackgroundModes": [
           "voip"
         ],
-        "NSMicrophoneUsageDescription": "Allow Data Udipi App to access your microphone for the voice assistant."
-      }
+        "NSMicrophoneUsageDescription": "Allow Data Udipi App to access your microphone for the voice assistant.",
+        "NSCameraUsageDescription": "Allow Data Udipi App to access your camera to scan table QR codes."
+      },
+      "bundleIdentifier": "com.dataudipi.app"
     },
     "android": {
       "predictiveBackGestureEnabled": false,
@@ -68,7 +70,7 @@
             "minSdkVersion": 24
           },
           "ios": {
-            "deploymentTarget": "15.1"
+            "deploymentTarget": "16.4"
           }
         }
       ]

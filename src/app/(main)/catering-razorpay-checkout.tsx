@@ -332,7 +332,7 @@ const styles = StyleSheet.create({
   rzpBadgeText: { fontSize: 12, fontWeight: '700', color: '#3395FF' },
   webView: { flex: 1 },
   loadingOverlay: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     backgroundColor: '#fff',
     alignItems: 'center',
     justifyContent: 'center',
@@ -340,7 +340,7 @@ const styles = StyleSheet.create({
   },
   loadingText: { fontSize: 14, color: '#888', marginTop: 12 },
   verifyingOverlay: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     backgroundColor: 'rgba(0,0,0,0.6)',
     alignItems: 'center',
     justifyContent: 'center',

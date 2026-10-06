@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Image, Platform, StatusBar, Linking, BackHandler, ActivityIndicator } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Image, Platform, StatusBar, Linking, BackHandler, ActivityIndicator, Alert } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
@@ -245,17 +245,13 @@ export default function TrackOrderScreen() {
           }
         }
       } catch (err: any) {
-        console.error('Poll error', err);
+        console.warn('Poll status:', err?.message || err);
         if (err?.message?.includes("404") || err?.message?.includes("not found")) {
           if (intervalId) clearInterval(intervalId);
-          import('../../store/useLiveOrderStore').then(({ useLiveOrderStore }) => {
-            useLiveOrderStore.getState().clearLiveOrder();
-          });
-          import('react-native').then(({ Alert }) => {
-            Alert.alert("Order Not Found", "Your order could not be found on the server.", [
-              { text: "OK", onPress: () => router.replace('/(main)/home') }
-            ]);
-          });
+          useLiveOrderStore.getState().clearLiveOrder();
+          Alert.alert("Order Not Found", "Your order could not be found on the server.", [
+            { text: "OK", onPress: () => router.replace('/(main)/home') }
+          ]);
         } else {
           setNetworkError(true);
         }
@@ -1080,12 +1076,12 @@ const styles = StyleSheet.create({
     backgroundColor: '#000',
   },
   dineInTopCardBg: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     width: '100%',
     height: '100%',
   },
   dineInTopCardOverlay: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     backgroundColor: 'rgba(0,0,0,0.5)',
   },
   dineInTopCardContent: {

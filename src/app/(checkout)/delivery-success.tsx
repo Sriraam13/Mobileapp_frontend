@@ -1,10 +1,10 @@
 import React, { useEffect, useState, useMemo } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, BackHandler, Platform } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, BackHandler, Platform, Alert } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { useRestaurantStore } from '../../store';
+import { useRestaurantStore, useLiveOrderStore } from '../../store';
 import { orderApi } from '../../services/apiService';
 
 export default function DeliverySuccessScreen() {
@@ -39,17 +39,13 @@ export default function DeliverySuccessScreen() {
           setOrderDetails(data);
         }
       } catch (err: any) {
-        console.error("Failed to fetch delivery order details", err);
+        console.warn("Failed to fetch delivery order details", err?.message || err);
         if (err?.message?.includes("404") || err?.message?.includes("not found")) {
           if (intervalId) clearInterval(intervalId);
-          import('../../store/useLiveOrderStore').then(({ useLiveOrderStore }) => {
-            useLiveOrderStore.getState().clearLiveOrder();
-          });
-          import('react-native').then(({ Alert }) => {
-            Alert.alert("Order Not Found", "Your order could not be found on the server.", [
-              { text: "OK", onPress: () => router.replace('/(main)/home') }
-            ]);
-          });
+          useLiveOrderStore.getState().clearLiveOrder();
+          Alert.alert("Order Not Found", "Your order could not be found on the server.", [
+            { text: "OK", onPress: () => router.replace('/(main)/home') }
+          ]);
         }
       }
     };

@@ -1,9 +1,11 @@
 import React, { useEffect, useRef } from 'react';
-import { View, Text, Image, StyleSheet, Dimensions, StatusBar, TouchableOpacity, ImageBackground, Animated, Easing, Platform } from 'react-native';
+import { View, Text, Image, StyleSheet, Dimensions, StatusBar, TouchableOpacity, Animated, Easing, Platform } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useAuthStore, useRestaurantStore } from '../store';
 
-const { width } = Dimensions.get('window');
+const { width, height } = Dimensions.get('window');
+const isSmallDevice = height < 750;
 
 export default function SplashScreen() {
   const router = useRouter();
@@ -23,70 +25,78 @@ export default function SplashScreen() {
   };
 
   useEffect(() => {
-    const timer = setTimeout(navigateToHome, 4000);
+    const timer = setTimeout(navigateToHome, 3500);
     return () => clearTimeout(timer);
   }, [isAuthenticated, selectedOutlet]);
 
-  // Animated values using React Native built-in Animated (100% native driver & crash-safe)
-  const bgScale = useRef(new Animated.Value(1.15)).current;
+  // Animated values using React Native built-in Animated
+  const bgScale = useRef(new Animated.Value(1.08)).current;
   const bgOpacity = useRef(new Animated.Value(0)).current;
+  const topBoardTranslateY = useRef(new Animated.Value(-35)).current;
   const welcomeOpacity = useRef(new Animated.Value(0)).current;
-  const welcomeTranslateY = useRef(new Animated.Value(-25)).current;
-  const logoScale = useRef(new Animated.Value(0.6)).current;
+  const welcomeTranslateY = useRef(new Animated.Value(-12)).current;
+  const logoScale = useRef(new Animated.Value(0.8)).current;
   const logoOpacity = useRef(new Animated.Value(0)).current;
   const subOpacity = useRef(new Animated.Value(0)).current;
-  const subTranslateY = useRef(new Animated.Value(25)).current;
+  const subTranslateY = useRef(new Animated.Value(12)).current;
   const mascotOpacity = useRef(new Animated.Value(0)).current;
-  const mascotTranslateY = useRef(new Animated.Value(90)).current;
+  const mascotTranslateY = useRef(new Animated.Value(30)).current;
   const loaderOpacity = useRef(new Animated.Value(0)).current;
   const rotation = useRef(new Animated.Value(0)).current;
-  const topBoardTranslateY = useRef(new Animated.Value(-100)).current;
 
   useEffect(() => {
     // 1. Background Image
     Animated.parallel([
-      Animated.timing(bgOpacity, { toValue: 1, duration: 1000, useNativeDriver: true }),
-      Animated.timing(bgScale, { toValue: 1, duration: 1800, easing: Easing.out(Easing.quad), useNativeDriver: true }),
+      Animated.timing(bgOpacity, { toValue: 1, duration: 800, useNativeDriver: true }),
+      Animated.timing(bgScale, { toValue: 1, duration: 1500, easing: Easing.out(Easing.quad), useNativeDriver: true }),
     ]).start();
 
-    // 2. "Welcome To" Text
+    // 2. Top Banner
+    Animated.timing(topBoardTranslateY, {
+      toValue: 0,
+      duration: 750,
+      easing: Easing.out(Easing.back(1.4)),
+      useNativeDriver: true,
+    }).start();
+
+    // 3. "Welcome To" Text
     const timer1 = setTimeout(() => {
       Animated.parallel([
-        Animated.timing(welcomeOpacity, { toValue: 1, duration: 800, useNativeDriver: true }),
-        Animated.timing(welcomeTranslateY, { toValue: 0, duration: 800, easing: Easing.out(Easing.back(1.5)), useNativeDriver: true }),
+        Animated.timing(welcomeOpacity, { toValue: 1, duration: 650, useNativeDriver: true }),
+        Animated.timing(welcomeTranslateY, { toValue: 0, duration: 650, easing: Easing.out(Easing.back(1.5)), useNativeDriver: true }),
       ]).start();
-    }, 300);
+    }, 200);
 
-    // 3. Main logo
+    // 4. Main logo
     const timer2 = setTimeout(() => {
       Animated.parallel([
-        Animated.timing(logoOpacity, { toValue: 1, duration: 800, useNativeDriver: true }),
-        Animated.timing(logoScale, { toValue: 1, duration: 800, easing: Easing.out(Easing.back(1.6)), useNativeDriver: true }),
+        Animated.timing(logoOpacity, { toValue: 1, duration: 650, useNativeDriver: true }),
+        Animated.timing(logoScale, { toValue: 1, duration: 650, easing: Easing.out(Easing.back(1.5)), useNativeDriver: true }),
       ]).start();
-    }, 600);
+    }, 450);
 
-    // 4. Subtitle Text
+    // 5. Subtitle Text
     const timer3 = setTimeout(() => {
       Animated.parallel([
-        Animated.timing(subOpacity, { toValue: 1, duration: 800, useNativeDriver: true }),
-        Animated.timing(subTranslateY, { toValue: 0, duration: 800, easing: Easing.out(Easing.quad), useNativeDriver: true }),
+        Animated.timing(subOpacity, { toValue: 1, duration: 650, useNativeDriver: true }),
+        Animated.timing(subTranslateY, { toValue: 0, duration: 650, easing: Easing.out(Easing.quad), useNativeDriver: true }),
       ]).start();
-    }, 900);
+    }, 700);
 
-    // 5. Chef Mascot
+    // 6. Chef Mascot
     const timer4 = setTimeout(() => {
       Animated.parallel([
-        Animated.timing(mascotOpacity, { toValue: 1, duration: 800, useNativeDriver: true }),
-        Animated.timing(mascotTranslateY, { toValue: 0, duration: 900, easing: Easing.out(Easing.back(1.4)), useNativeDriver: true }),
+        Animated.timing(mascotOpacity, { toValue: 1, duration: 750, useNativeDriver: true }),
+        Animated.timing(mascotTranslateY, { toValue: 0, duration: 750, easing: Easing.out(Easing.back(1.4)), useNativeDriver: true }),
       ]).start();
+    }, 950);
+
+    // 7. Loader Spinner
+    const timer5 = setTimeout(() => {
+      Animated.timing(loaderOpacity, { toValue: 1, duration: 450, useNativeDriver: true }).start();
     }, 1200);
 
-    // 6. Loader Spinner
-    const timer5 = setTimeout(() => {
-      Animated.timing(loaderOpacity, { toValue: 1, duration: 600, useNativeDriver: true }).start();
-    }, 1600);
-
-    // 7. Infinite spinner rotation
+    // 8. Infinite spinner rotation
     Animated.loop(
       Animated.timing(rotation, {
         toValue: 1,
@@ -96,23 +106,12 @@ export default function SplashScreen() {
       })
     ).start();
 
-    // 8. Top board slide down
-    const timer6 = setTimeout(() => {
-      Animated.timing(topBoardTranslateY, {
-        toValue: 0,
-        duration: 1000,
-        easing: Easing.bounce,
-        useNativeDriver: true,
-      }).start();
-    }, 200);
-
     return () => {
       clearTimeout(timer1);
       clearTimeout(timer2);
       clearTimeout(timer3);
       clearTimeout(timer4);
       clearTimeout(timer5);
-      clearTimeout(timer6);
     };
   }, []);
 
@@ -122,49 +121,89 @@ export default function SplashScreen() {
   });
 
   return (
-    <Animated.View style={[styles.backgroundImage, { opacity: bgOpacity, transform: [{ scale: bgScale }] }]}>
-      <ImageBackground
+    <View style={styles.container}>
+      <StatusBar barStyle="light-content" backgroundColor="#000000" translucent />
+
+      {/* Background Image with subtle zoom */}
+      <Animated.Image
         source={require('../../assets/images/frontpage_bg.png')}
-        style={StyleSheet.absoluteFillObject}
+        style={[
+          styles.backgroundImage,
+          {
+            opacity: bgOpacity,
+            transform: [{ scale: bgScale }],
+          },
+        ]}
         resizeMode="cover"
-      >
-        {/* Dark overlay for contrast and premium aesthetic */}
-        <View style={styles.overlay} />
+      />
 
-        <TouchableOpacity activeOpacity={1} style={styles.touchableContainer} onPress={navigateToHome}>
-          <StatusBar barStyle="light-content" backgroundColor="transparent" translucent />
+      {/* Dark Overlay for High Contrast */}
+      <View style={styles.overlay} />
 
-          {/* Top Hanging Banner */}
-          <Animated.View style={[styles.topBoardWrapper, { transform: [{ translateY: topBoardTranslateY }] }]}>
-            <Image 
-              source={require('../../assets/images/udupi-banner.png')} 
-              style={styles.topBannerImage} 
-              resizeMode="contain" 
-            />
-          </Animated.View>
+      {/* Interactive Container that leads directly into app */}
+      <TouchableOpacity activeOpacity={1} style={styles.touchableWrapper} onPress={navigateToHome}>
+        <SafeAreaView style={styles.safeArea} edges={['top', 'bottom']}>
+          {/* Top Hanging Banner Section */}
+          <View style={styles.topSection}>
+            <Animated.View style={{ transform: [{ translateY: topBoardTranslateY }] }}>
+              <Image
+                source={require('../../assets/images/udupi-banner.png')}
+                style={styles.topBannerImage}
+                resizeMode="contain"
+              />
+            </Animated.View>
+          </View>
 
-          {/* Middle Area: Reveals in order */}
-          <View style={styles.middleContainer}>
-            <Animated.Text style={[styles.welcomeText, { opacity: welcomeOpacity, transform: [{ translateY: welcomeTranslateY }] }]}>
+          {/* Middle Section: Centered Brand Logo & Tagline */}
+          <View style={styles.middleSection}>
+            <Animated.Text
+              style={[
+                styles.welcomeText,
+                {
+                  opacity: welcomeOpacity,
+                  transform: [{ translateY: welcomeTranslateY }],
+                },
+              ]}
+            >
               Welcome To
             </Animated.Text>
 
             <Animated.Image
               source={require('../../assets/images/Dataudupi.png')}
-              style={[styles.logo, { opacity: logoOpacity, transform: [{ scale: logoScale }] }]}
+              style={[
+                styles.logo,
+                {
+                  opacity: logoOpacity,
+                  transform: [{ scale: logoScale }],
+                },
+              ]}
               resizeMode="contain"
             />
 
-            <Animated.Text style={[styles.subtitleText, { opacity: subOpacity, transform: [{ translateY: subTranslateY }] }, { marginBottom: 25 }]}>
+            <Animated.Text
+              style={[
+                styles.subtitleText,
+                {
+                  opacity: subOpacity,
+                  transform: [{ translateY: subTranslateY }],
+                },
+              ]}
+            >
               {"40 YEARS OF EXCELLENCE IN SOUTH INDIAN\nVEGETARIAN CUISINE"}
             </Animated.Text>
           </View>
 
-          {/* Footer Area: Large Mascot + Loading Symbol at the bottom */}
-          <Animated.View style={[styles.footerContainer, { opacity: mascotOpacity, transform: [{ translateY: mascotTranslateY }] }]}>
-            <Image
+          {/* Bottom Section: Perfectly Aligned Mascot & Glowing Spinner */}
+          <View style={styles.bottomSection}>
+            <Animated.Image
               source={require('../../assets/images/chef_mascot.png')}
-              style={styles.mascot}
+              style={[
+                styles.mascot,
+                {
+                  opacity: mascotOpacity,
+                  transform: [{ translateY: mascotTranslateY }],
+                },
+              ]}
               resizeMode="contain"
             />
 
@@ -173,105 +212,113 @@ export default function SplashScreen() {
                 <View style={styles.spinnerDot} />
               </Animated.View>
             </Animated.View>
-          </Animated.View>
-        </TouchableOpacity>
-      </ImageBackground>
-    </Animated.View>
+          </View>
+        </SafeAreaView>
+      </TouchableOpacity>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  backgroundImage: {
+  container: {
     flex: 1,
+    backgroundColor: '#0a0a0a',
+  },
+  backgroundImage: {
+    ...StyleSheet.absoluteFill,
     width: '100%',
     height: '100%',
   },
   overlay: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(0, 0, 0, 0.84)',
+    ...StyleSheet.absoluteFill,
+    backgroundColor: 'rgba(0, 0, 0, 0.78)',
   },
-  touchableContainer: {
+  touchableWrapper: {
     flex: 1,
     width: '100%',
-    alignItems: 'center',
+    height: '100%',
+  },
+  safeArea: {
+    flex: 1,
+    width: '100%',
     justifyContent: 'space-between',
-    paddingHorizontal: 20,
-    paddingVertical: 10,
-  },
-  topBoardWrapper: {
-    position: 'absolute',
-    top: Platform.OS === 'android' ? 25 : 40,
-    alignSelf: 'center',
-    zIndex: 10,
     alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingTop: Platform.OS === 'android' ? 8 : 4,
+    paddingBottom: Platform.OS === 'ios' ? 24 : 16,
   },
-  topBannerImage: {
-    width: Math.min(width * 0.7, 240),
-    height: 70,
-  },
-  middleContainer: {
+  topSection: {
     width: '100%',
     alignItems: 'center',
     justifyContent: 'center',
-    marginTop: Platform.OS === 'android' ? 120 : 140,
+    zIndex: 10,
+  },
+  topBannerImage: {
+    width: Math.min(width * 0.68, 240),
+    height: isSmallDevice ? 56 : 68,
+  },
+  middleSection: {
+    flex: 1,
+    width: '100%',
+    alignItems: 'center',
+    justifyContent: 'center',
     paddingHorizontal: 16,
   },
   welcomeText: {
-    color: '#fff',
-    fontSize: 20,
-    fontWeight: '600',
+    color: '#ffffff',
+    fontSize: isSmallDevice ? 17 : 20,
+    fontWeight: '700',
     fontFamily: Platform.OS === 'ios' ? 'Georgia' : 'serif',
     letterSpacing: 4,
-    marginBottom: 14,
+    marginBottom: isSmallDevice ? 8 : 12,
     textTransform: 'uppercase',
     textAlign: 'center',
   },
   logo: {
     width: Math.min(width * 0.82, 300),
-    height: 95,
-    marginBottom: 16,
+    height: isSmallDevice ? 72 : 88,
+    marginBottom: isSmallDevice ? 10 : 14,
   },
   subtitleText: {
-    color: 'rgba(255, 255, 255, 0.82)',
-    fontSize: 11,
+    color: 'rgba(255, 255, 255, 0.85)',
+    fontSize: isSmallDevice ? 10.5 : 11.5,
     fontWeight: '700',
     fontFamily: Platform.OS === 'ios' ? 'Georgia' : 'serif',
-    letterSpacing: 2,
-    lineHeight: 18,
+    letterSpacing: 1.8,
+    lineHeight: isSmallDevice ? 16 : 18,
     textAlign: 'center',
   },
-  footerContainer: {
+  bottomSection: {
     width: '100%',
     alignItems: 'center',
     justifyContent: 'flex-end',
-    paddingBottom: 25,
   },
   mascot: {
-    width: 200,
-    height: 200,
-    marginBottom: 10,
+    width: isSmallDevice ? 140 : Math.min(width * 0.46, 175),
+    height: isSmallDevice ? 140 : Math.min(width * 0.46, 175),
+    marginBottom: 8,
   },
   loadingContainer: {
     alignItems: 'center',
     justifyContent: 'center',
-    height: 40,
+    height: 32,
   },
   spinnerRing: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
-    borderWidth: 3,
-    borderColor: 'rgba(255, 69, 0, 0.2)',
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    borderWidth: 2.5,
+    borderColor: 'rgba(255, 255, 255, 0.2)',
     borderTopColor: '#ff4500',
     alignItems: 'center',
     justifyContent: 'flex-start',
   },
   spinnerDot: {
-    width: 5,
-    height: 5,
-    borderRadius: 2.5,
+    width: 4.5,
+    height: 4.5,
+    borderRadius: 2.25,
     backgroundColor: '#ff4500',
     position: 'absolute',
-    top: 2,
+    top: 1,
   },
 });

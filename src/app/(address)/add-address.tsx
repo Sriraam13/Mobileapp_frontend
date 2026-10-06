@@ -331,7 +331,7 @@ export default function AddAddress() {
             </MapView>
           )}
           {isLocating && (
-            <View style={[StyleSheet.absoluteFillObject, { backgroundColor: 'rgba(255,255,255,0.85)', justifyContent: 'center', alignItems: 'center' }]}>
+            <View style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(255,255,255,0.85)', justifyContent: 'center', alignItems: 'center' }]}>
               <ActivityIndicator size="large" color="#ff4500" />
               <Text style={{ marginTop: 10, fontWeight: 'bold', color: '#ff4500', fontSize: 13 }}>Detecting your location...</Text>
             </View>

@@ -17,8 +17,8 @@
  *   - No duplicate bubbles
  */
 
+import { Alert, NativeModules, Platform } from 'react-native';
 import { create } from 'zustand';
-import Vapi from '@vapi-ai/react-native';
 import { executeSingleAction, UIAction } from '../utils/mobileAgentActionDispatcher';
 import { resolveRoute, getScreenDisplayName } from '../utils/agentRegistry';
 import { getMobileAgentContext } from '../utils/agentContext';
@@ -30,12 +30,42 @@ import { useCartStore } from './useCartStore';
 
 // ─── SDK Init ─────────────────────────────────────────────────────────────────
 // Only the PUBLIC key is used here. Private key stays server-side.
+let VapiClass: any = null;
 let vapiInstance: any = null;
 let listenersSetup = false;
 
+const isWebRTCSupported = () => {
+  if (Platform.OS === 'web') return false;
+  return !!(
+    NativeModules &&
+    (NativeModules.WebRTCModule ||
+      NativeModules.DailyWebRTC ||
+      NativeModules.RNWebRTC)
+  );
+};
+
 const getVapi = () => {
+  if (!isWebRTCSupported()) {
+    return null;
+  }
   if (!vapiInstance) {
-    vapiInstance = new Vapi(process.env.EXPO_PUBLIC_VAPI_PUBLIC_KEY || '');
+    if (!VapiClass) {
+      try {
+        const mod = require('@vapi-ai/react-native');
+        VapiClass = mod.default || mod;
+      } catch (e) {
+        console.warn('[VapiStore] Native Vapi/WebRTC is not available in Expo Go client:', e);
+        return null;
+      }
+    }
+    try {
+      if (VapiClass) {
+        vapiInstance = new VapiClass(process.env.EXPO_PUBLIC_VAPI_PUBLIC_KEY || '');
+      }
+    } catch (e) {
+      console.warn('[VapiStore] Failed to initialize Vapi instance:', e);
+      return null;
+    }
   }
   return vapiInstance;
 };
@@ -579,6 +609,15 @@ export const useVapiStore = create<VapiState>((set, get) => ({
   partialAgentTranscript: '',
 
   startCall: () => {
+    const vapi = getVapi();
+    if (!vapi) {
+      Alert.alert(
+        'Voice Assistant',
+        'Voice calls require custom native WebRTC (Development Build / APK). Other app features work normally in Expo Go.'
+      );
+      set({ isConnecting: false });
+      return;
+    }
     const { messages } = get();
     const hasHistory = messages.filter((m) => m.isFinal && m.text).length > 0;
     
@@ -588,7 +627,12 @@ export const useVapiStore = create<VapiState>((set, get) => ({
       firstMessage: "I'm back. Let's continue.", 
     } : undefined;
 
-    getVapi().start(process.env.EXPO_PUBLIC_VAPI_ASSISTANT_ID || '', overrides);
+    try {
+      vapi.start(process.env.EXPO_PUBLIC_VAPI_ASSISTANT_ID || '', overrides);
+    } catch (e) {
+      console.warn('[VapiStore] startCall error:', e);
+      set({ isConnecting: false });
+    }
   },
 
   stopCall: () => {
@@ -603,7 +647,10 @@ export const useVapiStore = create<VapiState>((set, get) => ({
 
   toggleMute: () => {
     const currentState = get().isMuted;
-    getVapi().setMuted(!currentState);
+    const vapi = getVapi();
+    if (vapi?.setMuted) {
+      vapi.setMuted(!currentState);
+    }
     set({ isMuted: !currentState });
   },
 
@@ -614,6 +661,7 @@ export const useVapiStore = create<VapiState>((set, get) => ({
   setupListeners: (routerRef) => {
     if (listenersSetup) return;
     const vapi = getVapi();
+    if (!vapi) return;
     listenersSetup = true;
 
     vapi.on('call-start', () => {

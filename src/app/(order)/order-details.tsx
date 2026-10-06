@@ -38,7 +38,7 @@ export default function OrderDetails() {
           setLoading(false);
         })
         .catch(err => {
-          console.error('Failed to load order details', err);
+          console.warn('Failed to load order details:', err?.message || err);
           setLoading(false);
         });
     } else {

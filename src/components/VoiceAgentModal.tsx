@@ -27,11 +27,15 @@ import {
   Animated,
   Easing,
   PanResponder,
+  Platform,
 } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useRouter, usePathname } from 'expo-router';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useVapiStore } from '../store/vapiStore';
 import { Ionicons, FontAwesome5 } from '@expo/vector-icons';
 import { useVoiceAgentStore } from '../store/useVoiceAgentStore';
+import { useCartStore } from '../store/useCartStore';
+import { useDineInSessionStore } from '../store/useDineInSessionStore';
 
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 
@@ -44,6 +48,19 @@ const SUGGESTIONS = [
 
 export default function VoiceAgentModal() {
   const router = useRouter();
+  const pathname = usePathname();
+  const insets = useSafeAreaInsets();
+  const cartItemCount = useCartStore((state) => state.getItemCount());
+  const isDineInActive = useDineInSessionStore((state) => state.isActive && !!state.activeOrderId);
+
+  // Position cleanly above BottomNav, ViewCartButton, and DineIn banner without collisions
+  const hasBottomNav = !pathname || pathname.includes('home') || pathname.includes('orders') || pathname.includes('profile') || pathname.includes('search');
+  const baseBottom = Math.max(insets.bottom, Platform.OS === 'android' ? 24 : 12);
+  let computedFabBottom = baseBottom + (hasBottomNav ? 78 : 24);
+  if (cartItemCount > 0) {
+    computedFabBottom += 58;
+  }
+
   const {
     setupListeners,
     startCall,
@@ -131,6 +148,12 @@ export default function VoiceAgentModal() {
     })
   ).current;
 
+  const isHiddenScreen = !pathname || pathname === '/' || pathname === '/index' || pathname === '/login' || pathname === '/signup';
+
+  if (isHiddenScreen && !isVisible) {
+    return null;
+  }
+
   return (
     <>
       {/* Floating pill FAB */}
@@ -139,6 +162,7 @@ export default function VoiceAgentModal() {
           {...panResponder.panHandlers}
           style={[
             styles.fabPill,
+            { bottom: computedFabBottom },
             isConnected ? styles.fabActive : null,
             { transform: [{ translateX: pan.x }, { translateY: pan.y }] },
             isDragging ? { borderRadius: 30, paddingHorizontal: 8 } : null
@@ -367,7 +391,6 @@ export default function VoiceAgentModal() {
 const styles = StyleSheet.create({
   fabPill: {
     position: 'absolute',
-    bottom: 130,
     right: 20,
     backgroundColor: '#ffffff',
     borderRadius: 30,
