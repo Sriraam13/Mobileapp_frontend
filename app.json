@@ -7,8 +7,10 @@
     "icon": "./assets/images/icon.png",
     "scheme": "restaurantnative",
     "userInterfaceStyle": "automatic",
+    "newArchEnabled": false,
     "ios": {
       "icon": "./assets/images/icon.png",
+      "newArchEnabled": false,
       "config": {
         "googleMapsApiKey": "AIzaSyA2qxAJag8F89Q_TdtjqU_42W6JAVJ5_qg"
       },
@@ -22,6 +24,7 @@
       "bundleIdentifier": "com.dataudipi.app"
     },
     "android": {
+      "newArchEnabled": false,
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",
         "backgroundColor": "#ffffff"
@@ -79,10 +82,12 @@
         {
           "android": {
             "usesCleartextTraffic": true,
-            "minSdkVersion": 24
+            "minSdkVersion": 24,
+            "newArchEnabled": false
           },
           "ios": {
-            "deploymentTarget": "16.4"
+            "deploymentTarget": "16.4",
+            "newArchEnabled": false
           }
         }
       ]
