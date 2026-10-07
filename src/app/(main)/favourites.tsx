@@ -1,1 +1,3 @@
-export { default } from './for-you';
+import ForYouScreen from './for-you';
+
+export default ForYouScreen;
