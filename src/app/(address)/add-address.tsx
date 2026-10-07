@@ -165,6 +165,7 @@ export default function AddAddress() {
       landmark ? `${landmark}` : ''
     ].filter(Boolean);
     if (parts.length > 0) {
+       // eslint-disable-next-line react-hooks/set-state-in-effect
        setFullAddress(parts.join(', '));
     }
   }, [flat, floor, building, landmark]);

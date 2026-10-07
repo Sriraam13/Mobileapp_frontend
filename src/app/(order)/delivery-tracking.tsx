@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Image, Platform, StatusBar, Dimensions, Linking, Alert, Animated } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Ionicons } from '@expo/vector-icons';
+import { Ionicons, MaterialIcons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { deliveryApi, orderApi } from '../../services/apiService';
 import { useRestaurantStore, useLiveOrderStore } from '../../store';
@@ -18,6 +18,7 @@ import {
 const MapView = Platform.OS !== 'web' ? require('react-native-maps').default : null;
 const Marker = Platform.OS !== 'web' ? require('react-native-maps').Marker : null;
 const Polyline = Platform.OS !== 'web' ? require('react-native-maps').Polyline : null;
+const MapViewDirections = Platform.OS !== 'web' ? require('react-native-maps-directions').default : null;
 
 const { width } = Dimensions.get('window');
 
@@ -40,7 +41,7 @@ export default function DeliveryTrackingScreen() {
   const [deliveryStatus, setDeliveryStatus] = useState<DeliveryStatus>(null);
   const [riderNotified, setRiderNotified] = useState(false);
   const [riderAssignedBanner, setRiderAssignedBanner] = useState<string | null>(null);
-  const pulseAnim = useRef(new Animated.Value(1)).current;
+  const [pulseAnim] = useState(() => new Animated.Value(1));
 
   const [riderInfo, setRiderInfo] = useState<{
     id?: number;
@@ -270,13 +271,14 @@ export default function DeliveryTrackingScreen() {
         </View>
       )}
 
-      <ScrollView style={styles.container} contentContainerStyle={{ paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
+      <ScrollView style={styles.container} contentContainerStyle={{ paddingBottom: 120 }} showsVerticalScrollIndicator={false}>
 
         {/* Map Section */}
         <View style={styles.mapContainer}>
           {Platform.OS !== 'web' && MapView && !isTerminalStatus(deliveryStatus) && hasCompleteMapData ? (
             <MapView
               style={StyleSheet.absoluteFill}
+              userInterfaceStyle="light"
               region={{
                 latitude: mapCenterLat,
                 longitude: mapCenterLng,
@@ -302,10 +304,13 @@ export default function DeliveryTrackingScreen() {
                   coordinate={{ latitude: riderLocation.latitude, longitude: riderLocation.longitude }}
                   title={riderInfo?.name || 'Delivery Partner'}
                 >
-                  <Image
-                    source={require('../../../assets/scooter.jpg')}
-                    style={{ width: 40, height: 40, resizeMode: 'contain' }}
-                  />
+                  <View style={[styles.restaurantMarker, { backgroundColor: '#333' }]}>
+                    <MaterialIcons 
+                      name={riderInfo?.vehicle_type?.toLowerCase() === 'car' ? 'directions-car' : 'motorcycle'} 
+                      size={18} 
+                      color="#fff" 
+                    />
+                  </View>
                 </Marker>
               )}
 
@@ -322,7 +327,15 @@ export default function DeliveryTrackingScreen() {
               )}
 
               {/* Route polyline when we have both rider and customer */}
-              {Polyline && riderLocation && customerLocation?.latitude && (
+              {MapViewDirections && riderLocation && customerLocation?.latitude && process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY ? (
+                <MapViewDirections
+                  origin={{ latitude: riderLocation.latitude, longitude: riderLocation.longitude }}
+                  destination={{ latitude: customerLocation.latitude!, longitude: customerLocation.longitude! }}
+                  apikey={process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY}
+                  strokeWidth={4}
+                  strokeColor="#ff3400"
+                />
+              ) : Polyline && riderLocation && customerLocation?.latitude && (
                 <Polyline
                   coordinates={[
                     { latitude: riderLocation.latitude, longitude: riderLocation.longitude },
@@ -377,10 +390,12 @@ export default function DeliveryTrackingScreen() {
                   <>
                     <Text style={styles.riderName}>{riderInfo?.name || 'Delivery Partner'}</Text>
                     <Text style={styles.riderRole}>{riderInfo?.vehicle_type ? `${riderInfo.vehicle_type} • ${riderInfo.vehicle_number || ''}` : 'Your delivery partner'}</Text>
-                    <View style={styles.ratingBadge}>
-                      <Ionicons name="star" size={10} color="#fff" />
-                      <Text style={styles.ratingText}>{riderInfo?.rating ? riderInfo.rating.toFixed(1) : '4.8'}</Text>
-                    </View>
+                    {riderInfo?.rating && riderInfo.rating > 0 ? (
+                      <View style={styles.ratingBadge}>
+                        <Ionicons name="star" size={10} color="#fff" />
+                        <Text style={styles.ratingText}>{riderInfo.rating.toFixed(1)}</Text>
+                      </View>
+                    ) : null}
                   </>
                 )}
       </View>
@@ -401,19 +416,19 @@ export default function DeliveryTrackingScreen() {
     {/* Content below map */ }
     < View style = { styles.detailsContainer } >
 
-      {/* Order ID + ETA row */ }
-      < View style = { styles.orderInfoRow } >
-            <View>
-              <Text style={styles.infoLabel}>Order ID</Text>
-              <Text style={styles.orderIdVal}>{orderIdText}</Text>
-            </View>
-            <View style={{ alignItems: 'flex-end' }}>
-              <Text style={styles.infoLabel}>Delivery Status</Text>
-              <Text style={styles.etaVal}>
-                {deliveryStatus === DELIVERY_STATUS.DELIVERED ? 'Delivered' : getDeliveryContextText(deliveryStatus)}
-              </Text>
-            </View>
-          </View >
+      {/* Order ID + ETA row */}
+      <View style={styles.orderInfoRow}>
+        <View style={{ flex: 1, paddingRight: 8 }}>
+          <Text style={styles.infoLabel}>Order ID</Text>
+          <Text style={styles.orderIdVal} numberOfLines={1} adjustsFontSizeToFit>{orderIdText}</Text>
+        </View>
+        <View style={{ flex: 1, alignItems: 'flex-end', paddingLeft: 8 }}>
+          <Text style={styles.infoLabel}>Delivery Status</Text>
+          <Text style={styles.etaVal} numberOfLines={2} adjustsFontSizeToFit>
+            {deliveryStatus === DELIVERY_STATUS.DELIVERED ? 'Delivered' : getDeliveryContextText(deliveryStatus)}
+          </Text>
+        </View>
+      </View>
 
     <View style={styles.divider} />
 

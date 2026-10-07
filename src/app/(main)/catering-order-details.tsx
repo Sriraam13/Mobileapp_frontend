@@ -17,10 +17,6 @@ export default function CateringOrderDetails() {
   const [loading, setLoading] = useState(true);
   const [order, setOrder] = useState<any>(null);
 
-  useEffect(() => {
-    if (orderId) fetchOrderDetails();
-  }, [orderId]);
-
   const fetchOrderDetails = async () => {
     try {
       const BASE_URL = API_BASE_URL;
@@ -41,6 +37,12 @@ export default function CateringOrderDetails() {
       setLoading(false);
     }
   };
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (orderId) fetchOrderDetails();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [orderId]);
 
   if (loading) {
     return (

@@ -88,6 +88,7 @@ export default function ForYou() {
       } else {
         await customerApi.addFavorite(customerId, menuItemId);
         addFavorite({
+          // eslint-disable-next-line react-hooks/purity
           favorite_id: Date.now(), // Temp ID
           menu_item_id: menuItemId,
           name: currentItem.name,

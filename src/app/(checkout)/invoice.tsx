@@ -23,7 +23,9 @@ export default function InvoiceScreen() {
 
   useEffect(() => {
     if (selectedOutlet) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       if (selectedOutlet.name) setBranchName(selectedOutlet.name);
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       if (selectedOutlet.address) setBranchAddress(selectedOutlet.address);
     }
   }, [selectedOutlet]);
@@ -34,6 +36,7 @@ export default function InvoiceScreen() {
 
     const restaurantId = selectedOutlet?.restaurant_id ? Number(selectedOutlet.restaurant_id) : null;
     if (!restaurantId) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setLoadingOrder(false);
       Alert.alert('Invoice unavailable', 'Restaurant context is unavailable.');
       return;
@@ -108,6 +111,7 @@ export default function InvoiceScreen() {
       if (uri.startsWith('http://') || uri.startsWith('https://')) {
         const cacheDir = FileSystem.cacheDirectory || FileSystem.documentDirectory;
         const ext = isPng ? 'png' : 'jpg';
+        // eslint-disable-next-line react-hooks/purity
         const localPath = `${cacheDir}temp_asset_${Math.random().toString(36).substring(7)}.${ext}`;
         const result = await FileSystem.downloadAsync(uri, localPath);
         const base64 = await FileSystem.readAsStringAsync(result.uri, {

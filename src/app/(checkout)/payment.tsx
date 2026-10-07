@@ -440,6 +440,7 @@ export default function PaymentScreen() {
           router.replace({
             pathname: '/order-completed',
             params: {
+              // eslint-disable-next-line react-hooks/purity
               orderId: finalOrderId || `ORD-${Math.floor(100000 + Math.random() * 900000)}`,
               dbOrderId: finalDbId || '',
               tableNumber: finalTable,

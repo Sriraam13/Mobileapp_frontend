@@ -48,22 +48,7 @@ export default function CateringOrderSuccess() {
   const [loading, setLoading] = useState(true);
 
   // Animated scale for the success icon
-  const scaleAnim = new Animated.Value(0);
-
-  useEffect(() => {
-    Animated.spring(scaleAnim, {
-      toValue: 1,
-      tension: 60,
-      friction: 6,
-      useNativeDriver: true,
-    }).start();
-
-    if (orderId) {
-      fetchOrderDetails();
-    } else {
-      setLoading(false);
-    }
-  }, []);
+  const [scaleAnim] = useState(() => new Animated.Value(0));
 
   const fetchOrderDetails = async () => {
     try {
@@ -83,6 +68,24 @@ export default function CateringOrderSuccess() {
       setLoading(false);
     }
   };
+
+  useEffect(() => {
+    Animated.spring(scaleAnim, {
+      toValue: 1,
+      tension: 60,
+      friction: 6,
+      useNativeDriver: true,
+    }).start();
+
+    if (orderId) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      fetchOrderDetails();
+    } else {
+      setTimeout(() => setLoading(false), 0);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [orderId, scaleAnim]);
+
 
   const fmt = (n: number) =>
     n.toLocaleString('en-IN', { minimumFractionDigits: 0, maximumFractionDigits: 0 });

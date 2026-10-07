@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { View, Text, Image, StyleSheet, Dimensions, StatusBar, TouchableOpacity, Animated, Easing, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -30,19 +30,19 @@ export default function SplashScreen() {
   }, [isAuthenticated, selectedOutlet]);
 
   // Animated values using React Native built-in Animated
-  const bgScale = useRef(new Animated.Value(1.08)).current;
-  const bgOpacity = useRef(new Animated.Value(0)).current;
-  const topBoardTranslateY = useRef(new Animated.Value(-35)).current;
-  const welcomeOpacity = useRef(new Animated.Value(0)).current;
-  const welcomeTranslateY = useRef(new Animated.Value(-12)).current;
-  const logoScale = useRef(new Animated.Value(0.8)).current;
-  const logoOpacity = useRef(new Animated.Value(0)).current;
-  const subOpacity = useRef(new Animated.Value(0)).current;
-  const subTranslateY = useRef(new Animated.Value(12)).current;
-  const mascotOpacity = useRef(new Animated.Value(0)).current;
-  const mascotTranslateY = useRef(new Animated.Value(30)).current;
-  const loaderOpacity = useRef(new Animated.Value(0)).current;
-  const rotation = useRef(new Animated.Value(0)).current;
+  const [bgScale] = useState(() => new Animated.Value(1.08));
+  const [bgOpacity] = useState(() => new Animated.Value(0));
+  const [topBoardTranslateY] = useState(() => new Animated.Value(-35));
+  const [welcomeOpacity] = useState(() => new Animated.Value(0));
+  const [welcomeTranslateY] = useState(() => new Animated.Value(-12));
+  const [logoScale] = useState(() => new Animated.Value(0.8));
+  const [logoOpacity] = useState(() => new Animated.Value(0));
+  const [subOpacity] = useState(() => new Animated.Value(0));
+  const [subTranslateY] = useState(() => new Animated.Value(12));
+  const [mascotOpacity] = useState(() => new Animated.Value(0));
+  const [mascotTranslateY] = useState(() => new Animated.Value(30));
+  const [loaderOpacity] = useState(() => new Animated.Value(0));
+  const [rotation] = useState(() => new Animated.Value(0));
 
   useEffect(() => {
     // 1. Background Image

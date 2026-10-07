@@ -312,7 +312,7 @@ export default function Home() {
           } catch (e) { }
         }
         if (!saved) {
-          saved = (global as any).dineInTable || null;
+          saved = (globalThis as any).dineInTable || null;
         }
         if (saved) {
           setTableNumber(saved);
@@ -330,7 +330,21 @@ export default function Home() {
       }
     };
     loadSavedTable();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  const handleDineInPress = async () => {
+    setIsScannerVisible(true);
+    setScanned(false);
+    setCameraReady(false);
+    if (!permission || !permission.granted) {
+      try {
+        await requestPermission();
+      } catch (e) {
+        console.warn("Failed to request camera permission:", e);
+      }
+    }
+  };
 
   useEffect(() => {
     if (params?.autoPromptQR === 'true') {
@@ -473,7 +487,9 @@ export default function Home() {
   };
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchData();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedOutlet]);
 
   const onRefresh = async () => {
@@ -527,7 +543,7 @@ export default function Home() {
         }
       }
       if (!saved) {
-        (global as any).dineInTable = cleanTableNum;
+        (globalThis as any).dineInTable = cleanTableNum;
       }
 
       setTableNumber(cleanTableNum);
@@ -590,19 +606,6 @@ export default function Home() {
     setCameraReady(false);
   };
 
-  const handleDineInPress = async () => {
-    setIsScannerVisible(true);
-    setScanned(false);
-    setCameraReady(false);
-    if (!permission || !permission.granted) {
-      try {
-        await requestPermission();
-      } catch (e) {
-        console.warn("Failed to request camera permission:", e);
-      }
-    }
-  };
-
   const handleClearTable = async () => {
     try {
       // Backend does not have a /vacate endpoint for customers.
@@ -616,7 +619,7 @@ export default function Home() {
           localStorage.removeItem('dineInTable');
         }
       } catch (e) { }
-    delete (global as any).dineInTable;
+    delete (globalThis as any).dineInTable;
     setTableNumber(null);
     setTableStatus(null);
     showPopup("Table Cleared", "You have left the table.", "info");
@@ -1578,7 +1581,7 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     paddingHorizontal: 20,
-    paddingBottom: 130,
+    paddingBottom: 180,
   },
   header: {
     flexDirection: 'row',

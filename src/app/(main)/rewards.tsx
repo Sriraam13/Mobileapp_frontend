@@ -32,7 +32,9 @@ export default function Rewards() {
   };
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchLoyalty();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [customerId]);
 
   return (

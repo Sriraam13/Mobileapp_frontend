@@ -87,9 +87,23 @@ export default function OrderCompletedScreen() {
   const isDineIn = !isTakeAway && !isDelivery;
 
   // ── Animation ──
-  const headerScale = useRef(new Animated.Value(0.85)).current;
-  const cardOpacity = useRef(new Animated.Value(0)).current;
-  const cardTranslateY = useRef(new Animated.Value(30)).current;
+  const [headerScale] = useState(() => new Animated.Value(0.85));
+  const [cardOpacity] = useState(() => new Animated.Value(0));
+  const [cardTranslateY] = useState(() => new Animated.Value(30));
+
+  // ── Navigation ──
+  const handleReturnHome = () => {
+    try {
+      const { completeTakeawaySession, completeDeliverySession, closeDineInSession } =
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        require('../../store/sessionUtils');
+      if (isDelivery) completeDeliverySession(false);
+      else if (isDineIn) closeDineInSession();
+      else completeTakeawaySession(false);
+    } catch (_) {}
+    router.dismissAll();
+    router.replace('/home');
+  };
 
   useEffect(() => {
     Animated.sequence([
@@ -103,6 +117,7 @@ export default function OrderCompletedScreen() {
     const onBack = () => { handleReturnHome(); return true; };
     const sub = BackHandler.addEventListener('hardwareBackPress', onBack);
     return () => sub.remove();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // ── Feedback state ──
@@ -145,19 +160,6 @@ export default function OrderCompletedScreen() {
     } finally {
       setSubmitting(false);
     }
-  };
-
-  // ── Navigation ──
-  const handleReturnHome = () => {
-    try {
-      const { completeTakeawaySession, completeDeliverySession, closeDineInSession } =
-        require('../../store/sessionUtils');
-      if (isDelivery) completeDeliverySession(false);
-      else if (isDineIn) closeDineInSession();
-      else completeTakeawaySession(false);
-    } catch (_) {}
-    router.dismissAll();
-    router.replace('/home');
   };
 
   const handleReorder = () => {

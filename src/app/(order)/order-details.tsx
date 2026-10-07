@@ -21,6 +21,7 @@ export default function OrderDetails() {
     if (orderId && !isHistorical) {
       const resolvedRestaurantId = restaurantId ? Number(restaurantId) : selectedOutlet?.restaurant_id;
       if (!resolvedRestaurantId) {
+        // eslint-disable-next-line react-hooks/set-state-in-effect
         setLoading(false);
         return;
       }

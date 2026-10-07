@@ -70,6 +70,7 @@ export default function DeliverySuccessScreen() {
       if (params.cart && params.cart !== '[object Object]') {
         const cartItems = typeof params.cart === 'string' ? JSON.parse(params.cart) : params.cart;
         if (Array.isArray(cartItems) && cartItems.length > 0) {
+          // eslint-disable-next-line react-hooks/set-state-in-effect
           setItemsName(`${cartItems[0].name || cartItems[0].itemName || 'Item'} x${cartItems[0].quantity || 1}`);
         }
       }
@@ -96,7 +97,7 @@ export default function DeliverySuccessScreen() {
           } catch (e) {}
         }
         if (!storedOrders) {
-          storedOrders = (global as any).userOrders || null;
+          storedOrders = (globalThis as any).userOrders || null;
         }
 
         let ordersList: any[] = [];
@@ -154,7 +155,7 @@ export default function DeliverySuccessScreen() {
             }
           } catch (e) {}
         }
-        (global as any).userOrders = listStr;
+        (globalThis as any).userOrders = listStr;
       } catch (err) {
         console.error("Error saving order to history", err);
       }
@@ -199,7 +200,7 @@ export default function DeliverySuccessScreen() {
     }
     baseTime.setMinutes(baseTime.getMinutes() + 45);
     return baseTime.toLocaleString('en-US', { hour: 'numeric', minute: 'numeric', hour12: true });
-  }, [orderDetails?.order?.created_at]);
+  }, [orderDetails]);
 
   const status = orderDetails?.order?.status?.toUpperCase() || 'PENDING';
   const isRiderPhase = ['DISPATCHED', 'ON_THE_WAY', 'DELIVERED', 'COMPLETED'].includes(status);

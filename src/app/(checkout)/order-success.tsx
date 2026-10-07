@@ -83,7 +83,7 @@ export default function OrderSuccessScreen() {
           } catch (e) {}
         }
         if (!storedOrders) {
-          storedOrders = (global as any).userOrders || null;
+          storedOrders = (globalThis as any).userOrders || null;
         }
 
         let ordersList: any[] = [];
@@ -140,7 +140,7 @@ export default function OrderSuccessScreen() {
             }
           } catch (e) {}
         }
-        (global as any).userOrders = listStr;
+        (globalThis as any).userOrders = listStr;
       } catch (err) {
         console.error("Error saving order to history", err);
       }

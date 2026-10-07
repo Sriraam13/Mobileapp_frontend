@@ -55,10 +55,10 @@ export default function VoiceAgentModal() {
 
   // Position cleanly above BottomNav, ViewCartButton, and DineIn banner without collisions
   const hasBottomNav = !pathname || pathname.includes('home') || pathname.includes('orders') || pathname.includes('profile') || pathname.includes('search');
-  const baseBottom = Math.max(insets.bottom, Platform.OS === 'android' ? 24 : 12);
-  let computedFabBottom = baseBottom + (hasBottomNav ? 78 : 24);
+  const baseBottom = Math.max(insets.bottom, Platform.OS === 'android' ? 40 : 30);
+  let computedFabBottom = baseBottom + (hasBottomNav ? 90 : 40);
   if (cartItemCount > 0) {
-    computedFabBottom += 58;
+    computedFabBottom += 60;
   }
 
   const {
@@ -79,7 +79,7 @@ export default function VoiceAgentModal() {
   const scrollViewRef = useRef<ScrollView>(null);
 
   // Pulse animation for speaking indicator
-  const pulseAnim = useRef(new Animated.Value(1)).current;
+  const [pulseAnim] = useState(() => new Animated.Value(1));
 
   useEffect(() => {
     // We intentionally removed setupListeners from here 
@@ -125,10 +125,10 @@ export default function VoiceAgentModal() {
     hideAgent();
   };
 
-  const pan = useRef(new Animated.ValueXY()).current;
+  const [pan] = useState(() => new Animated.ValueXY());
   const [isDragging, setIsDragging] = useState(false);
 
-  const panResponder = useRef(
+  const [panResponder] = useState(() =>
     PanResponder.create({
       onMoveShouldSetPanResponder: (evt, gestureState) => {
         return Math.abs(gestureState.dx) > 5 || Math.abs(gestureState.dy) > 5;
@@ -146,7 +146,7 @@ export default function VoiceAgentModal() {
         setIsDragging(false);
       }
     })
-  ).current;
+  );
 
   const isHiddenScreen = !pathname || pathname === '/' || pathname === '/index' || pathname === '/login' || pathname === '/signup';
 
@@ -164,7 +164,7 @@ export default function VoiceAgentModal() {
             styles.fabPill,
             { bottom: computedFabBottom },
             isConnected ? styles.fabActive : null,
-            { transform: [{ translateX: pan.x }, { translateY: pan.y }] },
+            { transform: pan.getTranslateTransform() },
             isDragging ? { borderRadius: 30, paddingHorizontal: 8 } : null
           ]}
         >

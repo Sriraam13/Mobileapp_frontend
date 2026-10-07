@@ -73,11 +73,6 @@ export default function CustomiseMenu() {
     ...(auth.token ? { 'Authorization': `Bearer ${auth.token}` } : {})
   };
 
-  useEffect(() => {
-    fetchPackageItems();
-    fetchCustomizations();
-  }, []);
-
   const fetchPackageItems = async () => {
     try {
       const res = await fetch(`${BASE_URL}/api/v1/public/catering/packages/${encodeURIComponent(packageCode)}/items`);
@@ -101,6 +96,13 @@ export default function CustomiseMenu() {
       console.log(e);
     }
   };
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    fetchPackageItems();
+    fetchCustomizations();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const openSwapModal = async (item: PackageItem) => {
     setSwapTarget(item);

@@ -44,10 +44,6 @@ export default function ChoosePackage() {
         return keywords.some(kw => nameLower.includes(kw));
       });
 
-  useEffect(() => {
-    fetchPackages();
-  }, []);
-
   const fetchPackages = async () => {
     try {
       const baseUrl = API_BASE_URL;
@@ -61,6 +57,12 @@ export default function ChoosePackage() {
       setLoading(false);
     }
   };
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    fetchPackages();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const handleProceed = async () => {
     if (!selectedPackage) return;

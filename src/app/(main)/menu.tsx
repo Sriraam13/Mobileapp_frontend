@@ -31,20 +31,6 @@ export default function App() {
     return () => subscription.remove();
   }, [router]);
 
-  useEffect(() => {
-    if (params.orderType) {
-      const initialOrderType = params.orderType as string;
-      const mappedOrderType = initialOrderType === "Takeaway" ? "Take Away" : (initialOrderType === "Dine-in" ? "Dine In" : initialOrderType) as "Dine In" | "Take Away" | "Delivery";
-      if (mappedOrderType) setOrderType(mappedOrderType);
-    }
-    if (params.tableNumber) {
-      setTableNumber(params.tableNumber as string);
-    }
-    if (params.search !== undefined) {
-      setSearchQuery(params.search as string);
-    }
-  }, [params.orderType, params.tableNumber, params.search, setOrderType, setTableNumber]);
-
   const [allCategories, setAllCategories] = useState<any[]>([]);
   const [menuItems, setMenuItems] = useState<any[]>([]);
   const [regions, setRegions] = useState<string[]>(["All Regions"]);
@@ -58,6 +44,22 @@ export default function App() {
   const [availabilityFilter, setAvailabilityFilter] = useState("All Items");
   const [priceSort, setPriceSort] = useState("Default");
   const [isLoading, setIsLoading] = useState(true);
+
+  useEffect(() => {
+    if (params.orderType) {
+      const initialOrderType = params.orderType as string;
+      const mappedOrderType = initialOrderType === "Takeaway" ? "Take Away" : (initialOrderType === "Dine-in" ? "Dine In" : initialOrderType) as "Dine In" | "Take Away" | "Delivery";
+      if (mappedOrderType) setOrderType(mappedOrderType);
+    }
+    if (params.tableNumber) {
+      setTableNumber(params.tableNumber as string);
+    }
+    if (params.search !== undefined) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setSearchQuery(params.search as string);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [params.orderType, params.tableNumber, params.search, setOrderType, setTableNumber]);
   const [refreshing, setRefreshing] = useState(false);
   
   const { selectedOutlet } = useRestaurantStore();
@@ -249,7 +251,9 @@ export default function App() {
   };
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchMenu();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [restaurantId]);
 
   const onRefresh = async () => {

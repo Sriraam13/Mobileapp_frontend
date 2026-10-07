@@ -1,4 +1,4 @@
-﻿import { API_BASE_URL } from '../../constants/api';
+import { API_BASE_URL } from '../../constants/api';
 import React, { useState, useEffect } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
@@ -50,19 +50,6 @@ export default function BalancePayment() {
 
   const parsedPaymentAmount = parseFloat(paymentAmount) || 0;
 
-  useEffect(() => {
-    if (params.razorpay_status === 'success' && params.razorpay_payment_id && params.razorpay_order_id && params.razorpay_signature) {
-      handlePaymentVerification(
-        params.razorpay_payment_id as string,
-        params.razorpay_order_id as string,
-        params.razorpay_signature as string
-      );
-    } else if (params.razorpay_status === 'failed') {
-      showAlert('Payment Failed', (params.razorpay_reason as string) || 'The payment could not be processed.');
-      router.setParams({ razorpay_status: undefined });
-    }
-  }, [params.razorpay_status]);
-
   const handlePaymentVerification = async (paymentId: string, razorpayOrderId: string, signature: string) => {
     setVerifying(true);
     try {
@@ -97,6 +84,23 @@ export default function BalancePayment() {
       setVerifying(false);
     }
   };
+
+  useEffect(() => {
+    if (params.razorpay_status === 'success' && params.razorpay_payment_id && params.razorpay_order_id && params.razorpay_signature) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      handlePaymentVerification(
+        params.razorpay_payment_id as string,
+        params.razorpay_order_id as string,
+        params.razorpay_signature as string
+      );
+    } else if (params.razorpay_status === 'failed') {
+      setTimeout(() => {
+        showAlert('Payment Failed', (params.razorpay_reason as string) || 'The payment could not be processed.');
+      }, 0);
+      router.setParams({ razorpay_status: undefined });
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [params.razorpay_status]);
 
   const handlePay = async () => {
     if (!termsAccepted) {

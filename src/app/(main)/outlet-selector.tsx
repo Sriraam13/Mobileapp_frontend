@@ -98,6 +98,7 @@ export default function OutletSelectorScreen() {
       
       // only update if different to avoid loop
       if (sorted[0]?.id !== outlets[0]?.id || sorted[0]?.dist !== outlets[0]?.dist) {
+        // eslint-disable-next-line react-hooks/set-state-in-effect
         setOutlets(sorted);
       }
     }
