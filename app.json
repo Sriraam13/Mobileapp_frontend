@@ -4,11 +4,11 @@
     "slug": "data-udipi-app",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/images/icon.jpeg",
+    "icon": "./assets/images/icon.png",
     "scheme": "restaurantnative",
     "userInterfaceStyle": "automatic",
     "ios": {
-      "icon": "./assets/images/icon.jpeg",
+      "icon": "./assets/images/icon.png",
       "infoPlist": {
         "UIBackgroundModes": [
           "voip"
@@ -19,6 +19,10 @@
       "bundleIdentifier": "com.dataudipi.app"
     },
     "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/images/adaptive-icon.png",
+        "backgroundColor": "#ffffff"
+      },
       "predictiveBackGestureEnabled": false,
       "permissions": [
         "android.permission.CAMERA",
@@ -27,8 +31,7 @@
         "android.permission.ACCESS_FINE_LOCATION",
         "android.permission.ACCESS_COARSE_LOCATION"
       ],
-      "package": "com.dataudipi.app",
-      "versionCode": 1
+      "package": "com.dataudipi.app"
     },
     "web": {
       "output": "single",
@@ -39,8 +42,9 @@
       [
         "expo-splash-screen",
         {
-          "backgroundColor": "#000000",
-          "image": "./assets/images/frontpage_bg.png"
+          "backgroundColor": "#ffffff",
+          "image": "./assets/images/icon.png",
+          "imageWidth": 200
         }
       ],
       [
