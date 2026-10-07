@@ -9,6 +9,9 @@
     "userInterfaceStyle": "automatic",
     "ios": {
       "icon": "./assets/images/icon.png",
+      "config": {
+        "googleMapsApiKey": "AIzaSyA2qxAJag8F89Q_TdtjqU_42W6JAVJ5_qg"
+      },
       "infoPlist": {
         "UIBackgroundModes": [
           "voip"
@@ -24,6 +27,11 @@
         "backgroundColor": "#ffffff"
       },
       "predictiveBackGestureEnabled": false,
+      "config": {
+        "googleMaps": {
+          "apiKey": "AIzaSyA2qxAJag8F89Q_TdtjqU_42W6JAVJ5_qg"
+        }
+      },
       "permissions": [
         "android.permission.CAMERA",
         "android.permission.RECORD_AUDIO",
