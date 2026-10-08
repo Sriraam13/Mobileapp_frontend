@@ -3,10 +3,13 @@
   "main": "expo-router/entry",
   "version": "1.0.0",
   "dependencies": {
+    "@daily-co/react-native-daily-js": "^0.88.0",
+    "@daily-co/react-native-webrtc": "^124.0.6-daily.2",
     "@expo/vector-icons": "^15.0.3",
     "@react-native-async-storage/async-storage": "2.2.0",
     "@react-navigation/native": "^7.0.14",
     "@teovilla/react-native-web-maps": "^0.9.5",
+    "@vapi-ai/react-native": "^0.3.0",
     "expo": "~57.0.27",
     "expo-build-properties": "~57.0.22",
     "expo-camera": "~57.0.6",
