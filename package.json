@@ -8,7 +8,6 @@
     "@react-navigation/native": "^7.0.14",
     "@teovilla/react-native-web-maps": "^0.9.5",
     "expo": "~57.0.27",
-    "expo-av": "~16.0.8",
     "expo-build-properties": "~57.0.22",
     "expo-camera": "~57.0.6",
     "expo-constants": "~57.0.20",
@@ -64,8 +63,7 @@
       "reactNativeDirectoryCheck": {
         "listUnknownPackages": false,
         "exclude": [
-          "react-native-background-timer",
-          "expo-av"
+          "react-native-background-timer"
         ]
       }
     }
