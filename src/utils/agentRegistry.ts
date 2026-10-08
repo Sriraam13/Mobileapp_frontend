@@ -209,11 +209,25 @@ export const SUPPORTED_ACTIONS = new Set([
 
 export const SUPPORTED_VAPI_TOOLS = new Set([
   'app_navigate',
+  'navigate',
   'app_go_back',
   'app_get_context',
   'set_order_type',
+  'select_order_mode',
+  'set_table_number',
   'menu_search',
+  'get_menu',
   'cart_update',
+  'add_to_cart',
+  'remove_from_cart',
+  'update_cart_item',
+  'clear_cart',
+  'open_cart',
+  'show_cart',
+  'proceed_to_checkout',
+  'place_order',
+  'select_payment_method',
+  'update_customer_info',
   'customer_get_profile',
   'customer_get_rewards',
   'customer_get_orders',
@@ -221,6 +235,9 @@ export const SUPPORTED_VAPI_TOOLS = new Set([
   'order_get_tracking',
   'catering_get_data',
   'app_confirm_action',
+  'mcp_tool',
+  'voicemail_tool',
+  'end_call_tool',
 ]);
 
 // ─── Resolve alias → canonical route ─────────────────────────────────────

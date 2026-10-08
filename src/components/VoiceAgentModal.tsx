@@ -101,6 +101,16 @@ export default function VoiceAgentModal() {
     }
   }, [isConnected, partialAgentTranscript]);
 
+  // Notify Vapi when the user navigates to a new screen
+  useEffect(() => {
+    if (isConnected && pathname) {
+      const vapiStore = useVapiStore.getState();
+      if (vapiStore.notifyRouteChanged) {
+        vapiStore.notifyRouteChanged(pathname);
+      }
+    }
+  }, [pathname, isConnected]);
+
   // Auto-scroll when messages update
   useEffect(() => {
     if (isVisible && scrollViewRef.current) {

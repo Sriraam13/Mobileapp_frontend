@@ -17,7 +17,7 @@
  *   - No duplicate bubbles
  */
 
-import { Alert, NativeModules, Platform } from 'react-native';
+import { Alert, NativeModules, Platform, PermissionsAndroid } from 'react-native';
 import { create } from 'zustand';
 import { executeSingleAction, UIAction } from '../utils/mobileAgentActionDispatcher';
 import { resolveRoute, getScreenDisplayName } from '../utils/agentRegistry';
@@ -85,11 +85,12 @@ interface VapiState {
   messages: ChatMessage[];
   partialUserTranscript: string;
   partialAgentTranscript: string;
-  startCall: () => void;
+  startCall: () => Promise<void>;
   stopCall: () => void;
   toggleMute: () => void;
   clearMessages: () => void;
   setupListeners: (routerRef: any) => void;
+  notifyRouteChanged: (route: string) => void;
 }
 
 // ─── Backend tool executor (READ-ONLY data fetch) ─────────────────────────────
@@ -608,7 +609,7 @@ export const useVapiStore = create<VapiState>((set, get) => ({
   partialUserTranscript: '',
   partialAgentTranscript: '',
 
-  startCall: () => {
+  startCall: async () => {
     const assistantId = process.env.EXPO_PUBLIC_VAPI_ASSISTANT_ID;
     if (!assistantId) {
       Alert.alert(
@@ -617,6 +618,28 @@ export const useVapiStore = create<VapiState>((set, get) => ({
       );
       set({ isConnecting: false });
       return;
+    }
+
+    if (Platform.OS === 'android') {
+      try {
+        const granted = await PermissionsAndroid.request(
+          PermissionsAndroid.PERMISSIONS.RECORD_AUDIO,
+          {
+            title: "Microphone Permission",
+            message: "The Voice Assistant needs access to your microphone.",
+            buttonNeutral: "Ask Me Later",
+            buttonNegative: "Cancel",
+            buttonPositive: "OK"
+          }
+        );
+        if (granted !== PermissionsAndroid.RESULTS.GRANTED) {
+          Alert.alert("Permission Denied", "Microphone access is required to use the Voice Assistant.");
+          set({ isConnecting: false });
+          return;
+        }
+      } catch (err) {
+        console.warn(err);
+      }
     }
 
     const vapi = getVapi();
@@ -633,9 +656,27 @@ export const useVapiStore = create<VapiState>((set, get) => ({
     
     set({ isConnecting: true });
 
-    const overrides = hasHistory ? { 
-      firstMessage: "I'm back. Let's continue.", 
-    } : undefined;
+    // Dynamic first message based on auth and restaurant state
+    const auth = useAuthStore.getState();
+    const restaurant = useRestaurantStore.getState();
+    const isLoggedIn = auth.isAuthenticated && auth.phone;
+    const hasOutlet = !!restaurant.selectedOutlet;
+
+    let dynamicFirstMessage = "Welcome to Data Udipi! I'm your voice assistant.";
+    
+    if (hasHistory) {
+      dynamicFirstMessage = "I'm back. Let's continue.";
+    } else if (!isLoggedIn) {
+      dynamicFirstMessage = "Welcome to Data Udipi! I'm your voice assistant. To get started, could you please tell me your phone number?";
+    } else if (!hasOutlet) {
+      dynamicFirstMessage = "Welcome back to Data Udipi! We have exciting delicious menu varieties and category items. Which outlet would you like to order from today?";
+    } else {
+      dynamicFirstMessage = "Welcome back to Data Udipi! We have exciting delicious menu varieties and category items. Which items would you prefer today?";
+    }
+
+    const overrides = { 
+      firstMessage: dynamicFirstMessage, 
+    };
 
     try {
       vapi.start(assistantId, overrides);
@@ -666,6 +707,23 @@ export const useVapiStore = create<VapiState>((set, get) => ({
 
   clearMessages: () => {
     set({ messages: [], partialUserTranscript: '', partialAgentTranscript: '' });
+  },
+
+  notifyRouteChanged: (route: string) => {
+    const vapi = getVapi();
+    if (vapi && get().isConnected) {
+      try {
+        (vapi as any).send({
+          type: 'add-message',
+          message: {
+            role: 'system',
+            content: `[System Update] The user has navigated to screen: ${route}`
+          }
+        });
+      } catch (e) {
+        console.warn('[VapiStore] Failed to notify route change:', e);
+      }
+    }
   },
 
   setupListeners: (routerRef) => {
