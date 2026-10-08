@@ -130,6 +130,11 @@ export default function VoiceAgentModal() {
   };
 
   const closeModal = () => {
+    hideAgent();
+    // Do NOT stopCall() here, so the agent stays active in the background!
+  };
+
+  const endCall = () => {
     stopCall();
     clearMessages();
     hideAgent();
@@ -383,7 +388,7 @@ export default function VoiceAgentModal() {
                   </TouchableOpacity>
 
                   {/* Stop Agent */}
-                  <TouchableOpacity style={styles.stopButton} onPress={closeModal} activeOpacity={0.85}>
+                  <TouchableOpacity style={styles.stopButton} onPress={endCall} activeOpacity={0.85}>
                     <Ionicons name="stop-circle" size={22} color="white" style={{ marginRight: 8 }} />
                     <Text style={styles.stopButtonText}>Stop Agent</Text>
                   </TouchableOpacity>
