@@ -51,6 +51,10 @@ export const usePaymentMethodStore = create<PaymentMethodState>()(
     {
       name: 'payment-method-storage',
       storage: createJSONStorage(() => AsyncStorage),
+      partialize: (state) => ({
+        paymentMethods: state.paymentMethods,
+        selectedMethodId: state.selectedMethodId,
+      }),
     }
   )
 );

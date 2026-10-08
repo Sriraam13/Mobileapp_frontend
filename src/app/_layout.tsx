@@ -1,8 +1,10 @@
-import React, { Component, ErrorInfo, ReactNode } from 'react';
 import 'react-native-gesture-handler';
+import 'react-native-get-random-values';
+import React, { Component, ErrorInfo, ReactNode, useEffect } from 'react';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { Slot } from 'expo-router';
+import * as SplashScreen from 'expo-splash-screen';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import VoiceAgentModal from '../components/VoiceAgentModal';
 
@@ -50,6 +52,10 @@ class RootErrorBoundary extends Component<Props, State> {
 }
 
 export default function RootLayout() {
+  useEffect(() => {
+    SplashScreen.hideAsync().catch(() => {});
+  }, []);
+
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaProvider>

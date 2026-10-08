@@ -162,9 +162,16 @@ export const useCartStore = create<CartState>()(
     return getSubtotal() - getDiscountAmount() + getGst() + getServiceCharge();
   }
 }),
-{
-  name: 'cart-storage',
-  storage: createJSONStorage(() => webSafeStorage),
-}
+  {
+    name: 'cart-storage-v2',
+    storage: createJSONStorage(() => webSafeStorage),
+    partialize: (state) => ({
+      items: state.items,
+      orderType: state.orderType,
+      tableNumber: state.tableNumber,
+      tableStatus: state.tableStatus,
+      discountCode: state.discountCode,
+    }),
+  }
 )
 );

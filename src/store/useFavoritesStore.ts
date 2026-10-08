@@ -47,6 +47,7 @@ export const useFavoritesStore = create<FavoritesState>()(
     {
       name: 'favorites-storage',
       storage: createJSONStorage(() => AsyncStorage),
+      partialize: (state) => ({ favorites: state.favorites }),
     }
   )
 );

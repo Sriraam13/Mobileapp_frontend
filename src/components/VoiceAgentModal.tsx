@@ -50,7 +50,7 @@ export default function VoiceAgentModal() {
   const router = useRouter();
   const pathname = usePathname();
   const insets = useSafeAreaInsets();
-  const cartItemCount = useCartStore((state) => state.getItemCount());
+  const cartItemCount = useCartStore((state) => (state.items ? Object.keys(state.items).length : 0));
   const isDineInActive = useDineInSessionStore((state) => state.isActive && !!state.activeOrderId);
 
   // Position cleanly above BottomNav, ViewCartButton, and DineIn banner without collisions
