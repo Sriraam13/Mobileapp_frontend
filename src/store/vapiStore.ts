@@ -609,6 +609,16 @@ export const useVapiStore = create<VapiState>((set, get) => ({
   partialAgentTranscript: '',
 
   startCall: () => {
+    const assistantId = process.env.EXPO_PUBLIC_VAPI_ASSISTANT_ID;
+    if (!assistantId) {
+      Alert.alert(
+        'Voice Assistant Setup',
+        'Vapi Assistant ID is missing. Please configure EXPO_PUBLIC_VAPI_ASSISTANT_ID in your environment variables.'
+      );
+      set({ isConnecting: false });
+      return;
+    }
+
     const vapi = getVapi();
     if (!vapi) {
       Alert.alert(
@@ -628,7 +638,7 @@ export const useVapiStore = create<VapiState>((set, get) => ({
     } : undefined;
 
     try {
-      vapi.start(process.env.EXPO_PUBLIC_VAPI_ASSISTANT_ID || '', overrides);
+      vapi.start(assistantId, overrides);
     } catch (e) {
       console.warn('[VapiStore] startCall error:', e);
       set({ isConnecting: false });
