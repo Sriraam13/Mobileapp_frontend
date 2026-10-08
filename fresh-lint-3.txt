@@ -1,0 +1,430 @@
+﻿
+> restaurantnative@1.0.0 lint
+> expo lint
+
+
+D:\TECH WIZARD FOLDER-INTERN\Restaurant-mobile\Restaurant-mobile\Mobileapp_frontend\src\app\(address)\add-address.tsx
+    7:10  warning  'API_BASE_URL' is defined but never used                                                                       @typescript-eslint/no-unused-vars
+   12:41  warning  A `require()` style import is forbidden                                                                        @typescript-eslint/no-require-imports
+   13:9   warning  'PROVIDER_GOOGLE' is assigned a value but never used                                                           @typescript-eslint/no-unused-vars
+   13:53  warning  A `require()` style import is forbidden                                                                        @typescript-eslint/no-require-imports
+   14:40  warning  A `require()` style import is forbidden                                                                        @typescript-eslint/no-require-imports
+   38:10  warning  'isSearching' is assigned a value but never used                                                               @typescript-eslint/no-unused-vars
+  171:6   warning  React Hook useEffect has a missing dependency: 'isLocating'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+
+D:\TECH WIZARD FOLDER-INTERN\Restaurant-mobile\Restaurant-mobile\Mobileapp_frontend\src\app\(address)\my-addresses.tsx
+   2:64  warning  'Platform' is defined but never used                                                                              @typescript-eslint/no-unused-vars
+   4:1   warning  Import in body of module; reorder to top                                                                          import/first
+   5:1   warning  Import in body of module; reorder to top                                                                          import/first
+   6:1   warning  Import in body of module; reorder to top                                                                          import/first
+   7:1   warning  Import in body of module; reorder to top                                                                          import/first
+   8:1   warning  Import in body of module; reorder to top                                                                          import/first
+  60:6   warning  React Hook useEffect has a missing dependency: 'loadAddresses'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+
+D:\TECH WIZARD FOLDER-INTERN\Restaurant-mobile\Restaurant-mobile\Mobileapp_frontend\src\app\(auth)\signup.tsx
+  2:127  warning  'D:\TECH WIZARD FOLDER-INTERN\Restaurant-mobile\Restaurant-mobile\Mobileapp_frontend\node_modules\react-native\index.js' imported multiple times  import/no-duplicates
+  8:36   warning  'D:\TECH WIZARD FOLDER-INTERN\Restaurant-mobile\Restaurant-mobile\Mobileapp_frontend\node_modules\react-native\index.js' imported multiple times  import/no-duplicates
+
+D:\TECH WIZARD FOLDER-INTERN\Restaurant-mobile\Restaurant-mobile\Mobileapp_frontend\src\app\(checkout)\checkout.tsx
+   2:71  warning  'Platform' is defined but never used  @typescript-eslint/no-unused-vars
+  49:55  warning  Expected '===' and instead saw '=='   eqeqeq
+
+D:\TECH WIZARD FOLDER-INTERN\Restaurant-mobile\Restaurant-mobile\Mobileapp_frontend\src\app\(checkout)\delivery-checkout.tsx
+    2:86  warning  'Image' is defined but never used                                      @typescript-eslint/no-unused-vars
+   22:55  warning  Expected '===' and instead saw '=='                                    eqeqeq
+  116:15  warning  Expected an assignment or function call and instead saw an expression  no-unused-expressions
+
+D:\TECH WIZARD FOLDER-INTERN\Restaurant-mobile\Restaurant-mobile\Mobileapp_frontend\src\app\(checkout)\delivery-success.tsx
+   57:6   warning  React Hook useEffect has a missing dependency: 'router'. Either include it or remove the dependency array                                                                                                                                          react-hooks/exhaustive-deps
+   77:14  warning  'e' is defined but never used                                                                                                                                                                                                                      @typescript-eslint/no-unused-vars
+   91:18  warning  'e' is defined but never used                                                                                                                                                                                                                      @typescript-eslint/no-unused-vars
+   97:20  warning  'e' is defined but never used                                                                                                                                                                                                                      @typescript-eslint/no-unused-vars
+  107:20  warning  'e' is defined but never used                                                                                                                                                                                                                      @typescript-eslint/no-unused-vars
+  126:18  warning  'e' is defined but never used                                                                                                                                                                                                                      @typescript-eslint/no-unused-vars
+  149:18  warning  'e' is defined but never used                                                                                                                                                                                                                      @typescript-eslint/no-unused-vars
+  156:20  warning  'e' is defined but never used                                                                                                                                                                                                                      @typescript-eslint/no-unused-vars
+  171:6   warning  React Hook useEffect has missing dependencies: 'params.dbOrderId', 'params.itemCount', 'params.orderId', 'params.total', 'router', 'selectedOutlet?.name', and 'selectedOutlet.restaurant_id'. Either include them or remove the dependency array  react-hooks/exhaustive-deps
+
+D:\TECH WIZARD FOLDER-INTERN\Restaurant-mobile\Restaurant-mobile\Mobileapp_frontend\src\app\(checkout)\invoice.tsx
+    9:8   warning  'AsyncStorage' is defined but never used                                                            @typescript-eslint/no-unused-vars
+   18:10  warning  'rating' is assigned a value but never used                                                         @typescript-eslint/no-unused-vars
+   18:18  warning  'setRating' is assigned a value but never used                                                      @typescript-eslint/no-unused-vars
+   28:7   warning  Unused eslint-disable directive (no problems were reported from 'react-hooks/set-state-in-effect')
+  122:18  warning  'e' is defined but never used                                                                       @typescript-eslint/no-unused-vars
+  147:15  warning  'itemCode' is assigned a value but never used                                                       @typescript-eslint/no-unused-vars
+
+D:\TECH WIZARD FOLDER-INTERN\Restaurant-mobile\Restaurant-mobile\Mobileapp_frontend\src\app\(checkout)\order-completed.tsx
+    1:28  warning  'useRef' is defined but never used  @typescript-eslint/no-unused-vars
+   73:16  warning  '_' is defined but never used       @typescript-eslint/no-unused-vars
+  103:14  warning  '_' is defined but never used       @typescript-eslint/no-unused-vars
+
+D:\TECH WIZARD FOLDER-INTERN\Restaurant-mobile\Restaurant-mobile\Mobileapp_frontend\src\app\(checkout)\order-success.tsx
+    3:10  warning  'SafeAreaView' is defined but never used                                                                                                                                                                                                                                                                    @typescript-eslint/no-unused-vars
+   36:10  warning  'loading' is assigned a value but never used                                                                                                                                                                                                                                                                @typescript-eslint/no-unused-vars
+   77:18  warning  'e' is defined but never used                                                                                                                                                                                                                                                                               @typescript-eslint/no-unused-vars
+   83:20  warning  'e' is defined but never used                                                                                                                                                                                                                                                                               @typescript-eslint/no-unused-vars
+   93:20  warning  'e' is defined but never used                                                                                                                                                                                                                                                                               @typescript-eslint/no-unused-vars
+  112:18  warning  'e' is defined but never used                                                                                                                                                                                                                                                                               @typescript-eslint/no-unused-vars
+  134:18  warning  'e' is defined but never used                                                                                                                                                                                                                                                                               @typescript-eslint/no-unused-vars
+  141:20  warning  'e' is defined but never used                                                                                                                                                                                                                                                                               @typescript-eslint/no-unused-vars
+  206:6   warning  React Hook useEffect has missing dependencies: 'params.cart', 'params.itemCount', 'params.orderId', 'params.paymentMethod', 'params.phone', 'params.tableNumber', 'params.total', 'router', 'selectedOutlet?.name', and 'selectedOutlet.restaurant_id'. Either include them or remove the dependency array  react-hooks/exhaustive-deps
+  244:16  warning  'e' is defined but never used                                                                                                                                                                                                                                                                               @typescript-eslint/no-unused-vars
+
+D:\TECH WIZARD FOLDER-INTERN\Restaurant-mobile\Restaurant-mobile\Mobileapp_frontend\src\app\(checkout)\payment-methods.tsx
+  2:64  warning  'Platform' is defined but never used      @typescript-eslint/no-unused-vars
+  4:1   warning  Import in body of module; reorder to top  import/first
+  5:1   warning  Import in body of module; reorder to top  import/first
+  6:1   warning  Import in body of module; reorder to top  import/first
+  7:1   warning  Import in body of module; reorder to top  import/first
+
+D:\TECH WIZARD FOLDER-INTERN\Restaurant-mobile\Restaurant-mobile\Mobileapp_frontend\src\app\(checkout)\payment.tsx
+    3:24  warning  'useSafeAreaInsets' is defined but never used                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  @typescript-eslint/no-unused-vars
+    7:13  warning  'Linking' is defined but never used                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            @typescript-eslint/no-unused-vars
+    8:8   warning  'AsyncStorage' is defined but never used                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       @typescript-eslint/no-unused-vars
+    9:10  warning  'API_BASE_URL' is defined but never used                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       @typescript-eslint/no-unused-vars
+   41:16  warning  '_' is defined but never used                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  @typescript-eslint/no-unused-vars
+   68:10  warning  'paymentFailedReason' is assigned a value but never used                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       @typescript-eslint/no-unused-vars
+   70:28  warning  'setCurrentDbOrderId' is assigned a value but never used                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       @typescript-eslint/no-unused-vars
+  118:61  warning  Expected '===' and instead saw '=='                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            eqeqeq
+  201:6   warning  React Hook React.useEffect has missing dependencies: 'addPastOrder', 'clearCart', 'discountAmount', 'discountCode', 'getItemCount', 'gst', 'items', 'orderType', 'params.instructions', 'razorpayPaymentId', 'razorpayReason', 'router', 'selectedMethod', 'selectedOutlet.restaurant_id', 'serviceCharge', 'setCurrentOrder', 'setLiveOrder', 'setPaymentFailed', 'setPaymentSuccess', 'subtotal', 'tableNumber', 'tipAmount', 'totalVal', and 'userPhone'. Either include them or remove the dependency array                                                                                                                                                                                                                                                                                                                                                                                                                react-hooks/exhaustive-deps
+  212:11  warning  'formattedCartItems' is assigned a value but never used                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        @typescript-eslint/no-unused-vars
+  360:63  warning  Expected '===' and instead saw '=='                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            eqeqeq
+  443:67  error    Error: Cannot call impure function during render
+
+`Math.random` is an impure function. Calling an impure function can produce unstable results that update unpredictably when the component happens to re-render. (https://react.dev/reference/rules/components-and-hooks-must-be-pure#components-and-hooks-must-be-idempotent).
+
+D:\TECH WIZARD FOLDER-INTERN\Restaurant-mobile\Restaurant-mobile\Mobileapp_frontend\src\app\(checkout)\payment.tsx:443:67
+  441 |             pathname: '/order-completed',
+  442 |             params: {
+> 443 |               orderId: finalOrderId || `ORD-${Math.floor(100000 + Math.random() * 900000)}`,
+      |                                                                   ^^^^^^^^^^^^^ Cannot call impure function
+  444 |               dbOrderId: finalDbId || '',
+  445 |               tableNumber: finalTable,
+  446 |               totalAmount: String(finalAmount),  react-hooks/purity
+
+D:\TECH WIZARD FOLDER-INTERN\Restaurant-mobile\Restaurant-mobile\Mobileapp_frontend\src\app\(main)\bulk-catering.tsx
+  2:81  warning  'Platform' is defined but never used  @typescript-eslint/no-unused-vars
+
+D:\TECH WIZARD FOLDER-INTERN\Restaurant-mobile\Restaurant-mobile\Mobileapp_frontend\src\app\(main)\catering-add-extras.tsx
+  1:1  warning  Unexpected Unicode BOM (Byte Order Mark)  unicode-bom
+
+D:\TECH WIZARD FOLDER-INTERN\Restaurant-mobile\Restaurant-mobile\Mobileapp_frontend\src\app\(main)\catering-advance-payment.tsx
+    5:43  warning  'Alert' is defined but never used                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      @typescript-eslint/no-unused-vars
+  100:7   error    Error: Calling setState synchronously within an effect can trigger cascading renders
+
+Effects are intended to synchronize state between React and external systems such as manually updating the DOM, state management libraries, or other platform APIs. In general, the body of an effect should do one or both of the following:
+* Update external systems with the latest state from React.
+* Subscribe for updates from some external system, calling setState in a callback function when external state changes.
+
+Calling setState synchronously within an effect body causes cascading renders that can hurt performance, and is not recommended. (https://react.dev/learn/you-might-not-need-an-effect).
+
+D:\TECH WIZARD FOLDER-INTERN\Restaurant-mobile\Restaurant-mobile\Mobileapp_frontend\src\app\(main)\catering-advance-payment.tsx:100:7
+   98 |   useEffect(() => {
+   99 |     if (params.razorpay_status === 'success' && params.razorpay_payment_id && params.razorpay_order_id && params.razorpay_signature) {
+> 100 |       handlePaymentVerification(
+      |       ^^^^^^^^^^^^^^^^^^^^^^^^^ Avoid calling setState() directly within an effect
+  101 |         params.razorpay_payment_id as string,
+  102 |         params.razorpay_order_id as string,
+  103 |         params.razorpay_signature as string  react-hooks/set-state-in-effect
+
+D:\TECH WIZARD FOLDER-INTERN\Restaurant-mobile\Restaurant-mobile\Mobileapp_frontend\src\app\(main)\catering-balance-payment.tsx
+   5:43  warning  'Alert' is defined but never used                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              @typescript-eslint/no-unused-vars
+  25:25  warning  'setPaymentAmount' is assigned a value but never used                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          @typescript-eslint/no-unused-vars
+  90:7   error    Error: Calling setState synchronously within an effect can trigger cascading renders
+
+Effects are intended to synchronize state between React and external systems such as manually updating the DOM, state management libraries, or other platform APIs. In general, the body of an effect should do one or both of the following:
+* Update external systems with the latest state from React.
+* Subscribe for updates from some external system, calling setState in a callback function when external state changes.
+
+Calling setState synchronously within an effect body causes cascading renders that can hurt performance, and is not recommended. (https://react.dev/learn/you-might-not-need-an-effect).
+
+D:\TECH WIZARD FOLDER-INTERN\Restaurant-mobile\Restaurant-mobile\Mobileapp_frontend\src\app\(main)\catering-balance-payment.tsx:90:7
+  88 |   useEffect(() => {
+  89 |     if (params.razorpay_status === 'success' && params.razorpay_payment_id && params.razorpay_order_id && params.razorpay_signature) {
+> 90 |       handlePaymentVerification(
+     |       ^^^^^^^^^^^^^^^^^^^^^^^^^ Avoid calling setState() directly within an effect
+  91 |         params.razorpay_payment_id as string,
+  92 |         params.razorpay_order_id as string,
+  93 |         params.razorpay_signature as string  react-hooks/set-state-in-effect
+
+D:\TECH WIZARD FOLDER-INTERN\Restaurant-mobile\Restaurant-mobile\Mobileapp_frontend\src\app\(main)\catering-choose-package.tsx
+  62:5  error    Error: Calling setState synchronously within an effect can trigger cascading renders
+
+Effects are intended to synchronize state between React and external systems such as manually updating the DOM, state management libraries, or other platform APIs. In general, the body of an effect should do one or both of the following:
+* Update external systems with the latest state from React.
+* Subscribe for updates from some external system, calling setState in a callback function when external state changes.
+
+Calling setState synchronously within an effect body causes cascading renders that can hurt performance, and is not recommended. (https://react.dev/learn/you-might-not-need-an-effect).
+
+D:\TECH WIZARD FOLDER-INTERN\Restaurant-mobile\Restaurant-mobile\Mobileapp_frontend\src\app\(main)\catering-choose-package.tsx:62:5
+  60 |
+  61 |   useEffect(() => {
+> 62 |     fetchPackages();
+     |     ^^^^^^^^^^^^^ Avoid calling setState() directly within an effect
+  63 |   // eslint-disable-next-line react-hooks/exhaustive-deps
+  64 |   }, []);
+  65 |  react-hooks/set-state-in-effect
+  63:3  warning  Unused eslint-disable directive (no problems were reported from 'react-hooks/exhaustive-deps')
+
+D:\TECH WIZARD FOLDER-INTERN\Restaurant-mobile\Restaurant-mobile\Mobileapp_frontend\src\app\(main)\catering-customise-menu.tsx
+   81:14  warning  'e' is defined but never used                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         @typescript-eslint/no-unused-vars
+  101:5   error    Error: Calling setState synchronously within an effect can trigger cascading renders
+
+Effects are intended to synchronize state between React and external systems such as manually updating the DOM, state management libraries, or other platform APIs. In general, the body of an effect should do one or both of the following:
+* Update external systems with the latest state from React.
+* Subscribe for updates from some external system, calling setState in a callback function when external state changes.
+
+Calling setState synchronously within an effect body causes cascading renders that can hurt performance, and is not recommended. (https://react.dev/learn/you-might-not-need-an-effect).
+
+D:\TECH WIZARD FOLDER-INTERN\Restaurant-mobile\Restaurant-mobile\Mobileapp_frontend\src\app\(main)\catering-customise-menu.tsx:101:5
+   99 |
+  100 |   useEffect(() => {
+> 101 |     fetchPackageItems();
+      |     ^^^^^^^^^^^^^^^^^ Avoid calling setState() directly within an effect
+  102 |     fetchCustomizations();
+  103 |   // eslint-disable-next-line react-hooks/exhaustive-deps
+  104 |   }, []);  react-hooks/set-state-in-effect
+  121:14  warning  'e' is defined but never used                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         @typescript-eslint/no-unused-vars
+  135:14  warning  'e' is defined but never used                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         @typescript-eslint/no-unused-vars
+  236:14  warning  'e' is defined but never used                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         @typescript-eslint/no-unused-vars
+
+D:\TECH WIZARD FOLDER-INTERN\Restaurant-mobile\Restaurant-mobile\Mobileapp_frontend\src\app\(main)\catering-event-details.tsx
+  6:13  warning  'Location' is defined but never used  @typescript-eslint/no-unused-vars
+
+D:\TECH WIZARD FOLDER-INTERN\Restaurant-mobile\Restaurant-mobile\Mobileapp_frontend\src\app\(main)\catering-order-details.tsx
+  10:10  warning  'cateringOrderApi' is defined but never used                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        @typescript-eslint/no-unused-vars
+  42:18  error    Error: Calling setState synchronously within an effect can trigger cascading renders
+
+Effects are intended to synchronize state between React and external systems such as manually updating the DOM, state management libraries, or other platform APIs. In general, the body of an effect should do one or both of the following:
+* Update external systems with the latest state from React.
+* Subscribe for updates from some external system, calling setState in a callback function when external state changes.
+
+Calling setState synchronously within an effect body causes cascading renders that can hurt performance, and is not recommended. (https://react.dev/learn/you-might-not-need-an-effect).
+
+D:\TECH WIZARD FOLDER-INTERN\Restaurant-mobile\Restaurant-mobile\Mobileapp_frontend\src\app\(main)\catering-order-details.tsx:42:18
+  40 |
+  41 |   useEffect(() => {
+> 42 |     if (orderId) fetchOrderDetails();
+     |                  ^^^^^^^^^^^^^^^^^ Avoid calling setState() directly within an effect
+  43 |   // eslint-disable-next-line react-hooks/exhaustive-deps
+  44 |   }, [orderId]);
+  45 |  react-hooks/set-state-in-effect
+
+D:\TECH WIZARD FOLDER-INTERN\Restaurant-mobile\Restaurant-mobile\Mobileapp_frontend\src\app\(main)\catering-order-success.tsx
+  38:9  warning  'insets' is assigned a value but never used                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       @typescript-eslint/no-unused-vars
+  81:7  error    Error: Calling setState synchronously within an effect can trigger cascading renders
+
+Effects are intended to synchronize state between React and external systems such as manually updating the DOM, state management libraries, or other platform APIs. In general, the body of an effect should do one or both of the following:
+* Update external systems with the latest state from React.
+* Subscribe for updates from some external system, calling setState in a callback function when external state changes.
+
+Calling setState synchronously within an effect body causes cascading renders that can hurt performance, and is not recommended. (https://react.dev/learn/you-might-not-need-an-effect).
+
+D:\TECH WIZARD FOLDER-INTERN\Restaurant-mobile\Restaurant-mobile\Mobileapp_frontend\src\app\(main)\catering-order-success.tsx:81:7
+  79 |
+  80 |     if (orderId) {
+> 81 |       fetchOrderDetails();
+     |       ^^^^^^^^^^^^^^^^^ Avoid calling setState() directly within an effect
+  82 |     } else {
+  83 |       setTimeout(() => setLoading(false), 0);
+  84 |     }  react-hooks/set-state-in-effect
+
+D:\TECH WIZARD FOLDER-INTERN\Restaurant-mobile\Restaurant-mobile\Mobileapp_frontend\src\app\(main)\for-you.tsx
+   43:11  warning  'phone' is assigned a value but never used                                                                       @typescript-eslint/no-unused-vars
+   45:11  warning  'favorites' is assigned a value but never used                                                                   @typescript-eslint/no-unused-vars
+   72:6   warning  React Hook useEffect has a missing dependency: 'setFavorites'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+  104:14  warning  'e' is defined but never used                                                                                    @typescript-eslint/no-unused-vars
+
+D:\TECH WIZARD FOLDER-INTERN\Restaurant-mobile\Restaurant-mobile\Mobileapp_frontend\src\app\(main)\home.tsx
+    2:153  warning  'Dimensions' is defined but never used                                                                                             @typescript-eslint/no-unused-vars
+    4:20   warning  'MaterialCommunityIcons' is defined but never used                                                                                 @typescript-eslint/no-unused-vars
+  252:6    warning  React Hook useEffect has missing dependencies: 'orderType' and 'setOrderType'. Either include them or remove the dependency array  react-hooks/exhaustive-deps
+  304:18   warning  'e' is defined but never used                                                                                                      @typescript-eslint/no-unused-vars
+  312:20   warning  'e' is defined but never used                                                                                                      @typescript-eslint/no-unused-vars
+  373:6    warning  React Hook useEffect has a missing dependency: 'handleDineInPress'. Either include it or remove the dependency array               react-hooks/exhaustive-deps
+  432:13   warning  'branchSuffix' is assigned a value but never used                                                                                  @typescript-eslint/no-unused-vars
+  481:16   warning  'e' is defined but never used                                                                                                      @typescript-eslint/no-unused-vars
+  616:16   warning  'e' is defined but never used                                                                                                      @typescript-eslint/no-unused-vars
+  621:16   warning  'e' is defined but never used                                                                                                      @typescript-eslint/no-unused-vars
+  701:9    warning  'handleOrderNow' is assigned a value but never used                                                                                @typescript-eslint/no-unused-vars
+  721:9    warning  'handleCategoryPress' is assigned a value but never used                                                                           @typescript-eslint/no-unused-vars
+
+D:\TECH WIZARD FOLDER-INTERN\Restaurant-mobile\Restaurant-mobile\Mobileapp_frontend\src\app\(main)\menu.tsx
+   1:85  warning  'Platform' is defined but never used                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 @typescript-eslint/no-unused-vars
+   1:95  warning  'StatusBar' is defined but never used                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                @typescript-eslint/no-unused-vars
+  43:9   warning  'showAgent' is assigned a value but never used                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       @typescript-eslint/no-unused-vars
+  58:7   error    Error: Calling setState synchronously within an effect can trigger cascading renders
+
+Effects are intended to synchronize state between React and external systems such as manually updating the DOM, state management libraries, or other platform APIs. In general, the body of an effect should do one or both of the following:
+* Update external systems with the latest state from React.
+* Subscribe for updates from some external system, calling setState in a callback function when external state changes.
+
+Calling setState synchronously within an effect body causes cascading renders that can hurt performance, and is not recommended. (https://react.dev/learn/you-might-not-need-an-effect).
+
+D:\TECH WIZARD FOLDER-INTERN\Restaurant-mobile\Restaurant-mobile\Mobileapp_frontend\src\app\(main)\menu.tsx:58:7
+  56 |     }
+  57 |     if (params.search !== undefined) {
+> 58 |       setSearchQuery(params.search as string);
+     |       ^^^^^^^^^^^^^^ Avoid calling setState() directly within an effect
+  59 |     }
+  60 |   // eslint-disable-next-line react-hooks/exhaustive-deps
+  61 |   }, [params.orderType, params.tableNumber, params.search, setOrderType, setTableNumber]);  react-hooks/set-state-in-effect
+  60:3   warning  Unused eslint-disable directive (no problems were reported from 'react-hooks/exhaustive-deps')
+
+D:\TECH WIZARD FOLDER-INTERN\Restaurant-mobile\Restaurant-mobile\Mobileapp_frontend\src\app\(main)\outlet-selector.tsx
+    5:8   warning  'AsyncStorage' is defined but never used                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             @typescript-eslint/no-unused-vars
+  101:9   error    Error: Calling setState synchronously within an effect can trigger cascading renders
+
+Effects are intended to synchronize state between React and external systems such as manually updating the DOM, state management libraries, or other platform APIs. In general, the body of an effect should do one or both of the following:
+* Update external systems with the latest state from React.
+* Subscribe for updates from some external system, calling setState in a callback function when external state changes.
+
+Calling setState synchronously within an effect body causes cascading renders that can hurt performance, and is not recommended. (https://react.dev/learn/you-might-not-need-an-effect).
+
+D:\TECH WIZARD FOLDER-INTERN\Restaurant-mobile\Restaurant-mobile\Mobileapp_frontend\src\app\(main)\outlet-selector.tsx:101:9
+   99 |       // only update if different to avoid loop
+  100 |       if (sorted[0]?.id !== outlets[0]?.id || sorted[0]?.dist !== outlets[0]?.dist) {
+> 101 |         setOutlets(sorted);
+      |         ^^^^^^^^^^ Avoid calling setState() directly within an effect
+  102 |       }
+  103 |     }
+  104 |   }, [userLocation]);  react-hooks/set-state-in-effect
+  104:6   warning  React Hook useEffect has a missing dependency: 'outlets'. Either include it or remove the dependency array                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           react-hooks/exhaustive-deps
+  119:14  warning  'e' is defined but never used                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        @typescript-eslint/no-unused-vars
+
+D:\TECH WIZARD FOLDER-INTERN\Restaurant-mobile\Restaurant-mobile\Mobileapp_frontend\src\app\(main)\profile.tsx
+   4:3   warning  'Platform' is defined but never used                                                                                                                   @typescript-eslint/no-unused-vars
+  10:27  warning  'D:\TECH WIZARD FOLDER-INTERN\Restaurant-mobile\Restaurant-mobile\Mobileapp_frontend\node_modules\expo-router\build\index.js' imported multiple times  import/no-duplicates
+  11:32  warning  'D:\TECH WIZARD FOLDER-INTERN\Restaurant-mobile\Restaurant-mobile\Mobileapp_frontend\node_modules\expo-router\build\index.js' imported multiple times  import/no-duplicates
+
+D:\TECH WIZARD FOLDER-INTERN\Restaurant-mobile\Restaurant-mobile\Mobileapp_frontend\src\app\(main)\rewards.tsx
+   2:64  warning  'Platform' is defined but never used                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                @typescript-eslint/no-unused-vars
+   2:85  warning  'Image' is defined but never used                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   @typescript-eslint/no-unused-vars
+  35:5   error    Error: Calling setState synchronously within an effect can trigger cascading renders
+
+Effects are intended to synchronize state between React and external systems such as manually updating the DOM, state management libraries, or other platform APIs. In general, the body of an effect should do one or both of the following:
+* Update external systems with the latest state from React.
+* Subscribe for updates from some external system, calling setState in a callback function when external state changes.
+
+Calling setState synchronously within an effect body causes cascading renders that can hurt performance, and is not recommended. (https://react.dev/learn/you-might-not-need-an-effect).
+
+D:\TECH WIZARD FOLDER-INTERN\Restaurant-mobile\Restaurant-mobile\Mobileapp_frontend\src\app\(main)\rewards.tsx:35:5
+  33 |
+  34 |   useEffect(() => {
+> 35 |     fetchLoyalty();
+     |     ^^^^^^^^^^^^ Avoid calling setState() directly within an effect
+  36 |   }, [customerId]);
+  37 |
+  38 |   return (  react-hooks/set-state-in-effect
+  36:6   warning  React Hook useEffect has a missing dependency: 'fetchLoyalty'. Either include it or remove the dependency array                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     react-hooks/exhaustive-deps
+
+D:\TECH WIZARD FOLDER-INTERN\Restaurant-mobile\Restaurant-mobile\Mobileapp_frontend\src\app\(order)\_MapComponents.tsx
+  3:41  warning  A `require()` style import is forbidden  @typescript-eslint/no-require-imports
+  4:71  warning  A `require()` style import is forbidden  @typescript-eslint/no-require-imports
+
+D:\TECH WIZARD FOLDER-INTERN\Restaurant-mobile\Restaurant-mobile\Mobileapp_frontend\src\app\(order)\delivery-completed.tsx
+    2:78  warning  'Platform' is defined but never used                                                                                              @typescript-eslint/no-unused-vars
+    6:30  warning  'D:\TECH WIZARD FOLDER-INTERN\Restaurant-mobile\Restaurant-mobile\Mobileapp_frontend\src\store\index.ts' imported multiple times  import/no-duplicates
+    8:36  warning  'D:\TECH WIZARD FOLDER-INTERN\Restaurant-mobile\Restaurant-mobile\Mobileapp_frontend\src\store\index.ts' imported multiple times  import/no-duplicates
+   13:9   warning  'insets' is assigned a value but never used                                                                                       @typescript-eslint/no-unused-vars
+   79:18  warning  'e' is defined but never used                                                                                                     @typescript-eslint/no-unused-vars
+   90:6   warning  React Hook useEffect has a missing dependency: 'customerId'. Either include it or remove the dependency array                     react-hooks/exhaustive-deps
+   98:14  warning  'e' is defined but never used                                                                                                     @typescript-eslint/no-unused-vars
+  160:14  warning  'e' is defined but never used                                                                                                     @typescript-eslint/no-unused-vars
+
+D:\TECH WIZARD FOLDER-INTERN\Restaurant-mobile\Restaurant-mobile\Mobileapp_frontend\src\app\(order)\delivery-tracking.tsx
+   18:41  warning  A `require()` style import is forbidden                                                                                           @typescript-eslint/no-require-imports
+   19:40  warning  A `require()` style import is forbidden                                                                                           @typescript-eslint/no-require-imports
+   20:42  warning  A `require()` style import is forbidden                                                                                           @typescript-eslint/no-require-imports
+   28:9   warning  'insets' is assigned a value but never used                                                                                       @typescript-eslint/no-unused-vars
+   41:10  warning  'riderNotified' is assigned a value but never used                                                                                @typescript-eslint/no-unused-vars
+   41:25  warning  'setRiderNotified' is assigned a value but never used                                                                             @typescript-eslint/no-unused-vars
+   42:31  warning  'setRiderAssignedBanner' is assigned a value but never used                                                                       @typescript-eslint/no-unused-vars
+   90:6   warning  React Hook useEffect has a missing dependency: 'pulseAnim'. Either include it or remove the dependency array                      react-hooks/exhaustive-deps
+  196:6   warning  React Hook useEffect has missing dependencies: 'params.orderId' and 'router'. Either include them or remove the dependency array  react-hooks/exhaustive-deps
+  206:14  warning  'e' is defined but never used                                                                                                     @typescript-eslint/no-unused-vars
+
+D:\TECH WIZARD FOLDER-INTERN\Restaurant-mobile\Restaurant-mobile\Mobileapp_frontend\src\app\(order)\order-details.tsx
+   2:64  warning  'Platform' is defined but never used                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                @typescript-eslint/no-unused-vars
+  24:9   error    Error: Calling setState synchronously within an effect can trigger cascading renders
+
+Effects are intended to synchronize state between React and external systems such as manually updating the DOM, state management libraries, or other platform APIs. In general, the body of an effect should do one or both of the following:
+* Update external systems with the latest state from React.
+* Subscribe for updates from some external system, calling setState in a callback function when external state changes.
+
+Calling setState synchronously within an effect body causes cascading renders that can hurt performance, and is not recommended. (https://react.dev/learn/you-might-not-need-an-effect).
+
+D:\TECH WIZARD FOLDER-INTERN\Restaurant-mobile\Restaurant-mobile\Mobileapp_frontend\src\app\(order)\order-details.tsx:24:9
+  22 |       const resolvedRestaurantId = restaurantId ? Number(restaurantId) : selectedOutlet?.restaurant_id;
+  23 |       if (!resolvedRestaurantId) {
+> 24 |         setLoading(false);
+     |         ^^^^^^^^^^ Avoid calling setState() directly within an effect
+  25 |         return;
+  26 |       }
+  27 |       orderApi.getOrderDetails(orderId as string, Number(resolvedRestaurantId))  react-hooks/set-state-in-effect
+  47:6   warning  React Hook useEffect has a missing dependency: 'isHistorical'. Either include it or remove the dependency array                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     react-hooks/exhaustive-deps
+
+D:\TECH WIZARD FOLDER-INTERN\Restaurant-mobile\Restaurant-mobile\Mobileapp_frontend\src\app\(order)\orders.tsx
+    2:64  warning  'Platform' is defined but never used                                                                           @typescript-eslint/no-unused-vars
+  220:6   warning  React Hook useEffect has a missing dependency: 'loadOrders'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+  236:9   warning  'handleReorder' is assigned a value but never used                                                             @typescript-eslint/no-unused-vars
+
+D:\TECH WIZARD FOLDER-INTERN\Restaurant-mobile\Restaurant-mobile\Mobileapp_frontend\src\app\(order)\track-order.tsx
+    2:71   warning  'Platform' is defined but never used                                                                                                                                                      @typescript-eslint/no-unused-vars
+    2:114  warning  'ActivityIndicator' is defined but never used                                                                                                                                             @typescript-eslint/no-unused-vars
+    6:26   warning  'D:\TECH WIZARD FOLDER-INTERN\Restaurant-mobile\Restaurant-mobile\Mobileapp_frontend\src\services\apiService.ts' imported multiple times                                                  import/no-duplicates
+    7:29   warning  'D:\TECH WIZARD FOLDER-INTERN\Restaurant-mobile\Restaurant-mobile\Mobileapp_frontend\src\services\apiService.ts' imported multiple times                                                  import/no-duplicates
+   35:10   warning  'loading' is assigned a value but never used                                                                                                                                              @typescript-eslint/no-unused-vars
+   36:10   warning  'deliveryStatus' is assigned a value but never used                                                                                                                                       @typescript-eslint/no-unused-vars
+   39:10   warning  'trackingTimeline' is assigned a value but never used                                                                                                                                     @typescript-eslint/no-unused-vars
+   49:10   warning  'riderBanner' is assigned a value but never used                                                                                                                                          @typescript-eslint/no-unused-vars
+   53:20   warning  'liveOrderId' is assigned a value but never used                                                                                                                                          @typescript-eslint/no-unused-vars
+   81:6    warning  React Hook useEffect has a missing dependency: 'handleGoBack'. Either include it or remove the dependency array                                                                           react-hooks/exhaustive-deps
+  268:6    warning  React Hook useEffect has missing dependencies: 'params.cart', 'params.orderType', 'params.phone', 'params.tableNumber', and 'router'. Either include them or remove the dependency array  react-hooks/exhaustive-deps
+  408:9    warning  'isPendingPayment' is assigned a value but never used                                                                                                                                     @typescript-eslint/no-unused-vars
+  642:23   warning  'isPending' is assigned a value but never used                                                                                                                                            @typescript-eslint/no-unused-vars
+  747:22   warning  'isActiveOrDone' is assigned a value but never used                                                                                                                                       @typescript-eslint/no-unused-vars
+
+D:\TECH WIZARD FOLDER-INTERN\Restaurant-mobile\Restaurant-mobile\Mobileapp_frontend\src\app\index.tsx
+    1:28  warning  'useRef' is defined but never used                                                                                                                                                                                                                                                                                       @typescript-eslint/no-unused-vars
+    2:16  warning  'Text' is defined but never used                                                                                                                                                                                                                                                                                         @typescript-eslint/no-unused-vars
+   30:6   warning  React Hook useEffect has a missing dependency: 'navigateToHome'. Either include it or remove the dependency array                                                                                                                                                                                                        react-hooks/exhaustive-deps
+  116:6   warning  React Hook useEffect has missing dependencies: 'bgOpacity', 'bgScale', 'loaderOpacity', 'logoOpacity', 'logoScale', 'mascotOpacity', 'mascotTranslateY', 'rotation', 'subOpacity', 'subTranslateY', 'topBoardTranslateY', 'welcomeOpacity', and 'welcomeTranslateY'. Either include them or remove the dependency array  react-hooks/exhaustive-deps
+
+D:\TECH WIZARD FOLDER-INTERN\Restaurant-mobile\Restaurant-mobile\Mobileapp_frontend\src\components\DineInActiveBanner.tsx
+   9:3   warning  'ActivityIndicator' is defined but never used               @typescript-eslint/no-unused-vars
+  10:3   warning  'Alert' is defined but never used                           @typescript-eslint/no-unused-vars
+  17:10  warning  'orderApi' is defined but never used                        @typescript-eslint/no-unused-vars
+  33:5   warning  'completeDineInSession' is assigned a value but never used  @typescript-eslint/no-unused-vars
+
+D:\TECH WIZARD FOLDER-INTERN\Restaurant-mobile\Restaurant-mobile\Mobileapp_frontend\src\components\VoiceAgentModal.tsx
+   54:9  warning  'isDineInActive' is assigned a value but never used                                                           @typescript-eslint/no-unused-vars
+  102:6  warning  React Hook useEffect has a missing dependency: 'pulseAnim'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+
+D:\TECH WIZARD FOLDER-INTERN\Restaurant-mobile\Restaurant-mobile\Mobileapp_frontend\src\components\icons\animated-icon.web.tsx
+   1:38  warning  'useRef' is defined but never used                                                                                                                     @typescript-eslint/no-unused-vars
+   2:68  warning  'Easing' is defined but never used                                                                                                                     @typescript-eslint/no-unused-vars
+  37:6   warning  React Hook useEffect has missing dependencies: 'logoScale', 'mascotTranslateY', and 'opacityAnim'. Either include them or remove the dependency array  react-hooks/exhaustive-deps
+
+D:\TECH WIZARD FOLDER-INTERN\Restaurant-mobile\Restaurant-mobile\Mobileapp_frontend\src\constants\api.ts
+  1:10  warning  'Platform' is defined but never used   @typescript-eslint/no-unused-vars
+  2:8   warning  'Constants' is defined but never used  @typescript-eslint/no-unused-vars
+
+D:\TECH WIZARD FOLDER-INTERN\Restaurant-mobile\Restaurant-mobile\Mobileapp_frontend\src\services\apiService.ts
+  27:16  warning  'e' is defined but never used  @typescript-eslint/no-unused-vars
+
+D:\TECH WIZARD FOLDER-INTERN\Restaurant-mobile\Restaurant-mobile\Mobileapp_frontend\src\store\sessionUtils.ts
+  5:10  warning  'usePaymentStore' is defined but never used  @typescript-eslint/no-unused-vars
+
+D:\TECH WIZARD FOLDER-INTERN\Restaurant-mobile\Restaurant-mobile\Mobileapp_frontend\src\store\vapiStore.ts
+  23:24  warning  'getScreenDisplayName' is defined but never used  @typescript-eslint/no-unused-vars
+  54:21  warning  A `require()` style import is forbidden           @typescript-eslint/no-require-imports
+
+D:\TECH WIZARD FOLDER-INTERN\Restaurant-mobile\Restaurant-mobile\Mobileapp_frontend\src\utils\mobileAgentActionDispatcher.ts
+  21:10  warning  'useDineInSessionStore' is defined but never used  @typescript-eslint/no-unused-vars
+  22:10  warning  'useAuthStore' is defined but never used           @typescript-eslint/no-unused-vars
+  24:29  warning  'SCREEN_REGISTRY' is defined but never used        @typescript-eslint/no-unused-vars
+
+Γ£û 179 problems (11 errors, 168 warnings)
+  0 errors and 17 warnings potentially fixable with the `--fix` option.
+

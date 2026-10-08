@@ -51,6 +51,10 @@ export default function CheckoutScreen() {
 
   const handleProceed = async () => {
     if (orderType === 'Delivery') {
+      if (!selectedDeliveryAddress) {
+        router.push('/add-address');
+        return;
+      }
       router.push('/delivery-checkout');
       return;
     }
@@ -285,7 +289,7 @@ export default function CheckoutScreen() {
             </View>
             <View style={styles.addressBottom}>
               <Text style={styles.addressText} numberOfLines={1}>
-                {selectedDeliveryAddress || 'Flat 402, Maple Heights, Kora...'}
+                {selectedDeliveryAddress || 'Select Delivery Address'}
               </Text>
               <View style={styles.etaBadge}>
                 <Text style={styles.etaText}>30-40 MIN ETA</Text>
