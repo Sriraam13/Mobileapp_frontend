@@ -676,6 +676,7 @@ export const useVapiStore = create<VapiState>((set, get) => ({
 
     const overrides = { 
       firstMessage: dynamicFirstMessage, 
+      maxDurationSeconds: 3600, // 1 hour max duration so it doesn't time out easily
     };
 
     try {
