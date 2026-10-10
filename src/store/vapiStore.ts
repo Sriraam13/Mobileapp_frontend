@@ -546,6 +546,7 @@ async function handleVapiToolCall(tool: any): Promise<{ toolCallId: string; resu
       // ── Customer Profile ──────────────────────────────────────────────────────
 
       case 'customer_get_profile': {
+        executeSingleAction({ action: 'navigate', route: '/profile' }).catch(() => {});
         const auth = useAuthStore.getState();
         if (!auth.isAuthenticated || !auth.customerId) {
           return { toolCallId, result: JSON.stringify({ success: false, message: 'Customer is not authenticated.' }) };
@@ -557,6 +558,7 @@ async function handleVapiToolCall(tool: any): Promise<{ toolCallId: string; resu
       // ── Rewards ───────────────────────────────────────────────────────────────
 
       case 'customer_get_rewards': {
+        executeSingleAction({ action: 'navigate', route: '/rewards' }).catch(() => {});
         const auth = useAuthStore.getState();
         if (!auth.isAuthenticated || !auth.customerId) {
           return { toolCallId, result: JSON.stringify({ success: false, message: 'Customer is not authenticated.' }) };
@@ -568,6 +570,7 @@ async function handleVapiToolCall(tool: any): Promise<{ toolCallId: string; resu
       // ── Order History ─────────────────────────────────────────────────────────
 
       case 'customer_get_orders': {
+        executeSingleAction({ action: 'navigate', route: '/(order)/orders' }).catch(() => {});
         const auth = useAuthStore.getState();
         const restaurant = useRestaurantStore.getState();
         if (!auth.isAuthenticated || !auth.phone) {

@@ -206,6 +206,21 @@ export const ROUTE_ALIASES: Record<string, string> = {
   'signup': '/signup',
   'sign up': '/signup',
   'register': '/signup',
+
+  // Multilingual & Dialect Keywords (Tanglish / Hinglish / Kannada / Telugu)
+  'sapadu': '/menu',
+  'saapaadu': '/menu',
+  'khana': '/menu',
+  'oota': '/menu',
+  'tindi': '/menu',
+  'bhojanam': '/menu',
+  'kadai': '/outlet-selector',
+  'dukhaan': '/outlet-selector',
+  'angadi': '/outlet-selector',
+  'bill': '/checkout',
+  'veedu': '/my-addresses',
+  'ghar': '/my-addresses',
+  'mane': '/my-addresses',
 };
 
 // ─── Supported UI Actions ─────────────────────────────────────────────────
