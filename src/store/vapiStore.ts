@@ -19,7 +19,7 @@
 
 import { Alert, NativeModules, Platform, PermissionsAndroid } from 'react-native';
 import { create } from 'zustand';
-import { executeSingleAction, UIAction } from '../utils/mobileAgentActionDispatcher';
+import { executeSingleAction, setActiveRouter, UIAction } from '../utils/mobileAgentActionDispatcher';
 import { resolveRoute, getScreenDisplayName } from '../utils/agentRegistry';
 import { getMobileAgentContext } from '../utils/agentContext';
 import { API_BASE_URL } from '../constants/api';
@@ -27,6 +27,56 @@ import { useAuthStore } from '../store/useAuthStore';
 import { useRestaurantStore } from '../store/useRestaurantStore';
 import { useLiveOrderStore } from '../store/useLiveOrderStore';
 import { useCartStore } from './useCartStore';
+
+// Cache executed toolCallIds to avoid duplicate execution
+const executedToolCallIds = new Set<string>();
+
+function extractToolCalls(message: any): any[] {
+  if (!message) return [];
+
+  // 1. Direct toolCallList (Vapi ServerMessageToolCalls / ClientMessageToolCalls standard)
+  if (Array.isArray(message.toolCallList)) {
+    return message.toolCallList;
+  }
+
+  // 2. toolCalls array
+  if (Array.isArray(message.toolCalls)) {
+    return message.toolCalls;
+  }
+
+  // 3. tool_calls array (OpenAI snake_case)
+  if (Array.isArray(message.tool_calls)) {
+    return message.tool_calls;
+  }
+
+  // 4. toolWithToolCallList array
+  if (Array.isArray(message.toolWithToolCallList)) {
+    return message.toolWithToolCallList.map((item: any) => item?.toolCall || item);
+  }
+
+  // 5. Singular toolCall
+  if (message.toolCall && typeof message.toolCall === 'object') {
+    return [message.toolCall];
+  }
+
+  // 6. function-call message type
+  if (message.type === 'function-call' && message.functionCall) {
+    return [{
+      id: message.functionCall.id || `fn-${Date.now()}`,
+      function: message.functionCall,
+    }];
+  }
+
+  // 7. Singular functionCall
+  if (message.functionCall && typeof message.functionCall === 'object') {
+    return [{
+      id: message.functionCall.id || `fn-${Date.now()}`,
+      function: message.functionCall,
+    }];
+  }
+
+  return [];
+}
 
 // ─── SDK Init ─────────────────────────────────────────────────────────────────
 // Only the PUBLIC key is used here. Private key stays server-side.
@@ -130,10 +180,22 @@ async function fetchAgentData(toolName: string, args: Record<string, any>): Prom
 
 async function handleVapiToolCall(tool: any): Promise<{ toolCallId: string; result: string } | null> {
   const toolCallId = tool.id || tool.toolCallId || `tool-${Date.now()}`;
-  const fnName: string = tool.function?.name || '';
-  const fnArgs: Record<string, any> = tool.function?.arguments || {};
+  const fnName: string = tool.function?.name || tool.name || '';
+  let fnArgs: Record<string, any> = {};
 
-  console.log(`[VapiStore] Tool call received: ${fnName}`, fnArgs);
+  const rawArgs = tool.function?.arguments ?? tool.arguments;
+  if (typeof rawArgs === 'string') {
+    try {
+      fnArgs = JSON.parse(rawArgs);
+    } catch (e) {
+      console.warn(`[VapiStore] Failed to parse tool arguments string:`, rawArgs);
+      fnArgs = {};
+    }
+  } else if (typeof rawArgs === 'object' && rawArgs !== null) {
+    fnArgs = rawArgs;
+  }
+
+  console.log(`[VapiStore] >>> Tool call received: "${fnName}"`, fnArgs);
 
   try {
     switch (fnName) {
@@ -141,30 +203,63 @@ async function handleVapiToolCall(tool: any): Promise<{ toolCallId: string; resu
       // ── App Navigation ────────────────────────────────────────────────────────
 
       case 'app_navigate':
-      case 'navigate': {
-        const route = fnArgs.route || '';
-        const resolved = resolveRoute(route);
-        if (!resolved) {
-          return { toolCallId, result: JSON.stringify({ success: false, message: `Route "${route}" is not supported.` }) };
+      case 'navigate':
+      case 'open_screen':
+      case 'switch_screen': {
+        const rawTarget =
+          fnArgs.route ||
+          fnArgs.destination ||
+          fnArgs.page ||
+          fnArgs.screen ||
+          fnArgs.target ||
+          '';
+
+        console.log(`[VapiStore] Navigation requested for target: "${rawTarget}"`);
+
+        // Check if destination enum implies order type (e.g. DINE_IN or TAKEAWAY)
+        if (typeof rawTarget === 'string') {
+          const upper = rawTarget.toUpperCase();
+          if (upper === 'DINE_IN' || upper === 'DINE-IN') {
+            useCartStore.getState().setOrderType('Dine In');
+          } else if (upper === 'TAKEAWAY' || upper === 'TAKE_AWAY') {
+            useCartStore.getState().setOrderType('Take Away');
+          } else if (upper === 'DELIVERY') {
+            useCartStore.getState().setOrderType('Delivery');
+          }
         }
+
+        const resolved = resolveRoute(String(rawTarget));
+        if (!resolved) {
+          console.warn(`[VapiStore] Route "${rawTarget}" could not be resolved!`);
+          return {
+            toolCallId,
+            result: JSON.stringify({
+              success: false,
+              code: 'ROUTE_NOT_FOUND',
+              message: `Screen "${rawTarget}" is not supported.`
+            })
+          };
+        }
+
+        console.log(`[VapiStore] Resolved route: "${resolved}", executing navigation...`);
         const result = await executeSingleAction({
           action: 'navigate',
           route: resolved,
           payload: { params: fnArgs.params || {} },
         });
+
+        console.log(`[VapiStore] Navigation result:`, result);
         return { toolCallId, result: JSON.stringify(result) };
       }
 
-      case 'app_go_back': {
+      case 'app_go_back':
+      case 'go_back': {
         const result = await executeSingleAction({ action: 'go_back' });
         return { toolCallId, result: JSON.stringify(result) };
       }
 
       case 'proceed_to_checkout': {
         const cartCount = useCartStore.getState().getItemCount();
-        if (cartCount === 0) {
-           return { toolCallId, result: JSON.stringify({ success: false, message: 'Cart is empty. Cannot proceed to checkout.' }) };
-        }
         const result = await executeSingleAction({ action: 'show_cart' }); // show_cart navigates to checkout
         return { toolCallId, result: JSON.stringify(result) };
       }
@@ -250,14 +345,15 @@ async function handleVapiToolCall(tool: any): Promise<{ toolCallId: string; resu
       // ── Cart ──────────────────────────────────────────────────────────────────
 
       case 'open_cart':
-      case 'show_cart': {
+      case 'show_cart':
+      case 'view_cart': {
         const result = await executeSingleAction({ action: 'show_cart' });
         return { toolCallId, result: JSON.stringify(result) };
       }
 
       case 'add_to_cart': {
-        const itemNameRaw = fnArgs.item_name;
-        const qty = fnArgs.quantity || 1;
+        const itemNameRaw = fnArgs.item_name || fnArgs.item || fnArgs.name || fnArgs.dish;
+        const qty = Number(fnArgs.quantity || fnArgs.qty) || 1;
 
         console.log(`[VapiStore] ADD_TO_CART REQUEST`);
         console.log(`[VapiStore] Requested item: ${itemNameRaw}`);
@@ -510,13 +606,31 @@ async function handleVapiToolCall(tool: any): Promise<{ toolCallId: string; resu
 
       // ── Order Tracking ────────────────────────────────────────────────────────
 
+      case 'track_order':
+      case 'delivery_tracking': {
+        const orderId = fnArgs.order_id || fnArgs.db_order_id || useLiveOrderStore.getState().dbOrderId;
+        const result = await executeSingleAction({
+          action: 'open_tracking',
+          order_id: orderId ? String(orderId) : undefined,
+        });
+        return { toolCallId, result: JSON.stringify(result) };
+      }
+
       case 'order_get_tracking': {
         const auth = useAuthStore.getState();
+        const orderId = fnArgs.order_id || fnArgs.db_order_id || useLiveOrderStore.getState().dbOrderId;
+
+        // Also navigate to tracking screen so the UI shows it
+        if (orderId) {
+          executeSingleAction({ action: 'open_tracking', order_id: String(orderId) }).catch(() => {});
+        } else {
+          executeSingleAction({ action: 'open_tracking' }).catch(() => {});
+        }
+
         if (!auth.isAuthenticated) {
           return { toolCallId, result: JSON.stringify({ success: false, message: 'Customer is not authenticated.' }) };
         }
 
-        const orderId = fnArgs.order_id || fnArgs.db_order_id || useLiveOrderStore.getState().dbOrderId;
         if (!orderId) {
           return { toolCallId, result: JSON.stringify({ success: false, message: 'No active order to track.' }) };
         }
@@ -530,6 +644,18 @@ async function handleVapiToolCall(tool: any): Promise<{ toolCallId: string; resu
       }
 
       // ── Catering ──────────────────────────────────────────────────────────────
+
+      case 'open_catering': {
+        const result = await executeSingleAction({ action: 'open_catering' });
+        return { toolCallId, result: JSON.stringify(result) };
+      }
+
+      case 'select_outlet':
+      case 'choose_outlet':
+      case 'outlet_selector': {
+        const result = await executeSingleAction({ action: 'select_outlet' });
+        return { toolCallId, result: JSON.stringify(result) };
+      }
 
       case 'catering_get_data': {
         const auth = useAuthStore.getState();
@@ -728,6 +854,9 @@ export const useVapiStore = create<VapiState>((set, get) => ({
   },
 
   setupListeners: (routerRef) => {
+    if (routerRef) {
+      setActiveRouter(routerRef);
+    }
     if (listenersSetup) return;
     const vapi = getVapi();
     if (!vapi) return;
@@ -765,23 +894,37 @@ export const useVapiStore = create<VapiState>((set, get) => ({
     });
 
     vapi.on('message', async (message: any) => {
+      if (!message) return;
 
-      // ── PHASE 3: Proper async tool-call handling with result return ────────────
-      if (message.type === 'tool-calls' && message.toolCalls) {
-        const toolCalls: any[] = message.toolCalls;
+      console.log(`[VapiStore] Incoming Vapi message: "${message.type || 'unknown'}"`);
 
-        // Execute all tool calls sequentially to ensure state mutations are ordered and predictable
+      // ── Tool Call Extraction & Execution ──────────────────────────────────────
+      const toolCalls = extractToolCalls(message);
+      if (toolCalls && toolCalls.length > 0) {
+        console.log(`[VapiStore] Processing ${toolCalls.length} tool call(s) from message type "${message.type}"...`);
+
         const results = [];
         for (const tool of toolCalls) {
+          const toolCallId = tool.id || tool.toolCallId;
+          if (toolCallId && executedToolCallIds.has(toolCallId)) {
+            console.log(`[VapiStore] Skipping already executed toolCallId: ${toolCallId}`);
+            continue;
+          }
+          if (toolCallId) {
+            executedToolCallIds.add(toolCallId);
+            setTimeout(() => executedToolCallIds.delete(toolCallId), 120000);
+          }
+
           const res = await handleVapiToolCall(tool);
-          results.push(res);
+          if (res) {
+            results.push(res);
+          }
         }
 
-        // Return results to Vapi so it can speak confirmed response
+        // Return results to Vapi so the assistant knows what happened
         try {
-          // The @vapi-ai/react-native SDK uses vapi.send() with tool-call-result messages
           for (const result of results) {
-            if (result) {
+            if (result && result.toolCallId) {
               (vapi as any).send({
                 type: 'add-message',
                 message: {
@@ -793,39 +936,7 @@ export const useVapiStore = create<VapiState>((set, get) => ({
             }
           }
         } catch (e) {
-          // Fallback: if send() isn't available in this SDK version, log and continue
-          console.warn('[VapiStore] vapi.send not available for tool results:', e);
-          // Still execute UI actions via legacy path for navigation/cart
-          for (const tool of toolCalls) {
-            const fnName = tool.function?.name || '';
-            const fnArgs = tool.function?.arguments || {};
-
-            // Fallback: map well-known tools to legacy actions
-            if (fnName === 'app_navigate' && fnArgs.route) {
-              await executeSingleAction({ action: 'navigate', route: fnArgs.route });
-            } else if (fnName === 'set_order_type' && fnArgs.order_type) {
-              await executeSingleAction({ action: 'set_order_type', order_type: fnArgs.order_type });
-            } else if (fnName === 'cart_update') {
-              const sub = fnArgs.sub_action || 'add';
-              const actionMap: Record<string, string> = {
-                add: 'add_to_cart', remove: 'remove_from_cart',
-                increment: 'increment_cart_item', decrement: 'decrement_cart_item',
-                set_quantity: 'set_cart_quantity', clear: 'clear_cart', show: 'show_cart',
-              };
-              if (actionMap[sub]) {
-                await executeSingleAction({
-                  action: actionMap[sub],
-                  menu_item_id: fnArgs.item_id,
-                  quantity: fnArgs.quantity,
-                  payload: fnArgs.item ? { item: fnArgs.item } : undefined,
-                });
-              }
-            } else if (fnName === 'app_go_back') {
-              await executeSingleAction({ action: 'go_back' });
-            } else if (fnName === 'order_get_tracking') {
-              await executeSingleAction({ action: 'open_tracking', order_id: fnArgs.order_id });
-            }
-          }
+          console.warn('[VapiStore] Result feedback via vapi.send notice:', e);
         }
       }
 

@@ -21,7 +21,61 @@ import { useLiveOrderStore } from '../store/useLiveOrderStore';
 import { useDineInSessionStore } from '../store/useDineInSessionStore';
 import { useAuthStore } from '../store/useAuthStore';
 import { useRestaurantStore } from '../store/useRestaurantStore';
+import { useVoiceAgentStore } from '../store/useVoiceAgentStore';
 import { SUPPORTED_ACTIONS, SCREEN_REGISTRY, resolveRoute } from './agentRegistry';
+
+// ─── Active Router Reference ──────────────────────────────────────────────────
+let activeRouter: any = null;
+
+export function setActiveRouter(r: any) {
+  if (r) {
+    activeRouter = r;
+  }
+}
+
+export function getActiveRouter() {
+  return activeRouter || router;
+}
+
+/**
+ * Safely navigates to a screen while auto-hiding the voice modal so the screen is visible.
+ * The voice call stays connected and active in the background.
+ */
+export function navigateScreen(resolvedRoute: string, params?: Record<string, any>) {
+  console.log(`[Dispatcher] navigateScreen triggered -> target: "${resolvedRoute}"`, params || '');
+
+  // Dismiss modal overlay so the destination screen is visible to the user immediately
+  try {
+    useVoiceAgentStore.getState().hideAgent();
+  } catch (err) {
+    console.warn('[Dispatcher] Could not minimize voice modal:', err);
+  }
+
+  const r = getActiveRouter();
+
+  setTimeout(() => {
+    try {
+      if (params && Object.keys(params).length > 0) {
+        r.push({ pathname: resolvedRoute as any, params });
+      } else {
+        r.push(resolvedRoute as any);
+      }
+      console.log(`[Dispatcher] Successfully navigated to ${resolvedRoute}`);
+    } catch (pushErr) {
+      console.warn(`[Dispatcher] router.push failed, falling back to router.replace:`, pushErr);
+      try {
+        if (params && Object.keys(params).length > 0) {
+          r.replace({ pathname: resolvedRoute as any, params });
+        } else {
+          r.replace(resolvedRoute as any);
+        }
+        console.log(`[Dispatcher] Successfully replaced to ${resolvedRoute}`);
+      } catch (repErr) {
+        console.error(`[Dispatcher] Complete navigation failure for "${resolvedRoute}":`, repErr);
+      }
+    }
+  }, 50);
+}
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -67,24 +121,28 @@ export async function executeSingleAction(act: UIAction): Promise<ActionResult> 
         const rawRoute = act.route || '';
         const resolved = resolveRoute(rawRoute);
         if (!resolved) {
+          console.warn(`[Dispatcher] Route "${rawRoute}" could not be resolved!`);
           return { success: false, action, message: `Route "${rawRoute}" is not a supported screen.` };
         }
 
         const params = act.payload?.params || {};
-        if (Object.keys(params).length > 0) {
-          router.push({ pathname: resolved as any, params });
-        } else {
-          router.push(resolved as any);
-        }
+        navigateScreen(resolved, params);
         return { success: true, action, message: `Navigated to ${resolved}`, data: { route: resolved } };
       }
 
       case 'go_back': {
-        if (router.canGoBack()) {
-          router.back();
-          return { success: true, action, message: 'Went back.' };
-        }
-        return { success: false, action, message: 'No previous screen to go back to.' };
+        try {
+          useVoiceAgentStore.getState().hideAgent();
+        } catch (_) {}
+        const r = getActiveRouter();
+        setTimeout(() => {
+          if (r.canGoBack && r.canGoBack()) {
+            r.back();
+          } else {
+            navigateScreen('/home');
+          }
+        }, 50);
+        return { success: true, action, message: 'Went back.' };
       }
 
       // ── Authentication form field fill (via events) ──────────────────────────
@@ -250,11 +308,7 @@ export async function executeSingleAction(act: UIAction): Promise<ActionResult> 
 
       case 'show_cart': {
         // Show cart navigates to checkout (cart UI lives there)
-        const count = useCartStore.getState().getItemCount();
-        if (count === 0) {
-          return { success: false, action, message: 'Your cart is empty.' };
-        }
-        router.push('/(checkout)/checkout' as any);
+        navigateScreen('/(checkout)/checkout');
         return { success: true, action, message: 'Opened cart.' };
       }
 
@@ -262,29 +316,29 @@ export async function executeSingleAction(act: UIAction): Promise<ActionResult> 
 
       case 'open_tracking': {
         const orderId = act.order_id || act.db_order_id || useLiveOrderStore.getState().dbOrderId;
-        if (!orderId) return { success: false, action, message: 'No active order to track.' };
-
         const { restaurant_id } = useRestaurantStore.getState().selectedOutlet || {};
-        router.push({
-          pathname: '/(order)/track-order' as any,
-          params: {
+        if (orderId) {
+          navigateScreen('/(order)/track-order', {
             dbOrderId: String(orderId),
             restaurantId: String(restaurant_id || ''),
-          },
-        });
-        return { success: true, action, message: `Opened tracking for order ${orderId}.`, data: { orderId } };
+          });
+          return { success: true, action, message: `Opened tracking for order ${orderId}.`, data: { orderId } };
+        } else {
+          navigateScreen('/(order)/orders');
+          return { success: true, action, message: 'Opened orders screen to track your orders.' };
+        }
       }
 
       // ── Order Details ────────────────────────────────────────────────────────
 
       case 'open_order_details': {
         const orderId = act.order_id || act.db_order_id;
-        if (!orderId) return { success: false, action, message: 'No order ID provided.' };
+        if (!orderId) {
+          navigateScreen('/(order)/orders');
+          return { success: true, action, message: 'Opened orders screen.' };
+        }
 
-        router.push({
-          pathname: '/(order)/order-details' as any,
-          params: { dbOrderId: String(orderId) },
-        });
+        navigateScreen('/(order)/order-details', { dbOrderId: String(orderId) });
         return { success: true, action, message: `Opened order details for ${orderId}.`, data: { orderId } };
       }
 
@@ -292,12 +346,12 @@ export async function executeSingleAction(act: UIAction): Promise<ActionResult> 
 
       case 'open_invoice': {
         const orderId = act.order_id || act.db_order_id || useLiveOrderStore.getState().dbOrderId;
-        if (!orderId) return { success: false, action, message: 'No order ID to open invoice for.' };
+        if (!orderId) {
+          navigateScreen('/(order)/orders');
+          return { success: true, action, message: 'Opened orders screen.' };
+        }
 
-        router.push({
-          pathname: '/(checkout)/invoice' as any,
-          params: { dbOrderId: String(orderId) },
-        });
+        navigateScreen('/(checkout)/invoice', { dbOrderId: String(orderId) });
         return { success: true, action, message: `Opened invoice for order ${orderId}.`, data: { orderId } };
       }
 
@@ -305,38 +359,33 @@ export async function executeSingleAction(act: UIAction): Promise<ActionResult> 
 
       case 'open_delivery_tracking': {
         const orderId = act.order_id || act.db_order_id || useLiveOrderStore.getState().dbOrderId;
-        if (!orderId) return { success: false, action, message: 'No active delivery to track.' };
-
-        router.push({
-          pathname: '/(order)/delivery-tracking' as any,
-          params: { dbOrderId: String(orderId) },
-        });
-        return { success: true, action, message: `Opened delivery tracking for order ${orderId}.`, data: { orderId } };
+        navigateScreen('/(order)/delivery-tracking', orderId ? { dbOrderId: String(orderId) } : {});
+        return { success: true, action, message: `Opened delivery tracking.` };
       }
 
       // ── Addresses ────────────────────────────────────────────────────────────
 
       case 'open_addresses': {
-        router.push('/(address)/my-addresses' as any);
+        navigateScreen('/(address)/my-addresses');
         return { success: true, action, message: 'Opened saved addresses.' };
       }
 
       case 'open_add_address': {
-        router.push('/(address)/add-address' as any);
+        navigateScreen('/(address)/add-address');
         return { success: true, action, message: 'Opened Add Address screen.' };
       }
 
       // ── Catering ─────────────────────────────────────────────────────────────
 
       case 'open_catering': {
-        router.push('/(main)/bulk-catering' as any);
+        navigateScreen('/(main)/bulk-catering');
         return { success: true, action, message: 'Opened Bulk Catering.' };
       }
 
       // ── Outlet ───────────────────────────────────────────────────────────────
 
       case 'select_outlet': {
-        router.push('/(main)/outlet-selector' as any);
+        navigateScreen('/outlet-selector');
         return { success: true, action, message: 'Opened Outlet Selector.' };
       }
 

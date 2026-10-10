@@ -36,6 +36,7 @@ import { Ionicons, FontAwesome5 } from '@expo/vector-icons';
 import { useVoiceAgentStore } from '../store/useVoiceAgentStore';
 import { useCartStore } from '../store/useCartStore';
 import { useDineInSessionStore } from '../store/useDineInSessionStore';
+import { setActiveRouter } from '../utils/mobileAgentActionDispatcher';
 
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 
@@ -120,7 +121,12 @@ export default function VoiceAgentModal() {
     }
   }, [messages, partialUserTranscript, partialAgentTranscript, isVisible]);
 
+  useEffect(() => {
+    setActiveRouter(router);
+  }, [router]);
+
   const openModal = () => {
+    setActiveRouter(router);
     showAgent();
     // Auto-start the Vapi call when the modal opens
     if (!isConnected && !isConnecting) {

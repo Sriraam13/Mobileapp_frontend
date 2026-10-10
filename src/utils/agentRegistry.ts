@@ -86,6 +86,9 @@ export const ROUTE_ALIASES: Record<string, string> = {
   'main': '/home',
   'start': '/home',
   'dashboard': '/home',
+  'home screen': '/home',
+  'go to home': '/home',
+  'go home': '/home',
 
   // Menu
   'menu': '/menu',
@@ -93,12 +96,28 @@ export const ROUTE_ALIASES: Record<string, string> = {
   'browse menu': '/menu',
   'see menu': '/menu',
   'view menu': '/menu',
+  'show menu': '/menu',
+  'open menu': '/menu',
+  'go to menu': '/menu',
+  'take me to menu': '/menu',
+  'today menu': '/menu',
+  'todays menu': '/menu',
+  'food': '/menu',
+  'dishes': '/menu',
+  'items': '/menu',
+  'dine in': '/menu',
+  'dine-in': '/menu',
+  'takeaway': '/menu',
+  'take away': '/menu',
 
   // Profile
   'profile': '/profile',
   'my profile': '/profile',
   'account': '/profile',
+  'my account': '/profile',
   'settings': '/profile',
+  'open profile': '/profile',
+  'show profile': '/profile',
 
   // Rewards
   'rewards': '/rewards',
@@ -106,6 +125,9 @@ export const ROUTE_ALIASES: Record<string, string> = {
   'points': '/rewards',
   'loyalty': '/rewards',
   'my points': '/rewards',
+  'my rewards': '/rewards',
+  'open rewards': '/rewards',
+  'show rewards': '/rewards',
 
   // Favourites
   'favourites': '/favourites',
@@ -113,6 +135,8 @@ export const ROUTE_ALIASES: Record<string, string> = {
   'saved items': '/favourites',
   'my favourites': '/favourites',
   'my favorites': '/favourites',
+  'open favourites': '/favourites',
+  'show favourites': '/favourites',
 
   // Addresses
   'addresses': '/my-addresses',
@@ -121,6 +145,8 @@ export const ROUTE_ALIASES: Record<string, string> = {
   'delivery addresses': '/my-addresses',
   'add address': '/add-address',
   'new address': '/add-address',
+  'open addresses': '/my-addresses',
+  'show addresses': '/my-addresses',
 
   // Orders
   'orders': '/orders',
@@ -128,10 +154,21 @@ export const ROUTE_ALIASES: Record<string, string> = {
   'order history': '/orders',
   'past orders': '/orders',
   'previous orders': '/orders',
+  'open orders': '/orders',
+  'show orders': '/orders',
+  'view orders': '/orders',
+  'go to orders': '/orders',
 
   // Checkout / Payment
   'checkout': '/checkout',
   'cart': '/checkout',
+  'my cart': '/checkout',
+  'open cart': '/checkout',
+  'show cart': '/checkout',
+  'view cart': '/checkout',
+  'go to cart': '/checkout',
+  'basket': '/checkout',
+  'my basket': '/checkout',
   'payment': '/payment',
   'pay': '/payment',
   'invoice': '/invoice',
@@ -143,24 +180,31 @@ export const ROUTE_ALIASES: Record<string, string> = {
   'tracking': '/track-order',
   'delivery tracking': '/delivery-tracking',
   'track delivery': '/delivery-tracking',
+  'where is my order': '/track-order',
 
   // Catering
   'catering': '/bulk-catering',
   'bulk catering': '/bulk-catering',
   'catering packages': '/catering-choose-package',
   'event catering': '/bulk-catering',
+  'bulk order': '/bulk-catering',
+  'open catering': '/bulk-catering',
 
   // Outlet
   'outlet': '/outlet-selector',
+  'outlets': '/outlet-selector',
   'change outlet': '/outlet-selector',
   'select outlet': '/outlet-selector',
+  'choose outlet': '/outlet-selector',
   'restaurant': '/outlet-selector',
   'change restaurant': '/outlet-selector',
+  'branch': '/outlet-selector',
 
   // Login / Signup
   'login': '/login',
   'sign in': '/login',
   'signup': '/signup',
+  'sign up': '/signup',
   'register': '/signup',
 };
 
@@ -210,7 +254,10 @@ export const SUPPORTED_ACTIONS = new Set([
 export const SUPPORTED_VAPI_TOOLS = new Set([
   'app_navigate',
   'navigate',
+  'open_screen',
+  'switch_screen',
   'app_go_back',
+  'go_back',
   'app_get_context',
   'set_order_type',
   'select_order_mode',
@@ -224,6 +271,7 @@ export const SUPPORTED_VAPI_TOOLS = new Set([
   'clear_cart',
   'open_cart',
   'show_cart',
+  'view_cart',
   'proceed_to_checkout',
   'place_order',
   'select_payment_method',
@@ -233,7 +281,11 @@ export const SUPPORTED_VAPI_TOOLS = new Set([
   'customer_get_orders',
   'customer_get_order',
   'order_get_tracking',
+  'track_order',
+  'delivery_tracking',
   'catering_get_data',
+  'open_catering',
+  'select_outlet',
   'app_confirm_action',
   'mcp_tool',
   'voicemail_tool',
@@ -243,19 +295,81 @@ export const SUPPORTED_VAPI_TOOLS = new Set([
 // ─── Resolve alias → canonical route ─────────────────────────────────────
 
 export function resolveRoute(input: string): string | null {
-  if (!input) return null;
-  const normalized = input.toLowerCase().trim();
+  if (!input || typeof input !== 'string') return null;
+  const raw = input.trim();
+  if (!raw) return null;
 
   // Direct match in SCREEN_REGISTRY
-  if (SCREEN_REGISTRY[input]) return SCREEN_REGISTRY[input];
-  if (SCREEN_REGISTRY[normalized]) return SCREEN_REGISTRY[normalized];
+  if (SCREEN_REGISTRY[raw]) return SCREEN_REGISTRY[raw];
 
-  // Alias match
+  const normalized = raw.toLowerCase().replace(/^[/#]+/, '').trim();
+  const withSlash = '/' + normalized;
+
+  if (SCREEN_REGISTRY[withSlash]) return SCREEN_REGISTRY[withSlash];
+  if (SCREEN_REGISTRY[raw.toLowerCase()]) return SCREEN_REGISTRY[raw.toLowerCase()];
+
+  // Direct uppercase enum match (e.g. DINE_IN, TAKEAWAY, CART, MENU, HOME, ORDERS from Vapi navigate tool)
+  const upper = raw.toUpperCase().replace(/[\s-]+/g, '_');
+  const ENUM_ROUTES: Record<string, string> = {
+    'HOME': '/home',
+    'MENU': '/menu',
+    'DINE_IN': '/menu',
+    'TAKEAWAY': '/menu',
+    'TAKE_AWAY': '/menu',
+    'DELIVERY': '/menu',
+    'CART': '/(checkout)/checkout',
+    'CHECKOUT': '/(checkout)/checkout',
+    'TAKEAWAY_CHECKOUT': '/(checkout)/checkout',
+    'PAYMENT': '/(checkout)/payment',
+    'TAKEAWAY_PAYMENT': '/(checkout)/payment',
+    'ORDER_SUCCESS': '/(checkout)/order-success',
+    'TAKEAWAY_ORDER_SUCCESS': '/(checkout)/order-success',
+    'INVOICE': '/(checkout)/invoice',
+    'ORDERS': '/(order)/orders',
+    'ORDER_HISTORY': '/(order)/orders',
+    'TRACK_ORDER': '/(order)/track-order',
+    'TRACKING': '/(order)/track-order',
+    'DELIVERY_TRACKING': '/(order)/delivery-tracking',
+    'PROFILE': '/profile',
+    'REWARDS': '/rewards',
+    'FAVOURITES': '/favourites',
+    'FAVORITES': '/favourites',
+    'OUTLET': '/outlet-selector',
+    'OUTLET_SELECTOR': '/outlet-selector',
+    'CATERING': '/(main)/bulk-catering',
+    'BULK_CATERING': '/(main)/bulk-catering',
+    'ADDRESSES': '/(address)/my-addresses',
+    'MY_ADDRESSES': '/(address)/my-addresses',
+    'ADD_ADDRESS': '/(address)/add-address',
+    'LOGIN': '/login',
+    'SIGNUP': '/signup',
+  };
+
+  if (ENUM_ROUTES[upper]) {
+    return ENUM_ROUTES[upper];
+  }
+
+  // Direct alias match
+  if (ROUTE_ALIASES[raw.toLowerCase()]) return ROUTE_ALIASES[raw.toLowerCase()];
   if (ROUTE_ALIASES[normalized]) return ROUTE_ALIASES[normalized];
 
-  // Partial alias match (prefix scan)
-  for (const [alias, route] of Object.entries(ROUTE_ALIASES)) {
-    if (normalized.includes(alias)) return route;
+  // Clean common conversational phrases (e.g. "go to menu" -> "menu")
+  const cleaned = raw.toLowerCase()
+    .replace(/^(go to|open|show|view|navigate to|take me to|please open|please go to)\s+/, '')
+    .trim();
+
+  if (ROUTE_ALIASES[cleaned]) return ROUTE_ALIASES[cleaned];
+  if (SCREEN_REGISTRY['/' + cleaned]) return SCREEN_REGISTRY['/' + cleaned];
+
+  // Substring match in ROUTE_ALIASES, sorted longest first to avoid partial conflicts
+  const sortedAliases = Object.entries(ROUTE_ALIASES).sort(
+    ([a], [b]) => b.length - a.length
+  );
+
+  for (const [alias, route] of sortedAliases) {
+    if (cleaned.includes(alias) || raw.toLowerCase().includes(alias)) {
+      return route;
+    }
   }
 
   return null;
