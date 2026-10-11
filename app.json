@@ -2,7 +2,7 @@
   "expo": {
     "name": "Data Udipi",
     "slug": "data-udipi-app",
-    "version": "1.0.0",
+    "version": "1.0.1",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "restaurantnative",
@@ -42,7 +42,8 @@
         "android.permission.ACCESS_FINE_LOCATION",
         "android.permission.ACCESS_COARSE_LOCATION"
       ],
-      "package": "com.dataudipi.app"
+      "package": "com.dataudipi.app",
+      "versionCode": 3
     },
     "web": {
       "output": "single",

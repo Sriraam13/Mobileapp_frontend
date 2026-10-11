@@ -1,7 +1,7 @@
 {
   "name": "restaurantnative",
   "main": "expo-router/entry",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "dependencies": {
     "@config-plugins/react-native-webrtc": "^15.0.2",
     "@daily-co/react-native-daily-js": "^0.88.0",
