@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, SafeAreaView, Platform, StatusBar, Modal, KeyboardAvoidingView } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
@@ -6,10 +6,12 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Location from 'expo-location';
 
 import { useCateringSessionStore } from '../../store/useCateringSessionStore';
+import { useRestaurantStore } from '../../store/useRestaurantStore';
 
 export default function CateringEventDetails() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const { selectedOutlet } = useRestaurantStore();
   
   const { 
     orderType, setOrderType,
@@ -20,8 +22,20 @@ export default function CateringEventDetails() {
     guestCount, 
     serviceType, 
     address, 
+    restaurantId,
+    restaurantName,
+    setRestaurant,
     setEventDetails 
   } = useCateringSessionStore();
+
+  useEffect(() => {
+    const outletRestId = selectedOutlet?.restaurant_id || selectedOutlet?.id;
+    if (outletRestId && (!restaurantId || restaurantId !== Number(outletRestId))) {
+      setRestaurant(Number(outletRestId), selectedOutlet?.name || null);
+    } else if (!restaurantId) {
+      setRestaurant(1, 'Data Udipi — Mugalivakkam');
+    }
+  }, [selectedOutlet, restaurantId, setRestaurant]);
 
   
   // Google Places Autocomplete state
@@ -108,6 +122,9 @@ export default function CateringEventDetails() {
       return;
     }
 
+    const effectiveRestId = restaurantId || Number(selectedOutlet?.restaurant_id || selectedOutlet?.id || 1);
+    const effectiveRestName = restaurantName || selectedOutlet?.name || 'Data Udipi';
+
     // Navigate to next step
     router.push({
       pathname: '/(main)/catering-choose-package',
@@ -118,7 +135,9 @@ export default function CateringEventDetails() {
         occasion,
         guestCount: guests.toString(),
         serviceType,
-        address
+        address,
+        restaurantId: effectiveRestId.toString(),
+        restaurantName: effectiveRestName,
       }
     });
   };

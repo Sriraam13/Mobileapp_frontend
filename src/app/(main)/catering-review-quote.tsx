@@ -135,6 +135,8 @@ export default function ReviewQuote() {
             pathname: '/(main)/catering-advance-payment',
             params: {
               sessionId,
+              restaurantId: (params.restaurantId as string) || '',
+              restaurantName: (params.restaurantName as string) || '',
               packageName,
               guestCount: guestCount.toString(),
               eventName,

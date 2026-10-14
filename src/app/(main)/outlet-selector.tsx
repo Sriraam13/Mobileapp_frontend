@@ -30,7 +30,7 @@ const FALLBACK_OUTLETS = [
   },
   {
     id: "banglore",
-    restaurant_id: 3,
+    restaurant_id: 25,
     name: "Data Udipi- Banglore",
     address: "Ganga block 1st cross, Electronic City, Survey No.33, 12th Cross Rd, Bettadasanapura, Karnataka 560100",
     lat: 12.8399,

@@ -24,6 +24,7 @@ interface CateringOrder {
   full_payment_due_date: string | null;
   payment_status: string;
   order_status: string;
+  restaurant_id?: number | null;
 }
 
 const TIMELINE_STEPS = [
@@ -101,6 +102,7 @@ export default function CateringOrderSuccess() {
     dueDate: order?.full_payment_due_date,
     orderStatus: order?.order_status || 'CONFIRMED',
     paymentStatus: order?.payment_status || 'ADVANCE_PAID',
+    restaurant_id: order?.restaurant_id ?? (params.restaurantId ? Number(params.restaurantId) : undefined),
   };
 
   const displayOrderId = `ORD-${displayOrder.id.toString().padStart(6, '0')}`;
@@ -242,7 +244,11 @@ export default function CateringOrderSuccess() {
             style={styles.viewOrderBtn}
             onPress={() => router.push({
               pathname: '/(main)/catering-order-details',
-              params: { orderId: displayOrder.id.toString() }
+              params: {
+                orderId: displayOrder.id.toString(),
+                restaurantId: (params.restaurantId as string) || (displayOrder.restaurant_id ? displayOrder.restaurant_id.toString() : ''),
+                restaurantName: (params.restaurantName as string) || ''
+              }
             })}
           >
             <Text style={styles.viewOrderBtnText}>View Order Details</Text>

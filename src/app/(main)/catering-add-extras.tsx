@@ -1,4 +1,4 @@
-﻿import { API_BASE_URL } from '../../constants/api';
+import { API_BASE_URL } from '../../constants/api';
 import React, { useState } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
@@ -161,6 +161,8 @@ export default function AddExtras() {
         pathname: '/(main)/catering-review-quote',
         params: {
           sessionId,
+          restaurantId: (params.restaurantId as string) || '',
+          restaurantName: (params.restaurantName as string) || '',
           packageName: params.packageName,
           guestCount: guestCount.toString(),
           eventName: params.eventName,
