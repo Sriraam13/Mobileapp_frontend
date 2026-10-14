@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, StatusBar, Image, Alert, ActivityIndicator } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, StatusBar, Image, Alert, ActivityIndicator, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
@@ -8,6 +8,8 @@ import { getFullImageUrl } from '../../constants/api';
 import { useAuthStore, useRestaurantStore, useFavoritesStore, useCartStore } from '../../store';
 import { customerApi } from '../../services/apiService';
 import BottomNavBar from '../../components/layout/BottomNavBar';
+import ViewCartButton from '../../components/layout/ViewCartButton';
+import AddToCartToast from '../../components/ui/AddToCartToast';
 
 interface RecommendationItem {
   id: number;
@@ -44,9 +46,12 @@ export default function ForYou() {
   const { selectedOutlet } = useRestaurantStore();
   const { favorites, setFavorites, addFavorite, removeFavorite, isFavorite } = useFavoritesStore();
   const { addItem } = useCartStore();
+  const cartItemCount = useCartStore((state) => state.getItemCount());
 
   const [data, setData] = useState<RecommendationsData | null>(null);
   const [loading, setLoading] = useState(true);
+  const [toastVisible, setToastVisible] = useState(false);
+  const [addedItemName, setAddedItemName] = useState('');
 
   useEffect(() => {
     const loadForYouData = async () => {
@@ -119,7 +124,8 @@ export default function ForYou() {
       image: getFullImageUrl(item.image_url, item.name),
       category: 'Favorite',
     });
-    Alert.alert('Added to Cart', `${item.name} has been added to your order!`);
+    setAddedItemName(item.name);
+    setToastVisible(true);
   };
 
   const handleComboAddToCart = (combo: any) => {
@@ -130,7 +136,8 @@ export default function ForYou() {
       image: getFullImageUrl(combo.image_url, combo.name),
       category: 'Combo',
     });
-    Alert.alert('Added to Cart', `${combo.name} has been added to your order!`);
+    setAddedItemName(combo.name);
+    setToastVisible(true);
   };
 
   const renderItemCard = (item: RecommendationItem) => (
@@ -322,6 +329,22 @@ export default function ForYou() {
             </>
           )}
         </ScrollView>
+      )}
+
+      {/* Add To Cart Toast Notification */}
+      <AddToCartToast
+        visible={toastVisible}
+        itemName={addedItemName}
+        itemCount={cartItemCount}
+        onDismiss={() => setToastVisible(false)}
+        bottomOffset={Platform.OS === 'ios' ? 84 : 74}
+      />
+
+      {/* Floating View Cart Button when cart has items and toast is not showing */}
+      {cartItemCount > 0 && !toastVisible && (
+        <View style={styles.floatingCartContainer}>
+          <ViewCartButton />
+        </View>
       )}
 
       {/* Bottom Navigation */}
@@ -545,5 +568,11 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontWeight: '700',
     fontSize: 14,
+  },
+  floatingCartContainer: {
+    position: 'absolute',
+    bottom: 74,
+    alignSelf: 'center',
+    zIndex: 999,
   },
 });

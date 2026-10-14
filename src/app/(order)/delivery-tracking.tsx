@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Image, Platform, StatusBar, Dimensions, Linking, Alert, Animated } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Image, Platform, StatusBar, Dimensions, Linking, Alert, Animated, Modal, ActivityIndicator } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons, MaterialIcons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
@@ -45,6 +45,46 @@ export default function DeliveryTrackingScreen() {
   const [riderNotified, setRiderNotified] = useState(false);
   const [riderAssignedBanner, setRiderAssignedBanner] = useState<string | null>(null);
   const [pulseAnim] = useState(() => new Animated.Value(1));
+
+  // Cancellation State
+  const [cancelling, setCancelling] = useState(false);
+  const [cancelModalVisible, setCancelModalVisible] = useState(false);
+  const [cancelError, setCancelError] = useState<string | null>(null);
+
+  const handleOpenCancelModal = () => {
+    setCancelError(null);
+    setCancelModalVisible(true);
+  };
+
+  const handleExecuteCancel = async () => {
+    const rawId = params.dbOrderId || (params.orderId ? params.orderId.replace(/\D/g, '') : '');
+    if (!rawId) return;
+
+    try {
+      setCancelling(true);
+      setCancelError(null);
+      const restId = selectedOutlet?.restaurant_id ? Number(selectedOutlet.restaurant_id) : undefined;
+      await orderApi.cancelOrder(rawId, restId);
+
+      setCurrentStatus('CANCELLED');
+      setDeliveryStatus(DELIVERY_STATUS.CANCELLED);
+      useLiveOrderStore.getState().clearLiveOrder();
+      setCancelModalVisible(false);
+      Alert.alert('Order Cancelled', 'Your delivery order has been cancelled successfully.', [
+        { text: 'Return Home', onPress: () => router.replace('/(main)/home') }
+      ]);
+    } catch (err: any) {
+      console.warn('Delivery cancel error:', err?.message || err);
+      const msg = err?.message || '';
+      if (msg.includes('409') || msg.toLowerCase().includes('preparing') || msg.toLowerCase().includes('already started')) {
+        setCancelError('Cancellation unavailable. The kitchen has already started preparing this order.');
+      } else {
+        setCancelError(msg || 'Unable to cancel order at this stage.');
+      }
+    } finally {
+      setCancelling(false);
+    }
+  };
 
   const [riderInfo, setRiderInfo] = useState<{
     id?: number;
@@ -240,6 +280,9 @@ export default function DeliveryTrackingScreen() {
     { label: 'Out for\nDelivery', icon: 'bicycle' },
     { label: 'Delivered', icon: 'home' },
   ];
+
+  const isCancelled = (currentStatus || '').toUpperCase() === 'CANCELLED' || deliveryStatus === DELIVERY_STATUS.CANCELLED;
+  const canCancel = !isCancelled && activeStep === 0 && ['PENDING', 'CONFIRMED'].includes((currentStatus || '').toUpperCase());
 
   const isSearchingRider = !riderInfo && (!deliveryStatus || deliveryStatus === DELIVERY_STATUS.RIDER_SEARCHING);
   const isOutForDelivery = isLiveTrackingStatus(deliveryStatus);
@@ -558,9 +601,98 @@ export default function DeliveryTrackingScreen() {
     )
   }
 
-        </View >
-      </ScrollView >
-    </SafeAreaView >
+          {/* Cancellation Card for Delivery (Before Kitchen Prepares) */}
+          {canCancel && (
+            <View style={styles.cancelCard}>
+              <View style={{ flex: 1, marginRight: 12 }}>
+                <Text style={styles.cancelCardTitle}>Need to cancel?</Text>
+                <Text style={styles.cancelCardSub}>
+                  Cancellation is available before the kitchen starts preparing your food.
+                </Text>
+              </View>
+              <TouchableOpacity
+                style={styles.cancelDeliveryBtn}
+                onPress={handleOpenCancelModal}
+                disabled={cancelling}
+                activeOpacity={0.8}
+              >
+                <Ionicons name="close-circle-outline" size={16} color="#DC2626" />
+                <Text style={styles.cancelDeliveryBtnText}>Cancel Order</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+
+          {/* Cancelled Banner */}
+          {isCancelled && (
+            <View style={styles.cancelledBanner}>
+              <Ionicons name="close-circle" size={24} color="#DC2626" />
+              <View style={{ marginLeft: 12, flex: 1 }}>
+                <Text style={styles.cancelledBannerTitle}>Order Cancelled</Text>
+                <Text style={styles.cancelledBannerSub}>This delivery order has been cancelled.</Text>
+              </View>
+              <TouchableOpacity
+                style={styles.returnHomeBtn}
+                onPress={() => router.replace('/(main)/home')}
+                activeOpacity={0.8}
+              >
+                <Text style={styles.returnHomeBtnText}>Home</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+
+        </View>
+      </ScrollView>
+
+      {/* Cancellation Modal */}
+      <Modal
+        visible={cancelModalVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => !cancelling && setCancelModalVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalIconBox}>
+              <Ionicons name="alert-circle" size={36} color="#DC2626" />
+            </View>
+            <Text style={styles.modalTitle}>Cancel Delivery Order?</Text>
+            <Text style={styles.modalSub}>
+              Are you sure you want to cancel this order? Once the kitchen starts cooking, cancellation is no longer possible.
+            </Text>
+
+            {cancelError && (
+              <View style={styles.modalErrorBox}>
+                <Ionicons name="warning-outline" size={16} color="#DC2626" />
+                <Text style={styles.modalErrorText}>{cancelError}</Text>
+              </View>
+            )}
+
+            <View style={styles.modalActions}>
+              <TouchableOpacity
+                style={styles.modalKeepBtn}
+                onPress={() => setCancelModalVisible(false)}
+                disabled={cancelling}
+                activeOpacity={0.8}
+              >
+                <Text style={styles.modalKeepText}>Keep Order</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.modalConfirmBtn}
+                onPress={handleExecuteCancel}
+                disabled={cancelling}
+                activeOpacity={0.8}
+              >
+                {cancelling ? (
+                  <ActivityIndicator size="small" color="#fff" />
+                ) : (
+                  <Text style={styles.modalConfirmText}>Yes, Cancel</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+    </SafeAreaView>
   );
 }
 
@@ -689,4 +821,168 @@ const styles = StyleSheet.create({
   },
   subtotalLabel: { fontSize: 14, fontWeight: 'bold', color: '#000' },
   subtotalValue: { fontSize: 14, fontWeight: 'bold', color: '#ff3400' },
+  cancelCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#FEF2F2',
+    borderWidth: 1,
+    borderColor: '#FECACA',
+    borderRadius: 14,
+    padding: 14,
+    marginTop: 18,
+  },
+  cancelCardTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#991B1B',
+    marginBottom: 2,
+  },
+  cancelCardSub: {
+    fontSize: 12,
+    color: '#7F1D1D',
+    lineHeight: 16,
+  },
+  cancelDeliveryBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#fff',
+    borderWidth: 1,
+    borderColor: '#FCA5A5',
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 10,
+    gap: 4,
+    shadowColor: '#DC2626',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.08,
+    shadowRadius: 3,
+    elevation: 1,
+  },
+  cancelDeliveryBtnText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#DC2626',
+  },
+  cancelledBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FEF2F2',
+    borderWidth: 1,
+    borderColor: '#FCA5A5',
+    borderRadius: 14,
+    padding: 16,
+    marginTop: 18,
+  },
+  cancelledBannerTitle: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#991B1B',
+  },
+  cancelledBannerSub: {
+    fontSize: 12,
+    color: '#7F1D1D',
+    marginTop: 2,
+  },
+  returnHomeBtn: {
+    backgroundColor: '#DC2626',
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    marginLeft: 8,
+  },
+  returnHomeBtnText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.55)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 24,
+  },
+  modalContent: {
+    width: '100%',
+    backgroundColor: '#fff',
+    borderRadius: 20,
+    padding: 24,
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.2,
+    shadowRadius: 16,
+    elevation: 8,
+  },
+  modalIconBox: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    backgroundColor: '#FEE2E2',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 16,
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: '800',
+    color: '#111827',
+    marginBottom: 8,
+    textAlign: 'center',
+  },
+  modalSub: {
+    fontSize: 13,
+    color: '#6B7280',
+    textAlign: 'center',
+    lineHeight: 18,
+    marginBottom: 16,
+  },
+  modalErrorBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FEF2F2',
+    borderColor: '#FECACA',
+    borderWidth: 1,
+    borderRadius: 10,
+    padding: 10,
+    marginBottom: 16,
+    gap: 6,
+    width: '100%',
+  },
+  modalErrorText: {
+    fontSize: 12,
+    color: '#991B1B',
+    flex: 1,
+  },
+  modalActions: {
+    flexDirection: 'row',
+    gap: 12,
+    width: '100%',
+    marginTop: 8,
+  },
+  modalKeepBtn: {
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: 12,
+    backgroundColor: '#F3F4F6',
+    alignItems: 'center',
+  },
+  modalKeepText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#374151',
+  },
+  modalConfirmBtn: {
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: 12,
+    backgroundColor: '#DC2626',
+    alignItems: 'center',
+  },
+  modalConfirmText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#fff',
+  },
 });

@@ -83,18 +83,17 @@ export default function Orders() {
             const finalOrderId = o.orderId || `ORD-${String(o.id).padStart(6, '0')}`;
             const { mappedType, tableNumber } = parseOrderTypeAndTable(o.order_type, o.table_number);
 
-            const isDineIn = mappedType === 'Dine In';
             const normPayMethod = (o.payment_method || '').toLowerCase().replace(/[\s_-]/g, '');
-            const isCounterPaid = normPayMethod === 'payatcounter' || normPayMethod === 'counter';
-            const isPaidStatus = (o.payment_status || '').toUpperCase() === 'PAID' || isCounterPaid;
+            const isCounter = normPayMethod === 'payatcounter' || normPayMethod === 'counter';
+            const isPaidStatus = (o.payment_status || '').toUpperCase() === 'PAID';
 
             return {
               id: finalOrderId,
               dbId: o.id,
               restaurant: o.restaurant_id === 2 ? 'MGR Nagar' : 'Mugalivakkam',
-              date: o.created_at || new Date().toISOString(),
-              status: (isCounterPaid && isDineIn) ? 'SERVED' : (o.status || 'Pending'),
-              payment_status: isPaidStatus ? 'Paid' : (o.payment_status || 'Pending'),
+              date: o.created_at || '2000-01-01T00:00:00Z',
+              status: o.status || 'Pending',
+              payment_status: isPaidStatus ? 'Paid' : (o.payment_status || (isCounter ? 'Pay at Counter' : 'Pending')),
               payment_method: o.payment_method,
               table_number: tableNumber,
               items: items || [],
@@ -118,7 +117,7 @@ export default function Orders() {
               id: `CAT-${String(cOrder.id).padStart(6, '0')}`,
               dbId: cOrder.id,
               restaurant: 'Data Udipi Catering',
-              date: cOrder.created_at || new Date().toISOString(),
+              date: cOrder.created_at || cOrder.event_date || '2000-01-01T00:00:00Z',
               status: cOrder.order_status || 'Pending',
               payment_status: cOrder.payment_status || 'Pending',
               payment_method: 'Online',
@@ -149,18 +148,17 @@ export default function Orders() {
 
         formattedOrders = accountPastOrders.map((o: any) => {
           const { mappedType, tableNumber } = parseOrderTypeAndTable(o.orderType || o.order_type, o.table_number);
-          const isDineIn = mappedType === 'Dine In';
           const normPayMethod = (o.payment_method || '').toLowerCase().replace(/[\s_-]/g, '');
-          const isCounterPaid = normPayMethod === 'payatcounter' || normPayMethod === 'counter';
-          const isPaidStatus = (o.payment_status || '').toUpperCase() === 'PAID' || isCounterPaid;
+          const isCounter = normPayMethod === 'payatcounter' || normPayMethod === 'counter';
+          const isPaidStatus = (o.payment_status || '').toUpperCase() === 'PAID';
 
           return {
             id: o.orderId || `ORD-${String(o.dbOrderId || o.id || 0).padStart(6, '0')}`,
             dbId: o.dbOrderId || o.id,
             restaurant: 'Data Udipi',
-            date: o.date || new Date().toISOString(),
-            status: (isCounterPaid && isDineIn) ? 'SERVED' : (o.status || 'Pending'),
-            payment_status: isPaidStatus ? 'Paid' : (o.payment_status || 'Pending'),
+            date: o.date || o.created_at || '2000-01-01T00:00:00Z',
+            status: o.status || 'Pending',
+            payment_status: isPaidStatus ? 'Paid' : (o.payment_status || (isCounter ? 'Pay at Counter' : 'Pending')),
             payment_method: o.payment_method,
             table_number: tableNumber,
             items: o.items || o.cart || [],
@@ -170,9 +168,6 @@ export default function Orders() {
           };
         });
       }
-
-      // Sort by date descending
-      formattedOrders.sort((a, b) => new Date(b.date || 0).getTime() - new Date(a.date || 0).getTime());
 
       // Merge active ongoing dine-in order under ONE single order ID
       if (dineInSession.isActive && dineInSession.activeOrderId) {
@@ -204,6 +199,62 @@ export default function Orders() {
           formattedOrders.unshift(activeOrderCard);
         }
       }
+
+      // Helper to compute timestamps safely
+      const getOrderTime = (o: any): number => {
+        if (o.isOngoingDineIn) return Date.now();
+        if (!o.date) return 0;
+        const t = new Date(o.date).getTime();
+        return isNaN(t) ? 0 : t;
+      };
+
+      // Check whether order requires payment / is unpaid
+      const isOrderUnpaid = (o: any): boolean => {
+        const statusUpper = (o.status || '').toUpperCase();
+        if (statusUpper === 'CANCELLED') return false;
+        if (o.isOngoingDineIn) return true;
+
+        if (o.isCatering) {
+          const payStatus = (o.payment_status || '').toUpperCase();
+          const balance = Number(o.balance_amount || 0);
+          return payStatus !== 'PAID' && (payStatus === 'PARTIALLY_PAID' || balance > 0 || payStatus === 'PENDING');
+        }
+
+        const payStatusUpper = (o.payment_status || '').toUpperCase();
+        return payStatusUpper !== 'PAID';
+      };
+
+      const maxOrderTime = formattedOrders.reduce((max, o) => Math.max(max, getOrderTime(o)), 0);
+
+      const getOrderPriority = (o: any): number => {
+        const statusUpper = (o.status || '').toUpperCase();
+        if (statusUpper === 'CANCELLED') return 4;
+
+        if (o.isOngoingDineIn) return 0;
+
+        const unpaid = isOrderUnpaid(o);
+        const isLatest = getOrderTime(o) === maxOrderTime && maxOrderTime > 0;
+
+        // Unpaid orders and the Last Order placed come to the front of the stack
+        if (unpaid || isLatest) return 1;
+
+        // Active in-progress orders
+        const isActive = ['PENDING', 'CONFIRMED', 'PREPARING', 'READY', 'RIDER_ASSIGNED', 'PICKED_UP', 'OUT_FOR_DELIVERY', 'ON_THE_WAY'].includes(statusUpper);
+        if (isActive) return 2;
+
+        // Completed historical orders
+        return 3;
+      };
+
+      // Multi-tier sort: Priority first, then newest orders first within each priority tier
+      formattedOrders.sort((a, b) => {
+        const prioA = getOrderPriority(a);
+        const prioB = getOrderPriority(b);
+        if (prioA !== prioB) {
+          return prioA - prioB;
+        }
+        return getOrderTime(b) - getOrderTime(a);
+      });
 
       setOrders(formattedOrders);
     } catch (e) {
@@ -428,10 +479,11 @@ export default function Orders() {
               const isDineIn = order.order_type === 'Dine In';
               const isCatering = order.isCatering;
               const normPayMethod = (order.payment_method || '').toLowerCase().replace(/[\s_-]/g, '');
-              const isCounterPaid = normPayMethod === 'payatcounter' || normPayMethod === 'counter';
+              const isCounter = normPayMethod === 'payatcounter' || normPayMethod === 'counter';
               const isPartiallyPaid = (order.payment_status || '').toUpperCase() === 'PARTIALLY_PAID';
-              const isPaid = (order.payment_status || '').toUpperCase() === 'PAID' || (isDineIn && isCounterPaid);
+              const isPaid = (order.payment_status || '').toUpperCase() === 'PAID';
               const isUnpaidDineIn = isDineIn && (!isPaid || order.isOngoingDineIn);
+              const isUnpaidNonCatering = !isPaid && !isCatering && (order.status || '').toUpperCase() !== 'CANCELLED';
 
               return (
                 <>
@@ -451,7 +503,7 @@ export default function Orders() {
                     <View style={[styles.infoBadge, isPaid ? { backgroundColor: '#e8f5e9' } : (isPartiallyPaid ? {backgroundColor: '#e3f2fd'} : { backgroundColor: '#fff3e0' })]}>
                       <Text style={styles.infoBadgeLabel}>Payment</Text>
                       <Text style={[styles.infoBadgeValue, { color: isPaid ? '#16a34a' : (isPartiallyPaid ? '#0284c7' : '#ff4500'), fontWeight: 'bold' }]}>
-                        {isPaid ? 'Paid' : (isPartiallyPaid ? 'Partially Paid' : (order.order_type === 'Delivery' ? 'Cash on Delivery' : 'Pay Later'))}
+                        {isPaid ? 'Paid' : (isPartiallyPaid ? 'Partially Paid' : (order.order_type === 'Delivery' ? 'Cash on Delivery' : (isCounter ? 'Pay at Counter' : 'Pay Later')))}
                       </Text>
                     </View>
                   </View>
@@ -509,6 +561,14 @@ export default function Orders() {
                         activeOpacity={0.8}
                       >
                         <Text style={[styles.reorderText, { color: '#ffffff', fontWeight: 'bold' }]}>Track Order</Text>
+                      </TouchableOpacity>
+                    ) : isUnpaidNonCatering ? (
+                      <TouchableOpacity 
+                        style={[styles.reorderBtn, { backgroundColor: '#ff4500', borderColor: '#ff4500', minWidth: 100, alignItems: 'center', justifyContent: 'center' }]} 
+                        onPress={() => handleOrderPress(order)}
+                        activeOpacity={0.8}
+                      >
+                        <Text style={[styles.reorderText, { color: '#ffffff', fontWeight: 'bold' }]}>Track / Pay</Text>
                       </TouchableOpacity>
                     ) : (
                       <TouchableOpacity 

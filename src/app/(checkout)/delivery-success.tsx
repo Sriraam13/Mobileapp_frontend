@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useMemo } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, BackHandler, Platform, Alert } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, BackHandler, Platform, Alert, ActivityIndicator } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
@@ -25,6 +25,44 @@ export default function DeliverySuccessScreen() {
 
   const [itemsName, setItemsName] = useState('Item x1');
   const [orderDetails, setOrderDetails] = useState<any>(null);
+  const [cancelling, setCancelling] = useState(false);
+
+  const handleCancelOrder = () => {
+    const rawId = params.dbOrderId || (params.orderId ? params.orderId.replace(/\D/g, '') : '');
+    if (!rawId) return;
+
+    Alert.alert(
+      "Cancel Delivery Order",
+      "Are you sure you want to cancel this order? Once kitchen preparation begins, orders cannot be cancelled.",
+      [
+        { text: "Keep Order", style: "cancel" },
+        {
+          text: "Yes, Cancel",
+          style: "destructive",
+          onPress: async () => {
+            try {
+              setCancelling(true);
+              const restId = selectedOutlet?.restaurant_id ? Number(selectedOutlet.restaurant_id) : undefined;
+              await orderApi.cancelOrder(rawId, restId);
+              useLiveOrderStore.getState().clearLiveOrder();
+              Alert.alert("Order Cancelled", "Your delivery order has been cancelled successfully.", [
+                { text: "Return Home", onPress: () => router.replace('/(main)/home') }
+              ]);
+            } catch (err: any) {
+              const msg = err?.message || '';
+              if (msg.includes('409') || msg.toLowerCase().includes('preparing') || msg.toLowerCase().includes('already started')) {
+                Alert.alert("Cannot Cancel", "Cancellation unavailable. The kitchen has already started preparing this order.");
+              } else {
+                Alert.alert("Cannot Cancel", msg || "Unable to cancel order at this stage.");
+              }
+            } finally {
+              setCancelling(false);
+            }
+          }
+        }
+      ]
+    );
+  };
 
   useEffect(() => {
     const dbOrderId = params.dbOrderId;
@@ -285,6 +323,20 @@ export default function DeliverySuccessScreen() {
         <TouchableOpacity style={styles.trackBtn} onPress={handleTrackOrder}>
           <Text style={styles.trackBtnText}>Track Your Order</Text>
         </TouchableOpacity>
+        {['PENDING', 'CONFIRMED'].includes(status) && (
+          <TouchableOpacity
+            style={styles.cancelBtn}
+            onPress={handleCancelOrder}
+            disabled={cancelling}
+            activeOpacity={0.8}
+          >
+            {cancelling ? (
+              <ActivityIndicator size="small" color="#DC2626" />
+            ) : (
+              <Text style={styles.cancelBtnText}>Cancel Order</Text>
+            )}
+          </TouchableOpacity>
+        )}
         <TouchableOpacity style={styles.backMenuBtn} onPress={handleBackToMenu}>
           <Text style={styles.backMenuText}>Back to Main Menu</Text>
         </TouchableOpacity>
@@ -492,6 +544,20 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 16,
     fontWeight: 'bold',
+  },
+  cancelBtn: {
+    backgroundColor: '#FEF2F2',
+    borderWidth: 1,
+    borderColor: '#FECACA',
+    paddingVertical: 14,
+    borderRadius: 12,
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  cancelBtnText: {
+    color: '#DC2626',
+    fontSize: 15,
+    fontWeight: '700',
   },
   backMenuBtn: {
     alignItems: 'center',

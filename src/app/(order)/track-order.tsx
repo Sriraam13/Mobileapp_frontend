@@ -1230,6 +1230,26 @@ export default function TrackOrderScreen() {
             </View>
           </View>
 
+          {/* Takeaway Cancellation Option Card */}
+          {['PENDING', 'CONFIRMED'].includes((orderDetails?.order?.status || '').toUpperCase()) && (
+            <View style={styles.cancellationBannerCard}>
+              <View style={{ marginBottom: 10 }}>
+                <Text style={styles.cancellationBannerTitle}>Need to cancel?</Text>
+                <Text style={styles.cancellationBannerSub}>
+                  Cancellation is available before the kitchen starts preparing your takeaway order.
+                </Text>
+              </View>
+              <TouchableOpacity
+                style={[styles.cancelActionBtn, { alignSelf: 'flex-start' }]}
+                onPress={() => openCancelModal(orderDetails?.order?.id || params.dbOrderId)}
+                activeOpacity={0.7}
+              >
+                <Ionicons name="close-circle-outline" size={15} color="#DC2626" style={{ marginRight: 4 }} />
+                <Text style={styles.cancelActionBtnText}>Cancel Takeaway Order</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+
           {/* Dish Prep Status */}
           <Text style={styles.dishSectionTitle}>Dish preparation status</Text>
           <View style={styles.dishList}>
@@ -1241,6 +1261,17 @@ export default function TrackOrderScreen() {
 
       {/* Bottom Actions */}
       <View style={[styles.bottomBar, { paddingBottom: insets.bottom || 16 }]}>
+        {['PENDING', 'CONFIRMED'].includes((orderDetails?.order?.status || '').toUpperCase()) && (
+          <TouchableOpacity
+            style={[styles.callButton, { borderColor: '#FECACA', backgroundColor: '#FEF2F2', marginRight: 8 }]}
+            onPress={() => openCancelModal(orderDetails?.order?.id || params.dbOrderId)}
+            activeOpacity={0.7}
+          >
+            <Ionicons name="close-circle-outline" size={18} color="#DC2626" />
+            <Text style={[styles.callBtnText, { color: '#DC2626', fontWeight: '700', marginLeft: 4 }]}>Cancel</Text>
+          </TouchableOpacity>
+        )}
+
         <TouchableOpacity style={styles.callButton} onPress={() => Linking.openURL(`tel:${selectedOutlet?.phone || '1234567890'}`)}>
           <Ionicons name="call-outline" size={18} color="#000" />
           <Text style={styles.callBtnText}>Call Restaurant</Text>

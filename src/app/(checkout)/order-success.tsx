@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Image, Platform, StatusBar, ScrollView, BackHandler, Linking, Alert } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Image, Platform, StatusBar, ScrollView, BackHandler, Linking, Alert, ActivityIndicator } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
@@ -38,6 +38,44 @@ export default function OrderSuccessScreen() {
   const [orderDetails, setOrderDetails] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [userLocation, setUserLocation] = useState<{latitude: number, longitude: number} | null>(null);
+  const [cancelling, setCancelling] = useState(false);
+
+  const handleCancelTakeawayOrder = () => {
+    const rawId = params.dbOrderId || (params.orderId ? params.orderId.replace(/\D/g, '') : '');
+    if (!rawId) return;
+
+    Alert.alert(
+      "Cancel Order",
+      "Are you sure you want to cancel this order? Once food preparation starts, cancellation is not possible.",
+      [
+        { text: "Keep Order", style: "cancel" },
+        {
+          text: "Yes, Cancel",
+          style: "destructive",
+          onPress: async () => {
+            try {
+              setCancelling(true);
+              const restId = selectedOutlet?.restaurant_id ? Number(selectedOutlet.restaurant_id) : undefined;
+              await orderApi.cancelOrder(rawId, restId);
+              useLiveOrderStore.getState().clearLiveOrder();
+              Alert.alert("Order Cancelled", "Your order has been cancelled successfully.", [
+                { text: "Return Home", onPress: () => router.replace('/(main)/home') }
+              ]);
+            } catch (err: any) {
+              const msg = err?.message || '';
+              if (msg.includes('409') || msg.toLowerCase().includes('preparing') || msg.toLowerCase().includes('already started')) {
+                Alert.alert("Cannot Cancel", "Cancellation unavailable. The kitchen has already started preparing this order.");
+              } else {
+                Alert.alert("Cannot Cancel", msg || "Unable to cancel order at this stage.");
+              }
+            } finally {
+              setCancelling(false);
+            }
+          }
+        }
+      ]
+    );
+  };
 
   const dbOrderId = params.dbOrderId;
 
@@ -413,6 +451,20 @@ export default function OrderSuccessScreen() {
           <Text style={styles.trackButtonText}>Track Preparation</Text>
           <Ionicons name="arrow-forward" size={20} color="#fff" />
         </TouchableOpacity>
+        {['PENDING', 'CONFIRMED'].includes((orderDetails?.order?.status || '').toUpperCase()) && (
+          <TouchableOpacity
+            style={styles.cancelTakeawayBtn}
+            onPress={handleCancelTakeawayOrder}
+            disabled={cancelling}
+            activeOpacity={0.8}
+          >
+            {cancelling ? (
+              <ActivityIndicator size="small" color="#DC2626" />
+            ) : (
+              <Text style={styles.cancelTakeawayBtnText}>Cancel Order</Text>
+            )}
+          </TouchableOpacity>
+        )}
       </View>
     </View>
   );
@@ -681,5 +733,20 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: 'bold',
     marginRight: 8,
+  },
+  cancelTakeawayBtn: {
+    backgroundColor: '#FEF2F2',
+    borderWidth: 1,
+    borderColor: '#FECACA',
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 14,
+    marginTop: 10,
+  },
+  cancelTakeawayBtnText: {
+    color: '#DC2626',
+    fontSize: 15,
+    fontWeight: '700',
   },
 });

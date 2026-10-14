@@ -27,7 +27,9 @@ async function fetchWithTimeout(url: string, options: RequestInit = {}, timeoutM
       } catch (e) {
         message = res.statusText || message;
       }
-      throw new Error(`${message} (HTTP ${res.status})`);
+      const error: any = new Error(message);
+      error.status = res.status;
+      throw error;
     }
     return await res.json();
   } catch (error: any) {
