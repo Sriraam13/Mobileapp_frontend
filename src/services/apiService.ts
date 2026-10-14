@@ -219,10 +219,10 @@ export const orderApi = {
   },
 
   /** GET /api/v1/public/orders/{dbOrderId} — fetch full order details (no auth needed) */
-  getOrderDetails: (dbOrderId: string, restaurantId: number) => {
-    if (!restaurantId) throw new Error("restaurantId is required");
+  getOrderDetails: (dbOrderId: string, restaurantId?: number) => {
+    const q = restaurantId ? `?restaurant_id=${restaurantId}` : '';
     return fetchWithTimeout(
-      `${API_BASE_URL}/api/v1/public/orders/${encodeURIComponent(dbOrderId)}?restaurant_id=${restaurantId}`,
+      `${API_BASE_URL}/api/v1/public/orders/${encodeURIComponent(dbOrderId)}${q}`,
     );
   },
 
@@ -232,6 +232,40 @@ export const orderApi = {
     return fetchWithTimeout(
       `${API_BASE_URL}/api/orders/${encodeURIComponent(dbOrderId)}?restaurant_id=${restaurantId}`,
     );
+  },
+
+  /** POST /api/orders/{orderId}/cancel — cancel whole order before kitchen preparation */
+  cancelOrder: (orderId: number | string, restaurantId?: number, reason?: string) => {
+    const rawStr = String(orderId || '').trim();
+    const cleanId = rawStr.replace(/\D/g, '') || rawStr;
+    const q = restaurantId ? `?restaurant_id=${restaurantId}` : '';
+    return fetchWithTimeout(`${API_BASE_URL}/api/orders/${encodeURIComponent(cleanId)}/cancel${q}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ reason: reason || 'Customer requested cancellation' }),
+    });
+  },
+
+  /** POST /api/orders/{orderId}/items/{itemId}/cancel — cancel item before preparation */
+  cancelOrderItem: (orderId: number | string, itemId: number | string, restaurantId?: number, reason?: string) => {
+    const rawOrderStr = String(orderId || '').trim();
+    const cleanOrderId = rawOrderStr.replace(/\D/g, '') || rawOrderStr;
+    const rawItemStr = String(itemId || '').trim();
+    const cleanItemId = rawItemStr.replace(/\D/g, '') || rawItemStr;
+    const q = restaurantId ? `?restaurant_id=${restaurantId}` : '';
+    return fetchWithTimeout(`${API_BASE_URL}/api/orders/${encodeURIComponent(cleanOrderId)}/items/${encodeURIComponent(cleanItemId)}/cancel${q}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ reason: reason || 'Customer requested cancellation' }),
+    });
+  },
+
+  /** GET /api/orders/{orderId}/cancellation-eligibility */
+  checkCancellationEligibility: (orderId: number | string, restaurantId?: number) => {
+    const rawStr = String(orderId || '').trim();
+    const cleanId = rawStr.replace(/\D/g, '') || rawStr;
+    const q = restaurantId ? `?restaurant_id=${restaurantId}` : '';
+    return fetchWithTimeout(`${API_BASE_URL}/api/orders/${encodeURIComponent(cleanId)}/cancellation-eligibility${q}`);
   },
 
   /** GET /api/v1/public/customers/orders?phone=...&restaurant_id=... — order history */
@@ -297,6 +331,42 @@ export const orderApi = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     }),
+};
+
+/**
+ * Dine-In Session Endpoints (DINE-IN ONLY)
+ */
+export const dineInSessionApi = {
+  /** POST /api/dine-in/session/active */
+  getActiveSession: (payload: { restaurant_id: number; table_number: string; phone?: string }) =>
+    fetchWithTimeout(`${API_BASE_URL}/api/dine-in/session/active`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    }),
+
+  /** GET /api/dine-in/session/{sessionId}/details?restaurant_id=... */
+  getSessionDetails: (sessionId: string | number, restaurantId: number) => {
+    if (!restaurantId) throw new Error("restaurantId is required");
+    return fetchWithTimeout(
+      `${API_BASE_URL}/api/dine-in/session/${encodeURIComponent(sessionId)}/details?restaurant_id=${restaurantId}`
+    );
+  },
+
+  /** POST /api/dine-in/session/{sessionId}/settle?restaurant_id=... */
+  settleSession: (
+    sessionId: string | number,
+    restaurantId: number,
+    payload: { payment_method: string; payment_id?: string; amount_paid?: number }
+  ) =>
+    fetchWithTimeout(
+      `${API_BASE_URL}/api/dine-in/session/${encodeURIComponent(sessionId)}/settle?restaurant_id=${restaurantId}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      }
+    ),
 };
 
 /**

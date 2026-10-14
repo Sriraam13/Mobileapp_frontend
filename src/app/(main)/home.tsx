@@ -68,34 +68,45 @@ export default function Home() {
         image: item.image,
       }));
 
-      if (dineInSession.isActive && dineInSession.activeDbOrderId) {
-        // Append items to current active dine in order
-        await orderApi.appendOrderItems(dineInSession.activeDbOrderId, {
+      if (dineInSession.isActive && (dineInSession.sessionDbId || dineInSession.sessionUid || dineInSession.activeDbOrderId)) {
+        // Create an independent Order round under the current Dine-In session
+        const roundRes = await orderApi.createOrder({
           restaurant_id: selectedOutlet.restaurant_id,
           cart: formattedCart,
+          subtotal: subtotal,
           total_amount: subtotal,
           order_type: 'DINE_IN',
           table_number: activeTable,
+          payment_method: 'Pay Later',
           phone: phone || '',
+          session_id: dineInSession.sessionDbId || undefined,
+          session_uid: dineInSession.sessionUid || undefined,
         });
 
-        const newAllItems = [...dineInSession.orderedItems, ...formattedCart];
-        const newTotal = (dineInSession.totalAmount || 0) + subtotal;
-        dineInSession.appendItemsToOrder(formattedCart, subtotal);
+        const newOrderId = roundRes.orderId;
+        const newDbOrderId = roundRes.dbOrderId;
+
+        dineInSession.appendOrderRound(
+          newOrderId,
+          newDbOrderId,
+          formattedCart,
+          subtotal
+        );
+
         useOrderStore.getState().addPastOrder({
-          orderId: dineInSession.activeOrderId ?? '',
-          dbOrderId: String(dineInSession.activeDbOrderId ?? ''),
+          orderId: newOrderId,
+          dbOrderId: String(newDbOrderId),
           date: new Date().toISOString(),
-          total: newTotal,
-          itemsCount: newAllItems.length,
+          total: subtotal,
+          itemsCount: formattedCart.length,
           status: 'Preparing',
           payment_status: 'Pending',
           table_number: activeTable,
           order_type: 'Dine In',
           customer_phone: phone ?? '',
-          items: newAllItems,
+          items: formattedCart,
         });
-        useLiveOrderStore.getState().setLiveOrder('Dine In', dineInSession.activeOrderId ?? '', String(dineInSession.activeDbOrderId ?? ''), 'Preparing');
+        useLiveOrderStore.getState().setLiveOrder('Dine In', newOrderId, String(newDbOrderId), 'Preparing');
         clearCart();
         setIsCartModalVisible(false);
 
@@ -103,11 +114,13 @@ export default function Home() {
         router.push({
           pathname: '/track-order',
           params: {
-            orderId: dineInSession.activeOrderId,
-            dbOrderId: String(dineInSession.activeDbOrderId),
+            orderId: newOrderId,
+            dbOrderId: String(newDbOrderId),
+            sessionId: String(roundRes.sessionId || dineInSession.sessionDbId || ''),
+            sessionUid: roundRes.sessionUid || dineInSession.sessionUid || '',
             tableNumber: activeTable,
             orderType: 'Dine In',
-            cart: JSON.stringify(newAllItems),
+            cart: JSON.stringify(formattedCart),
           }
         });
       } else if (payLater) {
@@ -128,7 +141,8 @@ export default function Home() {
           res.orderId,
           res.dbOrderId,
           formattedCart,
-          subtotal
+          subtotal,
+          { sessionId: res.sessionId, sessionUid: res.sessionUid }
         );
         useOrderStore.getState().addPastOrder({
           orderId: res.orderId,
@@ -153,6 +167,8 @@ export default function Home() {
           params: {
             orderId: res.orderId,
             dbOrderId: String(res.dbOrderId),
+            sessionId: String(res.sessionId || ''),
+            sessionUid: res.sessionUid || '',
             tableNumber: activeTable,
             orderType: 'Dine In',
             cart: JSON.stringify(formattedCart),
@@ -733,14 +749,16 @@ export default function Home() {
       return;
     }
     
-    const catName = categories.find(c => c.id === catId)?.name || 'all';
+    const catObj = categories.find(c => c.id === catId);
+    const catName = catObj?.name || 'all';
     
     router.push({
       pathname: '/menu',
       params: {
         orderType: activeTab === 'Dine-in' ? 'Dine In' : activeTab,
         tableNumber: activeTab === 'Dine-in' ? (tableNumber || '') : '',
-        categoryName: catName
+        categoryName: catName,
+        categoryId: String(catId),
       }
     });
   };
@@ -965,7 +983,8 @@ export default function Home() {
                   params: {
                     orderType: activeTab === 'Dine-in' ? 'Dine In' : activeTab,
                     tableNumber: activeTab === 'Dine-in' ? (tableNumber || '') : '',
-                    categoryName: cat.name
+                    categoryName: cat.name,
+                    categoryId: String(cat.id),
                   }
                 });
               }}

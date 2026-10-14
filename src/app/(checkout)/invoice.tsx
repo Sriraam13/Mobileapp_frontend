@@ -9,6 +9,7 @@ import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRestaurantStore } from '../../store';
 import { orderApi } from '../../services/apiService';
+import { formatDateTime } from '../../utils/dateUtils';
 
 export default function InvoiceScreen() {
   const { selectedOutlet } = useRestaurantStore();
@@ -31,27 +32,21 @@ export default function InvoiceScreen() {
   }, [selectedOutlet]);
 
   useEffect(() => {
-    const dbOrderId = params.dbOrderId as string | undefined;
+    const dbOrderId = (params.dbOrderId as string | undefined) || (params.orderId ? (params.orderId as string).replace(/\D/g, '') : undefined);
     if (!dbOrderId) return;
 
-    const restaurantId = selectedOutlet?.restaurant_id ? Number(selectedOutlet.restaurant_id) : null;
-    if (!restaurantId) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      setLoadingOrder(false);
-      Alert.alert('Invoice unavailable', 'Restaurant context is unavailable.');
-      return;
-    }
+    const restaurantId = Number(selectedOutlet?.restaurant_id || selectedOutlet?.id || 1);
 
     orderApi.getOrderDetails(dbOrderId, restaurantId)
       .then(data => setOrderData(data))
       .catch(error => {
-        console.error('Failed to load invoice order data', error);
-        Alert.alert('Invoice unavailable', 'We could not load the order details.');
+        console.warn('Failed to load invoice order data', error);
       })
       .finally(() => setLoadingOrder(false));
-  }, [params.dbOrderId, selectedOutlet]);
+  }, [params.dbOrderId, params.orderId, selectedOutlet]);
 
   const backendOrder = orderData?.order || {};
+  const currentBillNo = backendOrder.bill_no || (params.billNo as string) || null;
   const orderId = (params.orderId as string) || (backendOrder.id ? `ORD-${backendOrder.id}` : 'Invoice');
   const subtotalVal = orderData?.items?.reduce((sum: number, item: any) => sum + Number(item.price || item.unit_price || 0) * Number(item.quantity || 1), 0) || parseFloat((params.subtotal as string) || '0');
   const finalTotalVal = Number(backendOrder.total_amount ?? parseFloat((params.finalTotal as string) || '0'));
@@ -79,7 +74,7 @@ export default function InvoiceScreen() {
 
   const totalQty = cartData.reduce((acc, item) => acc + parseInt(item.quantity || item.qty || 1, 10), 0);
   const invoiceDate = backendOrder.created_at || backendOrder.delivered_at;
-  const formattedDate = invoiceDate ? new Date(invoiceDate).toLocaleString('en-IN') : 'Date unavailable';
+  const formattedDate = invoiceDate ? formatDateTime(invoiceDate) : 'Date unavailable';
 
   const totalGstValFromOrder = gstAmountVal || (finalTotalVal / 1.05 * 0.05);
   const netTaxableVal = finalTotalVal - totalGstValFromOrder;
@@ -387,7 +382,8 @@ export default function InvoiceScreen() {
 
           <div class="meta-container">
             <div class="meta-left">
-              <div>Invoice No : ${orderId}</div>
+              <div>Invoice No : ${currentBillNo ? `BILL #${currentBillNo}` : orderId}</div>
+              ${currentBillNo ? `<div style="color: #00a01d; font-weight: bold;">Bill No : ${currentBillNo}</div><div>Order Ref : ${orderId}</div>` : ''}
               <div>Order Type : ${orderType}</div>
               <div>Counter : 4</div>
               <div>Mobile No : ${mobileNumber}</div>
@@ -530,9 +526,15 @@ export default function InvoiceScreen() {
           <View style={styles.divider} />
 
           <View style={styles.metaRow}>
-            <Text style={styles.metaLabel}>Invoice No : {orderId}</Text>
+            <Text style={styles.metaLabel}>Invoice No : {currentBillNo ? `BILL #${currentBillNo}` : orderId}</Text>
             <Text style={styles.metaValue}>{formattedDate}</Text>
           </View>
+          {currentBillNo ? (
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4 }}>
+              <Text style={[styles.metaLabel, { color: '#00a01d', fontWeight: '700' }]}>Bill No : {currentBillNo}</Text>
+              <Text style={styles.metaLabel}>Order Ref : {orderId}</Text>
+            </View>
+          ) : null}
           <Text style={styles.metaLabel}>Order Type : {orderType}</Text>
           <Text style={styles.metaLabel}>Counter : 4</Text>
           <Text style={styles.metaLabel}>Customer : {customerName}</Text>

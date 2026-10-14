@@ -1,7 +1,7 @@
 import { View, Text, StyleSheet, TextInput, ScrollView, TouchableOpacity, FlatList, Platform, StatusBar, Image, Modal, BackHandler, Alert, ActivityIndicator, RefreshControl } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useVoiceAgentStore, useAuthStore, useOrderStore, useCartStore, useLiveOrderStore, useDineInSessionStore, useRestaurantStore } from '../../store';
 import { menuApi, orderApi } from '../../services/apiService';
@@ -45,6 +45,10 @@ export default function App() {
   const [priceSort, setPriceSort] = useState("Default");
   const [isLoading, setIsLoading] = useState(true);
 
+  const categoryScrollRef = useRef<ScrollView>(null);
+  const flatListRef = useRef<FlatList>(null);
+  const tabPositions = useRef<Record<string, { x: number; width: number }>>({});
+
   useEffect(() => {
     if (params.orderType) {
       const initialOrderType = params.orderType as string;
@@ -55,11 +59,55 @@ export default function App() {
       setTableNumber(params.tableNumber as string);
     }
     if (params.search !== undefined) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
       setSearchQuery(params.search as string);
     }
+    if (params.categoryName || params.categoryId) {
+      const newCat = (params.categoryName as string) || (params.categoryId as string);
+      setActiveCat(newCat);
+      setActiveRegion("All Regions");
+    }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [params.orderType, params.tableNumber, params.search, setOrderType, setTableNumber]);
+  }, [params.orderType, params.tableNumber, params.search, params.categoryName, params.categoryId, setOrderType, setTableNumber]);
+
+  // Automatically scroll horizontal category tabs to bring the active category into view
+  useEffect(() => {
+    if (flatListRef.current) {
+      try {
+        flatListRef.current.scrollToOffset({ offset: 0, animated: true });
+      } catch {}
+    }
+
+    if (!activeCat || activeCat.toLowerCase() === 'all') {
+      categoryScrollRef.current?.scrollTo({ x: 0, animated: true });
+      return;
+    }
+
+    const normActive = activeCat.toLowerCase().replace(/varities/i, 'varieties').trim();
+    const matchingKey = Object.keys(tabPositions.current).find(k => {
+      const normK = k.toLowerCase().replace(/varities/i, 'varieties').trim();
+      return normK === normActive || normK.includes(normActive) || normActive.includes(normK);
+    });
+
+    if (matchingKey && tabPositions.current[matchingKey]) {
+      const { x, width } = tabPositions.current[matchingKey];
+      const targetX = Math.max(0, x - 60);
+      categoryScrollRef.current?.scrollTo({ x: targetX, animated: true });
+    } else {
+      // If layout hasn't measured yet, try after a short delay
+      const timer = setTimeout(() => {
+        const key = Object.keys(tabPositions.current).find(k => {
+          const normK = k.toLowerCase().replace(/varities/i, 'varieties').trim();
+          return normK === normActive || normK.includes(normActive) || normActive.includes(normK);
+        });
+        if (key && tabPositions.current[key]) {
+          const { x } = tabPositions.current[key];
+          categoryScrollRef.current?.scrollTo({ x: Math.max(0, x - 60), animated: true });
+        }
+      }, 300);
+      return () => clearTimeout(timer);
+    }
+  }, [activeCat, allCategories]);
+
   const [refreshing, setRefreshing] = useState(false);
   
   const { selectedOutlet } = useRestaurantStore();
@@ -90,33 +138,48 @@ export default function App() {
 
       const subtotal = getSubtotal();
 
-      if (dineInSession.isActive && dineInSession.activeDbOrderId) {
-        // Append items to current active dine in order
-        await orderApi.appendOrderItems(dineInSession.activeDbOrderId, {
+      if (dineInSession.isActive && (dineInSession.sessionDbId || dineInSession.sessionUid || dineInSession.activeDbOrderId)) {
+        // Create an independent Order round under the current Dine-In session
+        const roundRes = await orderApi.createOrder({
+          restaurant_id: restaurantId,
           cart: formattedCart,
+          subtotal: subtotal,
           total_amount: subtotal,
           order_type: 'DINE_IN',
           table_number: activeTable,
+          payment_method: 'Pay Later',
           phone: phone || '',
+          session_id: dineInSession.sessionDbId || undefined,
+          session_uid: dineInSession.sessionUid || undefined,
         });
 
-        const newAllItems = [...dineInSession.orderedItems, ...formattedCart];
-        const newTotal = (dineInSession.totalAmount || 0) + subtotal;
-        dineInSession.appendItemsToOrder(formattedCart, subtotal);
+        const newOrderId = roundRes.orderId;
+        const newDbOrderId = roundRes.dbOrderId;
+        const combinedSessionTotal = roundRes.sessionTotalAmount != null 
+          ? Number(roundRes.sessionTotalAmount) 
+          : (dineInSession.totalAmount || 0) + subtotal;
+
+        dineInSession.appendOrderRound(
+          newOrderId,
+          newDbOrderId,
+          formattedCart,
+          subtotal
+        );
+
         useOrderStore.getState().addPastOrder({
-          orderId: dineInSession.activeOrderId ?? '',
-          dbOrderId: String(dineInSession.activeDbOrderId ?? ''),
+          orderId: newOrderId,
+          dbOrderId: String(newDbOrderId),
           date: new Date().toISOString(),
-          total: newTotal,
-          itemsCount: newAllItems.length,
+          total: subtotal,
+          itemsCount: formattedCart.length,
           status: 'Preparing',
           payment_status: 'Pending',
           table_number: activeTable,
           order_type: 'Dine In',
           customer_phone: phone ?? '',
-          items: newAllItems,
+          items: formattedCart,
         });
-        useLiveOrderStore.getState().setLiveOrder('Dine In', dineInSession.activeOrderId ?? '', String(dineInSession.activeDbOrderId ?? ''), 'Preparing');
+        useLiveOrderStore.getState().setLiveOrder('Dine In', newOrderId, String(newDbOrderId), 'Preparing');
         clearCart();
         setIsCartModalVisible(false);
 
@@ -124,16 +187,19 @@ export default function App() {
         router.push({
           pathname: '/track-order',
           params: {
-            orderId: dineInSession.activeOrderId ?? '',
-            dbOrderId: String(dineInSession.activeDbOrderId ?? ''),
+            orderId: newOrderId,
+            dbOrderId: String(newDbOrderId),
+            sessionId: String(dineInSession.sessionDbId || roundRes.sessionId || ''),
+            sessionUid: dineInSession.sessionUid || roundRes.sessionUid || '',
             tableNumber: activeTable,
             orderType: 'Dine In',
-            cart: JSON.stringify(newAllItems),
+            cart: JSON.stringify(formattedCart),
           }
         });
       } else if (payLater) {
-        // Place initial dine-in order with Pay Later
+        // Place initial dine-in order with Pay Later and initialize session
         const res = await orderApi.createOrder({
+          restaurant_id: restaurantId,
           cart: formattedCart,
           subtotal: subtotal,
           total_amount: subtotal,
@@ -148,7 +214,8 @@ export default function App() {
           res.orderId,
           res.dbOrderId,
           formattedCart,
-          subtotal
+          subtotal,
+          { sessionId: res.sessionId, sessionUid: res.sessionUid }
         );
         useOrderStore.getState().addPastOrder({
           orderId: res.orderId,
@@ -173,6 +240,8 @@ export default function App() {
           params: {
             orderId: res.orderId,
             dbOrderId: String(res.dbOrderId),
+            sessionId: String(res.sessionId || ''),
+            sessionUid: res.sessionUid || '',
             tableNumber: activeTable,
             orderType: 'Dine In',
             cart: JSON.stringify(formattedCart),
@@ -209,6 +278,7 @@ export default function App() {
             const catData = await menuApi.getCategories(restaurantId);
             
             const validRegions = new Set<string>();
+            const rawCategoryMap = new Map<string, { id: string; label: string; region?: string }>();
             const categoryMap = new Map<string, any>(); // Used to deduplicate by clean label
 
             catData.forEach((c: any) => {
@@ -217,8 +287,11 @@ export default function App() {
                 // 1. Skip if this category has no items in the system
                 if (!activeCategoryIds.has(idStr)) return;
                 
+                if (!c.name) return;
+                const cName = String(c.name);
+
                 // 2. Skip internal categories
-                if (c.name.includes('_all') || c.name.includes('_breakfast') || c.name.includes('_lunch') || c.name.includes('_dinner')) {
+                if (cName.includes('_all') || cName.includes('_breakfast') || cName.includes('_lunch') || cName.includes('_dinner')) {
                     return;
                 }
 
@@ -227,12 +300,21 @@ export default function App() {
                     validRegions.add(desc);
                 }
                 
-                // Remove the restaurant name in parentheses from the category label
-                const cleanLabel = c.name.replace(/\s*\(.*\)\s*$/, '').trim();
+                // Remove the restaurant name in parentheses from the category label and standardize typos
+                const cleanLabel = cName
+                    .replace(/\s*\(.*?\)\s*/g, '')
+                    .replace(/varities/i, 'Varieties')
+                    .trim();
                 
-                // Deduplicate: If multiple categories end up with the same clean label, we keep one
-                if (!categoryMap.has(cleanLabel)) {
-                    categoryMap.set(cleanLabel, { 
+                rawCategoryMap.set(idStr, {
+                    id: idStr,
+                    label: cleanLabel,
+                    region: desc
+                });
+
+                // Deduplicate: If multiple categories end up with the same clean label, we keep one tab
+                if (!categoryMap.has(cleanLabel.toLowerCase())) {
+                    categoryMap.set(cleanLabel.toLowerCase(), { 
                         id: idStr, 
                         label: cleanLabel, 
                         region: desc 
@@ -240,7 +322,7 @@ export default function App() {
                 }
             });
             
-            setAllCategories(Array.from(categoryMap.values()));
+            setAllCategories(Array.from(rawCategoryMap.values()));
             setRegions(["All Regions", ...Array.from(validRegions)]);
             setMenuItems(formattedItems);
         } catch (e) {
@@ -370,8 +452,10 @@ export default function App() {
     }
     
     // Category match by label
-    if (activeCat.toLowerCase() !== "all") {
-      if (itemCat?.label !== activeCat) return false;
+    if (activeCat && activeCat.toLowerCase() !== "all") {
+      const targetCat = activeCat.toLowerCase().replace(/varities/i, 'varieties').trim();
+      const currentCat = (itemCat?.label || '').toLowerCase().replace(/varities/i, 'varieties').trim();
+      if (currentCat !== targetCat && !currentCat.includes(targetCat) && !targetCat.includes(currentCat)) return false;
     }
     
     // Search match
@@ -391,9 +475,21 @@ export default function App() {
     return 0; // Default
   });
 
+  // Deduplicate categories by clean label for tab display
+  const seenTabLabels = new Set<string>();
+  const uniqueCategoryTabs: { id: string; label: string; region?: string }[] = [];
+  allCategories.forEach(cat => {
+    if (activeRegion !== "All Regions" && cat.region !== activeRegion) return;
+    const lower = cat.label.toLowerCase();
+    if (!seenTabLabels.has(lower)) {
+      seenTabLabels.add(lower);
+      uniqueCategoryTabs.push(cat);
+    }
+  });
+
   const categoriesToShow = [
     { id: "all", label: "All" },
-    ...allCategories.filter(cat => activeRegion === "All Regions" || cat.region === activeRegion)
+    ...uniqueCategoryTabs
   ];
 
   const cartItemCount = getItemCount();
@@ -438,21 +534,40 @@ export default function App() {
 
       {/* Categories Scroll */}
       <View>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.catScroll}>
-          {categoriesToShow.map(cat => (
-            <TouchableOpacity 
-              key={cat.id} 
-              style={[styles.catTab, activeCat.toLowerCase() === cat.label.toLowerCase() && styles.catTabActive]}
-              onPress={() => setActiveCat(cat.label)}
-            >
-              <Text style={[styles.catText, activeCat.toLowerCase() === cat.label.toLowerCase() && styles.catTextActive]}>{cat.label}</Text>
-            </TouchableOpacity>
-          ))}
+        <ScrollView 
+          ref={categoryScrollRef}
+          horizontal 
+          showsHorizontalScrollIndicator={false} 
+          contentContainerStyle={styles.catScroll}
+        >
+          {categoriesToShow.map(cat => {
+            const isTabActive = (() => {
+              if (cat.id === "all") return !activeCat || activeCat.toLowerCase() === "all";
+              const normActive = (activeCat || '').toLowerCase().replace(/varities/i, 'varieties').trim();
+              const normLabel = cat.label.toLowerCase().replace(/varities/i, 'varieties').trim();
+              return normActive === normLabel || normActive.includes(normLabel) || normLabel.includes(normActive);
+            })();
+
+            return (
+              <TouchableOpacity 
+                key={cat.id} 
+                style={[styles.catTab, isTabActive && styles.catTabActive]}
+                onLayout={(e) => {
+                  const { x, width } = e.nativeEvent.layout;
+                  tabPositions.current[cat.label] = { x, width };
+                }}
+                onPress={() => setActiveCat(cat.label)}
+              >
+                <Text style={[styles.catText, isTabActive && styles.catTextActive]}>{cat.label}</Text>
+              </TouchableOpacity>
+            );
+          })}
         </ScrollView>
       </View>
 
       {filteredItems.length > 0 ? (
         <FlatList 
+          ref={flatListRef}
           data={filteredItems}
           keyExtractor={i => i.id.toString()}
           numColumns={2}

@@ -6,6 +6,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRestaurantStore, useLiveOrderStore } from '../../store';
 import { orderApi } from '../../services/apiService';
+import { parseDate, formatTime } from '../../utils/dateUtils';
 
 export default function DeliverySuccessScreen() {
   const router = useRouter();
@@ -194,12 +195,9 @@ export default function DeliverySuccessScreen() {
 
   // Calculate ETA dynamically from order creation or fallback
   const displayEta = useMemo(() => {
-    let baseTime = new Date();
-    if (orderDetails?.order?.created_at) {
-      baseTime = new Date(orderDetails.order.created_at);
-    }
+    const baseTime = parseDate(orderDetails?.order?.created_at);
     baseTime.setMinutes(baseTime.getMinutes() + 45);
-    return baseTime.toLocaleString('en-US', { hour: 'numeric', minute: 'numeric', hour12: true });
+    return formatTime(baseTime);
   }, [orderDetails]);
 
   const status = orderDetails?.order?.status?.toUpperCase() || 'PENDING';

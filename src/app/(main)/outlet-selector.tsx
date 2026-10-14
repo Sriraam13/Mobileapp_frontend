@@ -33,8 +33,8 @@ const FALLBACK_OUTLETS = [
     restaurant_id: 3,
     name: "Data Udipi- Banglore",
     address: "Ganga block 1st cross, Electronic City, Survey No.33, 12th Cross Rd, Bettadasanapura, Karnataka 560100",
-    lat: 12.8452,
-    lng: 77.6602,
+    lat: 12.8399,
+    lng: 77.6770,
     open: true,
     comingSoon: false
   }
@@ -68,13 +68,16 @@ export default function OutletSelectorScreen() {
             r.name.toLowerCase().includes(f.name.split(' — ')[1]?.toLowerCase() || f.name.split('- ')[1]?.toLowerCase() || 'unknown')
           );
           
+          const rLat = r.latitude != null ? Number(r.latitude) : null;
+          const rLng = r.longitude != null ? Number(r.longitude) : null;
+
           return {
             id: r.id.toString(),
             restaurant_id: r.id,
             name: r.name,
             address: r.address || '',
-            lat: fallback?.lat ?? 13.0210,
-            lng: fallback?.lng ?? 80.1614,
+            lat: (rLat && !isNaN(rLat)) ? rLat : (fallback?.lat ?? 13.0210),
+            lng: (rLng && !isNaN(rLng)) ? rLng : (fallback?.lng ?? 80.1614),
             open: fallback?.open ?? true,
             comingSoon: fallback?.comingSoon ?? false,
           };

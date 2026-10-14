@@ -14,6 +14,9 @@ import {
   isTerminalStatus,
   resolveDeliveryStatus,
 } from '../../utils/deliveryStatusUtils';
+import { formatTime } from '../../utils/dateUtils';
+import { LIGHT_MAP_STYLE } from '../../constants/mapStyle';
+import { resolveOutletLocation } from '../../utils/deliveryArea';
 
 const MapView = Platform.OS !== 'web' ? require('react-native-maps').default : null;
 const Marker = Platform.OS !== 'web' ? require('react-native-maps').Marker : null;
@@ -134,10 +137,26 @@ export default function DeliveryTrackingScreen() {
             });
           }
           if (trackingData.restaurant) {
+            const rawLat = trackingData.restaurant.latitude != null ? Number(trackingData.restaurant.latitude) : null;
+            const rawLng = trackingData.restaurant.longitude != null ? Number(trackingData.restaurant.longitude) : null;
+            const outletResolved = resolveOutletLocation({
+              restaurant_id: trackingData.restaurant.id || selectedOutlet?.restaurant_id,
+              name: trackingData.restaurant.name || selectedOutlet?.name,
+              lat: rawLat,
+              lng: rawLng,
+            });
+
             setRestaurantLocation({
-              name: trackingData.restaurant.name || 'Restaurant',
-              latitude: trackingData.restaurant.latitude != null ? Number(trackingData.restaurant.latitude) : undefined,
-              longitude: trackingData.restaurant.longitude != null ? Number(trackingData.restaurant.longitude) : undefined,
+              name: trackingData.restaurant.name || outletResolved.name,
+              latitude: (rawLat && !isNaN(rawLat)) ? rawLat : outletResolved.latitude,
+              longitude: (rawLng && !isNaN(rawLng)) ? rawLng : outletResolved.longitude,
+            });
+          } else {
+            const outletResolved = resolveOutletLocation(selectedOutlet);
+            setRestaurantLocation({
+              name: outletResolved.name,
+              latitude: outletResolved.latitude,
+              longitude: outletResolved.longitude,
             });
           }
           if (Array.isArray(trackingData.timeline)) {
@@ -234,9 +253,13 @@ export default function DeliveryTrackingScreen() {
   };
 
 
-  const mapCenterLat = riderLocation?.latitude ?? customerLocation?.latitude ?? restaurantLocation?.latitude;
-  const mapCenterLng = riderLocation?.longitude ?? customerLocation?.longitude ?? restaurantLocation?.longitude;
-  const hasCompleteMapData = Boolean(customerLocation?.latitude != null && customerLocation?.longitude != null && restaurantLocation?.latitude != null && restaurantLocation?.longitude != null);
+  const activeRestaurant = restaurantLocation?.latitude && restaurantLocation?.longitude
+    ? restaurantLocation
+    : resolveOutletLocation(selectedOutlet);
+
+  const mapCenterLat = riderLocation?.latitude ?? customerLocation?.latitude ?? activeRestaurant.latitude;
+  const mapCenterLng = riderLocation?.longitude ?? customerLocation?.longitude ?? activeRestaurant.longitude;
+  const hasCompleteMapData = Boolean(customerLocation?.latitude != null && customerLocation?.longitude != null && activeRestaurant.latitude != null && activeRestaurant.longitude != null);
 
   const handleCallRider = () => {
     if (riderInfo?.phone) {
@@ -279,6 +302,7 @@ export default function DeliveryTrackingScreen() {
             <MapView
               style={StyleSheet.absoluteFill}
               userInterfaceStyle="light"
+              customMapStyle={LIGHT_MAP_STYLE}
               region={{
                 latitude: mapCenterLat,
                 longitude: mapCenterLng,
@@ -287,10 +311,10 @@ export default function DeliveryTrackingScreen() {
               }}
             >
               {/* Restaurant Marker */}
-              {restaurantLocation?.latitude && restaurantLocation?.longitude && (
+              {activeRestaurant.latitude != null && activeRestaurant.longitude != null && (
                 <Marker
-                  coordinate={{ latitude: restaurantLocation.latitude, longitude: restaurantLocation.longitude }}
-                  title={restaurantLocation.name || 'Restaurant'}
+                  coordinate={{ latitude: activeRestaurant.latitude, longitude: activeRestaurant.longitude }}
+                  title={activeRestaurant.name || 'Restaurant'}
                 >
                   <View style={styles.restaurantMarker}>
                     <Ionicons name="restaurant" size={14} color="#ff3400" />
@@ -352,7 +376,7 @@ export default function DeliveryTrackingScreen() {
               {!isTerminalStatus(deliveryStatus) && hasCompleteMapData ? (
                 riderLocation || hasCompleteMapData ? (
                   <Image
-                    source={{ uri: `https://maps.googleapis.com/maps/api/staticmap?center=${mapCenterLat},${mapCenterLng}&zoom=14&size=600x400&markers=color:red%7Clabel:R%7C${restaurantLocation?.latitude},${restaurantLocation?.longitude}&markers=color:green%7Clabel:H%7C${customerLocation?.latitude},${customerLocation?.longitude}${riderLocation ? `&markers=color:blue%7Clabel:D%7C${riderLocation.latitude},${riderLocation.longitude}` : ''}&path=color:0xff3400ff%7Cweight:3%7C${restaurantLocation?.latitude},${restaurantLocation?.longitude}%7C${customerLocation?.latitude},${customerLocation?.longitude}&key=${process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY || ''}` }}
+                    source={{ uri: `https://maps.googleapis.com/maps/api/staticmap?center=${mapCenterLat},${mapCenterLng}&zoom=14&size=600x400&markers=color:red%7Clabel:R%7C${activeRestaurant.latitude},${activeRestaurant.longitude}&markers=color:green%7Clabel:H%7C${customerLocation?.latitude},${customerLocation?.longitude}${riderLocation ? `&markers=color:blue%7Clabel:D%7C${riderLocation.latitude},${riderLocation.longitude}` : ''}&path=color:0xff3400ff%7Cweight:3%7C${activeRestaurant.latitude},${activeRestaurant.longitude}%7C${customerLocation?.latitude},${customerLocation?.longitude}&key=${process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY || ''}` }}
                     style={styles.mapImage}
                     resizeMode="cover"
                   />
@@ -462,10 +486,7 @@ export default function DeliveryTrackingScreen() {
                 // Find the *first* occurrence of this status to show when it began
                 const event = timeline.find((t: any) => t.status === matchingStatus);
                 if (event && event.timestamp) {
-                  const date = new Date(event.timestamp);
-                  if (!isNaN(date.getTime())) {
-                    stepTimeStr = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-                  }
+                  stepTimeStr = formatTime(event.timestamp);
                 }
               }
 

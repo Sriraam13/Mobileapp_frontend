@@ -1,70 +1,104 @@
-import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Platform, StatusBar, Image, ActivityIndicator } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import React, { useEffect, useState, useMemo } from 'react';
+import {
+  View,
+  Text,
+  StyleSheet,
+  ScrollView,
+  TouchableOpacity,
+  Image,
+  ActivityIndicator,
+  StatusBar,
+  Alert,
+} from 'react-native';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { orderApi } from '../../services/apiService';
 import { getFullImageUrl } from '../../constants/api';
 import { useCartStore, useRestaurantStore } from '../../store';
 import BottomNavBar from '../../components/layout/BottomNavBar';
+import { formatOrderDate } from '../../utils/dateUtils';
 
-export default function OrderDetails() {
+const DEFAULT_FOOD_IMAGE = 'https://images.unsplash.com/photo-1589301760014-d929f3979dbc?w=200';
+
+export default function OrderDetailsScreen() {
   const router = useRouter();
-  const { orderId, isHistorical, restaurantId } = useLocalSearchParams();
+  const insets = useSafeAreaInsets();
+  const params = useLocalSearchParams<{
+    orderId?: string;
+    isHistorical?: string;
+    restaurantId?: string;
+    orderJson?: string;
+    displayOrderId?: string;
+  }>();
+
   const { clearCart, addItem, setOrderType } = useCartStore();
   const { selectedOutlet } = useRestaurantStore();
-  const [order, setOrder] = useState<any>(null);
-  const [items, setItems] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
+
+  // Instant data initialization from route params if available
+  const initialData = useMemo(() => {
+    if (params.orderJson) {
+      try {
+        const parsed = JSON.parse(params.orderJson);
+        return parsed;
+      } catch (_) {}
+    }
+    return null;
+  }, [params.orderJson]);
+
+  const [order, setOrder] = useState<any>(initialData);
+  const [items, setItems] = useState<any[]>(() => {
+    if (initialData?.items) {
+      if (Array.isArray(initialData.items)) return initialData.items;
+      if (typeof initialData.items === 'string') {
+        try {
+          const parsed = JSON.parse(initialData.items);
+          if (Array.isArray(parsed)) return parsed;
+        } catch (_) {}
+      }
+    }
+    return [];
+  });
+  const [loading, setLoading] = useState(!initialData);
 
   useEffect(() => {
-    if (orderId && !isHistorical) {
-      const resolvedRestaurantId = restaurantId ? Number(restaurantId) : selectedOutlet?.restaurant_id;
-      if (!resolvedRestaurantId) {
-        // eslint-disable-next-line react-hooks/set-state-in-effect
-        setLoading(false);
-        return;
-      }
-      orderApi.getOrderDetails(orderId as string, Number(resolvedRestaurantId))
-        .then(data => {
-          if (data && data.order) {
-            let mappedType = data.order.order_type || 'Dine In';
-            if (mappedType === 'DINE_IN') mappedType = 'Dine In';
-            if (mappedType === 'TAKEAWAY') mappedType = 'Take Away';
-            if (mappedType === 'DELIVERY') mappedType = 'Delivery';
-            data.order.order_type = mappedType;
-            setOrder(data.order);
-            setItems(data.items || []);
-          }
-          setLoading(false);
-        })
-        .catch(err => {
-          console.warn('Failed to load order details:', err?.message || err);
-          setLoading(false);
-        });
-    } else {
+    const rawId = params.orderId || initialData?.dbOrderId || initialData?.dbId || initialData?.id;
+    if (!rawId) {
       setLoading(false);
+      return;
     }
-  }, [orderId, restaurantId, selectedOutlet]);
 
-  const handleReorder = () => {
-    if (!items || items.length === 0) return;
-    clearCart();
-    if (order?.order_type === 'Take Away') setOrderType('Take Away');
-    else if (order?.order_type === 'Delivery') setOrderType('Delivery');
-    else setOrderType('Dine In');
+    const resId = Number(params.restaurantId) || selectedOutlet?.restaurant_id || 1;
 
-    items.forEach((item: any) => {
-      addItem({
-        id: item.menu_item_id,
-        name: item.name,
-        price: item.price,
-        quantity: item.quantity,
-        image: getFullImageUrl(item.image_url, item.name),
-        category: 'Special',
+    orderApi.getOrderDetails(String(rawId), Number(resId))
+      .then((data: any) => {
+        if (data && data.order) {
+          let mappedType = data.order.order_type || 'Dine In';
+          if (mappedType === 'DINE_IN') mappedType = 'Dine In';
+          if (mappedType === 'TAKEAWAY') mappedType = 'Take Away';
+          if (mappedType === 'DELIVERY') mappedType = 'Delivery';
+          data.order.order_type = mappedType;
+
+          setOrder(data.order);
+          if (Array.isArray(data.items) && data.items.length > 0) {
+            setItems(data.items);
+          }
+        }
+      })
+      .catch((err) => {
+        console.warn('[OrderDetails] Fetch error:', err?.message || err);
+      })
+      .finally(() => {
+        setLoading(false);
       });
-    });
-    router.push('/checkout');
+  }, [params.orderId, params.restaurantId, initialData, selectedOutlet]);
+
+  const handleBack = () => {
+    if (router.canGoBack()) {
+      router.back();
+    } else {
+      router.replace('/orders');
+    }
   };
 
   const handleInvoice = () => {
@@ -72,236 +106,345 @@ export default function OrderDetails() {
     router.push({
       pathname: '/invoice',
       params: {
-        dbOrderId: String(order.id),
-        orderId: order.orderId,
+        dbOrderId: String(order.id || order.dbOrderId || params.orderId || ''),
+        orderId: order.orderId || order.id || '',
         orderType: order.order_type || 'Dine In',
-      }
+      },
     });
   };
 
-  const getSubtotal = () => {
-    return items.reduce((sum, item) => sum + (item.price * item.quantity), 0);
+  const handleReorder = () => {
+    if (!items || items.length === 0) {
+      Alert.alert('Reorder', 'Item list not available for this order.');
+      return;
+    }
+    clearCart();
+    if (order?.order_type === 'Take Away') setOrderType('Take Away');
+    else if (order?.order_type === 'Delivery') setOrderType('Delivery');
+    else setOrderType('Dine In');
+
+    items.forEach((item: any) => {
+      addItem({
+        id: String(item.menu_item_id || item.id),
+        name: item.name || 'Special Item',
+        price: Number(item.price || 0),
+        quantity: Number(item.quantity || item.qty || 1),
+        image: getFullImageUrl(item.image_url || item.image, item.name),
+        category: 'Special',
+      });
+    });
+
+    Alert.alert('Reordered', 'Items have been added to your cart.');
+    router.push('/checkout');
   };
 
-  const getTaxes = () => {
-    // Deriving taxes back from final amount since it's not stored
-    // Total = Sub + Taxes + Delivery - Discount
-    const sub = getSubtotal();
-    const dlv = order?.order_type === 'Delivery' ? 30 : 0;
-    const disc = order?.discount_amount || 0;
-    return Math.max(0, order?.total_amount - sub - dlv + disc);
+  const [cancelling, setCancelling] = useState(false);
+
+  const handleCancelOrder = () => {
+    const rawId = order?.id || params.orderId;
+    if (!rawId) return;
+
+    Alert.alert(
+      "Cancel Order",
+      "Are you sure you want to cancel this order? Once food preparation starts, cancellation is not possible.",
+      [
+        { text: "Keep Order", style: "cancel" },
+        {
+          text: "Yes, Cancel",
+          style: "destructive",
+          onPress: async () => {
+            try {
+              setCancelling(true);
+              const restId = order?.restaurant_id ? Number(order.restaurant_id) : (selectedOutlet?.restaurant_id ? Number(selectedOutlet.restaurant_id) : undefined);
+              await orderApi.cancelOrder(rawId, restId);
+              Alert.alert("Order Cancelled", "Your order has been cancelled successfully.");
+              setOrder((prev: any) => prev ? { ...prev, status: 'CANCELLED' } : null);
+            } catch (err: any) {
+              const msg = err.message || '';
+              if (msg.includes('409') || msg.toLowerCase().includes('preparing') || msg.toLowerCase().includes('already started')) {
+                Alert.alert("Cancellation Unavailable", "Cancellation unavailable. The kitchen has already started preparing this order.");
+              } else {
+                Alert.alert("Cannot Cancel", msg || "Unable to cancel order at this stage.");
+              }
+            } finally {
+              setCancelling(false);
+            }
+          }
+        }
+      ]
+    );
   };
 
-  const getDisplayStatus = () => {
-    if (!order) return '';
-    const status = order.status;
-    if (status === 'COMPLETED' || status === 'SERVED') {
-      if (order.order_type === 'Take Away') return 'Picked Up';
-      if (order.order_type === 'Delivery') return 'Delivered';
-      return 'Served';
+  // ── ID formatting ────────────────────────────────────────────────────────────
+  const displayOrderIdText = useMemo(() => {
+    const raw = String(order?.orderId || order?.id || params.displayOrderId || params.orderId || '').trim();
+    if (!raw) return 'Order #DU-847294';
+    if (raw.startsWith('DU-')) return `Order #${raw}`;
+    if (raw.startsWith('#DU-')) return `Order ${raw}`;
+    if (raw.startsWith('ORD-')) return `Order #${raw.replace('ORD-', 'DU-')}`;
+    if (/^\d+$/.test(raw)) return `Order #DU-${raw.padStart(6, '0')}`;
+    return `Order #${raw.replace(/^#/, '')}`;
+  }, [order, params]);
+
+  // ── Status styling ───────────────────────────────────────────────────────────
+  const { statusLabel, statusBg, statusColor } = useMemo(() => {
+    const s = String(order?.status || '').toUpperCase();
+    const type = order?.order_type || '';
+
+    if (s === 'CANCELLED') {
+      return { statusLabel: 'Cancelled', statusBg: '#FEE2E2', statusColor: '#EF4444' };
     }
-    if (status === 'CONFIRMED') return 'Confirmed';
-    if (status === 'PREPARING') return 'Preparing';
-    if (status === 'READY') {
-      if (order.order_type === 'Take Away') return 'Ready to Pick up';
-      if (order.order_type === 'Delivery') return 'Ready for Delivery';
-      return 'Ready to Serve';
+    if (s === 'PREPARING') {
+      return { statusLabel: 'Preparing', statusBg: '#EFF6FF', statusColor: '#2563EB' };
     }
-    if (status === 'CANCELLED') return 'Cancelled';
-    return status;
-  };
+    if (s === 'CONFIRMED') {
+      return { statusLabel: 'Confirmed', statusBg: '#EFF6FF', statusColor: '#2563EB' };
+    }
+    if (s === 'READY') {
+      const label = type === 'Delivery' ? 'Ready for Delivery' : type === 'Take Away' ? 'Ready to Pick up' : 'Ready to Serve';
+      return { statusLabel: label, statusBg: '#FEF3C7', statusColor: '#D97706' };
+    }
+
+    // Default completed
+    if (type === 'Take Away') {
+      return { statusLabel: 'Picked Up', statusBg: '#E8F8EE', statusColor: '#16A34A' };
+    }
+    if (type === 'Dine In') {
+      return { statusLabel: 'Served', statusBg: '#E8F8EE', statusColor: '#16A34A' };
+    }
+    return { statusLabel: 'Delivered', statusBg: '#E8F8EE', statusColor: '#16A34A' };
+  }, [order]);
+
+  // ── Bill calculations ────────────────────────────────────────────────────────
+  const subtotal = useMemo(() => {
+    if (!items || items.length === 0) {
+      return Number(order?.total_amount || order?.total || 0);
+    }
+    return items.reduce((sum, item) => {
+      const p = Number(item.price || 0);
+      const q = Number(item.quantity || item.qty || 1);
+      return sum + p * q;
+    }, 0);
+  }, [items, order]);
+
+  const isDelivery = order?.order_type === 'Delivery';
+  const deliveryFee = isDelivery ? (Number(order?.delivery_fee) || 0) : 0;
+  const discountAmount = Number(order?.discount_amount || 0);
+  const taxesAmount = useMemo(() => {
+    if (order?.gst_amount !== undefined && order?.gst_amount !== null) {
+      return Number(order.gst_amount);
+    }
+    // Standard 5% GST on food subtotal
+    return Number((subtotal * 0.05).toFixed(2));
+  }, [order, subtotal]);
+
+  const grandTotal = useMemo(() => {
+    const rawTotal = Number(order?.total_amount || order?.total || 0);
+    if (rawTotal > 0) return rawTotal;
+    return subtotal + (isDelivery && deliveryFee > 0 ? deliveryFee : 0) + taxesAmount - discountAmount;
+  }, [order, subtotal, isDelivery, deliveryFee, taxesAmount, discountAmount]);
+
+  // ── Location & Payment ───────────────────────────────────────────────────────
+  const deliveryLocationLabel = isDelivery
+    ? 'DELIVERED TO'
+    : (order?.order_type === 'Take Away' ? 'PICKED UP AT' : 'SERVED AT');
+
+  const deliveryAddressText = useMemo(() => {
+    if (isDelivery) {
+      if (order?.delivery_address) {
+        if (typeof order.delivery_address === 'string') return order.delivery_address;
+        const a = order.delivery_address;
+        const parts = [
+          a.flat_no || a.house_no || a.flat_number || a.building,
+          a.street_address || a.address_line || a.address || a.area,
+          a.landmark ? `Near ${a.landmark}` : null,
+          a.city || 'Bangalore',
+          a.pincode ? `Bangalore - ${a.pincode}` : null,
+        ].filter(Boolean);
+        if (parts.length > 0) return parts.join(', ');
+      }
+      return order?.address || order?.customer_address || 'Flat 402, Sunshine Residency, Koramangala 3rd Block, Bangalore';
+    }
+
+    if (order?.order_type === 'Take Away') {
+      return `${selectedOutlet?.name || 'Data Udipi'} — Takeaway Counter, Mount-Poonamallee Road`;
+    }
+
+    const tableStr = order?.table_number ? `Table ${order.table_number}` : 'Table T-01';
+    return `${tableStr}, ${selectedOutlet?.name || 'Data Udipi — Mugalivakkam'}`;
+  }, [order, isDelivery, selectedOutlet]);
+
+  const paymentMethodText = useMemo(() => {
+    const method = String(order?.payment_method || '').trim();
+    if (!method) return 'Google Pay (UPI)';
+    const lower = method.toLowerCase();
+    if (lower.includes('google') || lower.includes('gpay')) return 'Google Pay (UPI)';
+    if (lower.includes('phonepe')) return 'PhonePe (UPI)';
+    if (lower.includes('paytm')) return 'Paytm (UPI)';
+    if (lower.includes('counter')) return 'Paid (Pay at Counter)';
+    if (lower.includes('cash') || lower.includes('cod')) return 'Cash on Delivery';
+    if (lower.includes('razorpay')) return 'Razorpay (UPI)';
+    if (lower.includes('upi')) return `${method}`;
+    return method;
+  }, [order]);
 
   if (loading) {
     return (
-      <SafeAreaView style={[styles.container, { justifyContent: 'center', alignItems: 'center' }]}>
-        <ActivityIndicator size="large" color="#ff4500" />
+      <SafeAreaView style={[styles.container, styles.center]}>
+        <ActivityIndicator size="large" color="#FF4500" />
       </SafeAreaView>
     );
   }
 
-  if (!order) {
+  if (!order && items.length === 0) {
     return (
-      <SafeAreaView style={[styles.container, { justifyContent: 'center', alignItems: 'center' }]}>
-        <Text style={{ fontSize: 16, color: '#666' }}>Order not found</Text>
+      <SafeAreaView style={[styles.container, styles.center]}>
+        <Text style={{ fontSize: 16, color: '#666', marginBottom: 16 }}>Order details not found</Text>
+        <TouchableOpacity style={styles.backButtonSimple} onPress={handleBack}>
+          <Text style={{ color: '#FF4500', fontWeight: 'bold' }}>Go Back</Text>
+        </TouchableOpacity>
       </SafeAreaView>
     );
   }
-
-  const formatDate = (isoString: string) => {
-    try {
-      let parsedString = isoString;
-      if (parsedString && parsedString.includes('T') && !parsedString.endsWith('Z') && !parsedString.includes('+')) {
-        parsedString += 'Z';
-      }
-      const d = new Date(parsedString);
-      if (isNaN(d.getTime())) return isoString;
-      const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-      const date = d.getDate();
-      const month = months[d.getMonth()];
-      const year = d.getFullYear();
-      let hours = d.getHours();
-      const minutes = d.getMinutes().toString().padStart(2, '0');
-      const ampm = hours >= 12 ? 'PM' : 'AM';
-      hours = hours % 12;
-      hours = hours ? hours : 12;
-      return `${date} ${month} ${year}, ${hours}:${minutes} ${ampm}`;
-    } catch {
-      return isoString;
-    }
-  };
 
   return (
-    <SafeAreaView style={styles.container}>
-      <StatusBar barStyle='dark-content' backgroundColor='#fff' />
-      
-      {/* Header */}
-      <View style={styles.header}>
-        <TouchableOpacity 
-          style={styles.backBtn} 
-          onPress={() => router.canGoBack() ? router.back() : router.replace('/orders')}
-        >
-          <Ionicons name="arrow-back" size={24} color="#000" />
+    <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
+      <StatusBar barStyle="dark-content" backgroundColor="#FFFFFF" />
+
+      {/* ── Top Bar ── */}
+      <View style={styles.topHeader}>
+        <TouchableOpacity style={styles.backBtn} onPress={handleBack} activeOpacity={0.7}>
+          <Ionicons name="arrow-back" size={24} color="#111827" />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Order Details</Text>
+        <Text style={styles.topHeaderTitle}>Order Details</Text>
       </View>
 
-      <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-        
-        {/* Order Header info */}
-        <View style={styles.orderHeaderCard}>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.orderDate}>
-              Placed on {formatDate(order.created_at)}
+      <ScrollView
+        contentContainerStyle={[styles.scrollContent, { paddingBottom: 110 }]}
+        showsVerticalScrollIndicator={false}
+      >
+        {/* ── Order Header ── */}
+        <View style={styles.orderHeaderRow}>
+          <View style={{ flex: 1, paddingRight: 8 }}>
+            <Text style={styles.orderIdTitle}>{displayOrderIdText}</Text>
+            <Text style={styles.orderDateSubtitle}>
+              {formatOrderDate(order?.created_at || order?.date)}
             </Text>
           </View>
-          <View style={[styles.statusBadge, order.status === 'CANCELLED' ? { backgroundColor: '#fee2e2' } : {}]}>
-            <Text style={[styles.statusText, order.status === 'CANCELLED' ? { color: '#ef4444' } : {}]}>{getDisplayStatus()}</Text>
-          </View>
-        </View>
-
-        <View style={{ flexDirection: 'row', gap: 12, marginTop: 15 }}>
-          <View style={styles.infoBadge}>
-            <Text style={styles.infoBadgeLabel}>Order ID</Text>
-            <Text style={styles.infoBadgeValue}>{order.orderId || `ORD-${String(order.id).padStart(6, '0')}`}</Text>
-          </View>
-          <View style={styles.infoBadge}>
-            <Text style={styles.infoBadgeLabel}>Type</Text>
-            <Text style={styles.infoBadgeValue}>{order.order_type || 'Dine In'}</Text>
+          <View style={[styles.statusBadge, { backgroundColor: statusBg }]}>
+            <Text style={[styles.statusBadgeText, { color: statusColor }]}>{statusLabel}</Text>
           </View>
         </View>
 
         <View style={styles.divider} />
 
-        {/* Items */}
-        {items.map((item, index) => (
-          <View key={index} style={styles.itemRow}>
-            <Image source={{ uri: getFullImageUrl(item.image_url, item.name) }} style={styles.itemImage} />
-            <View style={styles.itemInfo}>
-              <Text style={styles.itemName}>{item.name}</Text>
-              <Text style={styles.itemQty}>Qty: {item.quantity} • Rs. {item.price} each</Text>
+        {/* ── Items List ── */}
+        {items.map((item: any, idx: number) => {
+          const qty = Number(item.quantity || item.qty || 1);
+          const price = Number(item.price || 0);
+          const itemTotal = price * qty;
+          const imageUri = getFullImageUrl(item.image_url || item.image, item.name);
+
+          return (
+            <View key={item.id || item.menu_item_id || idx} style={styles.itemRow}>
+              <Image
+                source={{ uri: imageUri || DEFAULT_FOOD_IMAGE }}
+                style={styles.itemImage}
+                defaultSource={{ uri: DEFAULT_FOOD_IMAGE }}
+              />
+              <View style={styles.itemInfo}>
+                <Text style={styles.itemName} numberOfLines={1}>{item.name || 'Menu Item'}</Text>
+                <Text style={styles.itemQty}>Qty: {qty} • Rs. {price.toFixed(0)} each</Text>
+              </View>
+              <Text style={styles.itemTotal}>Rs. {itemTotal.toFixed(0)}</Text>
             </View>
-            <Text style={styles.itemTotal}>Rs. {item.price * item.quantity}</Text>
-          </View>
-        ))}
+          );
+        })}
 
         <View style={styles.divider} />
 
-        {/* Bill Details */}
+        {/* ── Bill Breakdown ── */}
         <View style={styles.billRow}>
           <Text style={styles.billLabel}>Subtotal</Text>
-          <Text style={styles.billValue}>Rs. {getSubtotal().toFixed(0)}</Text>
+          <Text style={styles.billValue}>Rs. {subtotal.toFixed(0)}</Text>
         </View>
-        
-        {order.order_type === 'Delivery' && (
+
+        {isDelivery && (
           <View style={styles.billRow}>
             <Text style={styles.billLabel}>Delivery Fee</Text>
-            <Text style={styles.billValue}>
-              <Text style={styles.strikethrough}>Rs. 40</Text>
-              <Text style={styles.freeText}> FREE</Text>
-            </Text>
+            {deliveryFee === 0 ? (
+              <Text style={styles.billValue}>
+                <Text style={styles.strikethrough}>Rs. 40</Text>
+                <Text style={styles.freeText}> FREE</Text>
+              </Text>
+            ) : (
+              <Text style={styles.billValue}>Rs. {deliveryFee.toFixed(0)}</Text>
+            )}
           </View>
         )}
-        
-        {order.discount_amount > 0 && (
+
+        {discountAmount > 0 && (
           <View style={styles.billRow}>
             <Text style={styles.billLabel}>Discount</Text>
-            <Text style={[styles.billValue, { color: '#ef4444' }]}>- Rs. {order.discount_amount.toFixed(2)}</Text>
+            <Text style={[styles.billValue, { color: '#EF4444' }]}>
+              - Rs. {discountAmount.toFixed(2)}
+            </Text>
           </View>
         )}
 
         <View style={styles.billRow}>
           <Text style={styles.billLabel}>Taxes & charges</Text>
-          <Text style={styles.billValue}>Rs. {getTaxes().toFixed(2)}</Text>
+          <Text style={styles.billValue}>Rs. {taxesAmount.toFixed(2)}</Text>
         </View>
-        
+
         <View style={styles.grandTotalRow}>
           <Text style={styles.grandTotalLabel}>Grand Total</Text>
-          <Text style={styles.grandTotalValue}>Rs. {order.total_amount.toFixed(2)}</Text>
+          <Text style={styles.grandTotalValue}>Rs. {grandTotal.toFixed(2)}</Text>
         </View>
 
         <View style={styles.divider} />
 
-        {/* Delivered To / Phone */}
-        <View style={styles.section}>
-          <Text style={styles.sectionLabel}>{order.order_type === 'Delivery' ? 'DELIVERED TO' : 'CUSTOMER PHONE'}</Text>
-          <Text style={styles.sectionText}>
-            {order.order_type === 'Delivery' 
-              ? (order.address || 'Flat 402, Sunshine Residency, Koramangala 3rd Block, Bangalore')
-              : (order.customer_phone || 'WALK-IN')}
-          </Text>
+        {/* ── Delivery / Service Destination ── */}
+        <View style={styles.metaSection}>
+          <Text style={styles.metaSectionLabel}>{deliveryLocationLabel}</Text>
+          <Text style={styles.metaSectionValue}>{deliveryAddressText}</Text>
         </View>
 
-        {/* Payment Method */}
-        <View style={styles.section}>
-          <Text style={styles.sectionLabel}>PAYMENT METHOD</Text>
-          <View style={styles.paymentRow}>
-            <Ionicons name="card-outline" size={18} color="#555" />
-            <Text style={styles.paymentText}>{order.payment_method}</Text>
+        {/* ── Payment Method ── */}
+        <View style={styles.metaSection}>
+          <Text style={styles.metaSectionLabel}>PAYMENT METHOD</Text>
+          <View style={styles.paymentMethodRow}>
+            <Ionicons name="card-outline" size={18} color="#4B5563" />
+            <Text style={styles.paymentMethodText}>{paymentMethodText}</Text>
           </View>
         </View>
 
-        {/* Buttons */}
-        <View style={styles.actionRow}>
-          {order.order_type === 'Dine In' && (order.payment_status || '').toUpperCase() !== 'PAID' ? (
-            <>
-              <TouchableOpacity
-                style={[styles.invoiceBtn, { backgroundColor: '#00a01d', borderColor: '#00a01d' }]}
-                onPress={() => router.push({ pathname: '/menu', params: { orderType: 'Dine In', tableNumber: order.table_number || '' } })}
-              >
-                <Text style={[styles.invoiceText, { color: '#fff' }]}>Order Again</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.reorderBtn, { backgroundColor: '#ff4500' }]}
-                onPress={() => router.push({
-                  pathname: '/(checkout)/payment',
-                  params: {
-                    isDineInSettlement: 'true',
-                    orderId: order.orderId || `ORD-${String(order.id).padStart(6, '0')}`,
-                    dbOrderId: String(order.id || ''),
-                    tableNumber: order.table_number || 'T-01',
-                    totalAmount: String(order.total_amount || 0),
-                    cartItems: JSON.stringify(items),
-                  }
-                })}
-              >
-                <Text style={styles.reorderText}>Complete Order / Pay</Text>
-              </TouchableOpacity>
-            </>
-          ) : (
-            <>
-              <TouchableOpacity style={styles.invoiceBtn} onPress={handleInvoice}>
-                <Text style={styles.invoiceText}>Invoice</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.reorderBtn} onPress={handleReorder}>
-                <Text style={styles.reorderText}>Reorder</Text>
-              </TouchableOpacity>
-            </>
+        {/* ── Action Buttons ── */}
+        <View style={styles.actionButtonsRow}>
+          {['PENDING', 'CONFIRMED'].includes(String(order?.status || '').toUpperCase()) && (
+            <TouchableOpacity
+              style={styles.cancelBtn}
+              onPress={handleCancelOrder}
+              disabled={cancelling}
+              activeOpacity={0.8}
+            >
+              {cancelling ? (
+                <ActivityIndicator size="small" color="#EF4444" />
+              ) : (
+                <Text style={styles.cancelBtnText}>Cancel Order</Text>
+              )}
+            </TouchableOpacity>
           )}
+          <TouchableOpacity style={styles.invoiceBtn} onPress={handleInvoice} activeOpacity={0.8}>
+            <Text style={styles.invoiceBtnText}>Invoice</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.reorderBtn} onPress={handleReorder} activeOpacity={0.8}>
+            <Text style={styles.reorderBtnText}>Reorder</Text>
+          </TouchableOpacity>
         </View>
-
       </ScrollView>
 
-      {/* Bottom Navigation */}
+      {/* ── Bottom Nav Bar ── */}
       <BottomNavBar activeTab="orders" />
     </SafeAreaView>
   );
@@ -310,221 +453,217 @@ export default function OrderDetails() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#fff',
-    
+    backgroundColor: '#FFFFFF',
   },
-  header: {
+  center: {
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  backButtonSimple: {
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#FF4500',
+  },
+  topHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingVertical: 15,
-    backgroundColor: '#fff',
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    backgroundColor: '#FFFFFF',
+    borderBottomWidth: 1,
+    borderBottomColor: '#F3F4F6',
   },
   backBtn: {
-    marginRight: 15,
+    padding: 4,
+    marginRight: 12,
   },
-  headerTitle: {
-    fontSize: 18,
-    fontWeight: '900',
-    color: '#000',
+  topHeaderTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#111827',
   },
   scrollContent: {
-    padding: 20,
-    paddingBottom: 100,
+    paddingHorizontal: 20,
+    paddingTop: 16,
+    backgroundColor: '#FFFFFF',
   },
-  orderHeaderCard: {
+  orderHeaderRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'flex-start',
   },
-  orderId: {
-    fontSize: 16,
-    fontWeight: '900',
-    color: '#000',
-    marginBottom: 4,
+  orderIdTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#111827',
   },
-  orderDate: {
+  orderDateSubtitle: {
     fontSize: 13,
-    color: '#666',
-  },
-  infoBadge: {
-    backgroundColor: '#f9f9f9',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#f0f0f0',
-  },
-  infoBadgeLabel: {
-    fontSize: 10,
-    color: '#888',
-    marginBottom: 4,
-  },
-  infoBadgeValue: {
-    fontSize: 13,
-    fontWeight: 'bold',
-    color: '#000',
+    color: '#6B7280',
+    marginTop: 4,
   },
   statusBadge: {
-    backgroundColor: '#eaf5eb',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 5,
+    borderRadius: 20,
   },
-  statusText: {
-    color: '#16a34a',
-    fontSize: 12,
-    fontWeight: 'bold',
+  statusBadgeText: {
+    fontSize: 13,
+    fontWeight: '600',
   },
   divider: {
     height: 1,
-    backgroundColor: '#f0f0f0',
-    marginVertical: 20,
+    backgroundColor: '#F3F4F6',
+    marginVertical: 18,
   },
   itemRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 15,
+    marginBottom: 16,
   },
   itemImage: {
-    width: 60,
-    height: 60,
-    borderRadius: 12,
-    marginRight: 15,
-    backgroundColor: '#f3f4f6',
+    width: 52,
+    height: 52,
+    borderRadius: 10,
+    backgroundColor: '#F3F4F6',
   },
   itemInfo: {
     flex: 1,
-    marginRight: 10,
+    marginLeft: 14,
+    marginRight: 12,
   },
   itemName: {
-    fontSize: 14,
-    fontWeight: '900',
-    color: '#000',
-    marginBottom: 4,
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#111827',
   },
   itemQty: {
-    fontSize: 12,
-    color: '#666',
+    fontSize: 13,
+    color: '#6B7280',
+    marginTop: 3,
   },
   itemTotal: {
-    fontSize: 14,
-    fontWeight: '900',
-    color: '#000',
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#111827',
   },
   billRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
+    alignItems: 'center',
     marginBottom: 12,
   },
   billLabel: {
     fontSize: 14,
-    color: '#666',
+    color: '#6B7280',
   },
   billValue: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: '#000',
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#111827',
   },
   strikethrough: {
     fontSize: 13,
-    color: '#9ca3af',
+    color: '#9CA3AF',
     textDecorationLine: 'line-through',
-    marginRight: 4,
   },
   freeText: {
-    fontSize: 13,
-    color: '#16a34a',
-    fontWeight: 'bold',
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#16A34A',
   },
   grandTotalRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginTop: 5,
+    alignItems: 'center',
+    marginTop: 6,
+    marginBottom: 4,
   },
   grandTotalLabel: {
-    fontSize: 16,
-    fontWeight: '900',
-    color: '#ff3400',
+    fontSize: 18,
+    fontWeight: '800',
+    color: '#FF4500',
   },
   grandTotalValue: {
-    fontSize: 16,
-    fontWeight: '900',
-    color: '#ff3400',
+    fontSize: 18,
+    fontWeight: '800',
+    color: '#FF4500',
   },
-  section: {
-    marginBottom: 20,
+  metaSection: {
+    marginBottom: 18,
   },
-  sectionLabel: {
-    fontSize: 11,
-    fontWeight: '900',
-    color: '#666',
-    marginBottom: 8,
+  metaSectionLabel: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#6B7280',
     letterSpacing: 0.5,
+    marginBottom: 6,
   },
-  sectionText: {
+  metaSectionValue: {
     fontSize: 14,
-    color: '#333',
+    color: '#1F2937',
     lineHeight: 20,
   },
-  paymentRow: {
+  paymentMethodRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    marginTop: 2,
   },
-  paymentText: {
+  paymentMethodText: {
     fontSize: 14,
-    color: '#333',
+    color: '#1F2937',
+    marginLeft: 8,
+    fontWeight: '500',
   },
-  actionRow: {
+  actionButtonsRow: {
     flexDirection: 'row',
-    gap: 15,
-    marginTop: 10,
+    gap: 12,
+    marginTop: 18,
+    marginBottom: 12,
   },
   invoiceBtn: {
     flex: 1,
-    paddingVertical: 14,
-    borderWidth: 1,
-    borderColor: '#e5e7eb',
+    height: 48,
     borderRadius: 12,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
     alignItems: 'center',
-    backgroundColor: '#fff',
+    justifyContent: 'center',
   },
-  invoiceText: {
-    fontSize: 14,
-    fontWeight: 'bold',
-    color: '#666',
+  invoiceBtnText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#4B5563',
   },
   reorderBtn: {
     flex: 1,
-    paddingVertical: 14,
-    backgroundColor: '#ff3400',
+    height: 48,
     borderRadius: 12,
+    backgroundColor: '#FF4500',
     alignItems: 'center',
+    justifyContent: 'center',
   },
-  reorderText: {
+  reorderBtnText: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#FFFFFF',
+  },
+  cancelBtn: {
+    flex: 1,
+    height: 48,
+    borderRadius: 12,
+    backgroundColor: '#FEE2E2',
+    borderWidth: 1,
+    borderColor: '#FECACA',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  cancelBtnText: {
     fontSize: 14,
-    fontWeight: 'bold',
-    color: '#fff',
+    fontWeight: '700',
+    color: '#EF4444',
   },
-  bottomNav: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    flexDirection: 'row',
-    justifyContent: 'space-around',
-    paddingVertical: 15,
-    backgroundColor: '#fff',
-    borderTopWidth: 1,
-    borderTopColor: '#f0f0f0',
-  },
-  navItem: {
-    alignItems: 'center',
-  },
-  navText: {
-    fontSize: 10,
-    marginTop: 5,
-    color: '#888',
-  }
 });

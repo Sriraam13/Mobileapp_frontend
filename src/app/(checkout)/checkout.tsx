@@ -60,164 +60,101 @@ export default function CheckoutScreen() {
     }
 
     if (orderType === 'Dine In') {
-      if (dineInSession.isActive && dineInSession.activeDbOrderId) {
-        // Append items to current active dine-in session
-        setSubmitting(true);
-        try {
-          const formattedCart = cartItems.map(item => ({
-            id: Number(item.id),
-            quantity: item.quantity,
-            price: item.price,
-            name: item.name,
-            image: item.image,
-          }));
+      setSubmitting(true);
+      try {
+        const formattedCart = cartItems.map(item => ({
+          id: Number(item.id),
+          quantity: item.quantity,
+          price: item.price,
+          name: item.name,
+          image: item.image,
+        }));
 
-          const restaurantId = selectedOutlet?.restaurant_id;
-          if (!restaurantId) {
-            setSubmitting(false);
-            Alert.alert('No Restaurant Selected', 'Please select a restaurant outlet before ordering.', [
-              { text: 'Select Outlet', onPress: () => router.push('/outlet-selector') },
-            ]);
-            return;
-          }
-
-          const activeTable = dineInSession.tableNumber || tableNumber;
-          if (!activeTable) {
-            setSubmitting(false);
-            Alert.alert('No Table Selected', 'Please scan your table QR or enter a table number before placing a Dine-In order.');
-            return;
-          }
-
-          await orderApi.appendOrderItems(dineInSession.activeDbOrderId, {
-            restaurant_id: restaurantId,
-            cart: formattedCart,
-            total_amount: Math.max(finalToPay, 0),
-            order_type: 'DINE_IN',
-            table_number: activeTable,
-            phone: phone || '',
-          });
-
-          const newAllItems = [...dineInSession.orderedItems, ...formattedCart];
-          const newTotal = (dineInSession.totalAmount || 0) + Math.max(finalToPay, 0);
-          dineInSession.appendItemsToOrder(formattedCart, Math.max(finalToPay, 0));
-          useOrderStore.getState().addPastOrder({
-            orderId: dineInSession.activeOrderId ?? '',
-            dbOrderId: String(dineInSession.activeDbOrderId ?? ''),
-            date: new Date().toISOString(),
-            total: newTotal,
-            itemsCount: newAllItems.length,
-            status: 'Preparing',
-            payment_status: 'Pending',
-            table_number: activeTable,
-            order_type: 'Dine In',
-            customer_phone: phone ?? '',
-            items: newAllItems,
-          });
-          useLiveOrderStore.getState().setLiveOrder('Dine In', dineInSession.activeOrderId ?? '', String(dineInSession.activeDbOrderId ?? ''), 'Preparing');
-          useCartStore.getState().clearCart();
+        const restaurantId = selectedOutlet?.restaurant_id;
+        if (!restaurantId) {
           setSubmitting(false);
-
-          // Immediately navigate to Track Order status screen
-          router.push({
-            pathname: '/track-order',
-            params: {
-              orderId: dineInSession.activeOrderId,
-              dbOrderId: String(dineInSession.activeDbOrderId),
-              tableNumber: activeTable,
-              orderType: 'Dine In',
-              cart: JSON.stringify(newAllItems),
-            }
-          });
-        } catch (err: any) {
-          setSubmitting(false);
-          Alert.alert("Error", err.message || "Failed to append items to order.");
+          Alert.alert('No Restaurant Selected', 'Please select a restaurant outlet before ordering.', [
+            { text: 'Select Outlet', onPress: () => router.push('/outlet-selector') },
+          ]);
+          return;
         }
-        return;
-      }
 
-      if (dineInPayLater) {
-        // Place initial dine-in order with Pay Later
-        setSubmitting(true);
-        try {
-          const formattedCart = cartItems.map(item => ({
-            id: Number(item.id),
-            quantity: item.quantity,
-            price: item.price,
-            name: item.name,
-            image: item.image,
-          }));
+        const activeTable = dineInSession.tableNumber || tableNumber;
+        if (!activeTable) {
+          setSubmitting(false);
+          Alert.alert('No Table Selected', 'Please scan your table QR or enter a table number before placing a Dine-In order.');
+          return;
+        }
 
-          const restaurantId = selectedOutlet?.restaurant_id;
-          if (!restaurantId) {
-            setSubmitting(false);
-            Alert.alert('No Restaurant Selected', 'Please select a restaurant outlet before ordering.', [
-              { text: 'Select Outlet', onPress: () => router.push('/outlet-selector') },
-            ]);
-            return;
-          }
+        const res = await orderApi.createOrder({
+          restaurant_id: restaurantId,
+          cart: formattedCart,
+          subtotal,
+          gst,
+          discount_amount: discountAmount,
+          discount_code: discountCode,
+          total_amount: Math.max(finalToPay, 0),
+          order_type: 'DINE_IN',
+          table_number: activeTable,
+          payment_method: 'Pay Later',
+          phone: phone || '',
+          session_id: dineInSession.sessionDbId || undefined,
+          session_uid: dineInSession.sessionUid || undefined,
+        });
 
-          const activeTable = tableNumber;
-          if (!activeTable) {
-            setSubmitting(false);
-            Alert.alert('No Table Selected', 'Please scan your table QR or enter a table number before placing a Dine-In order.');
-            return;
-          }
-
-          const res = await orderApi.createOrder({
-            restaurant_id: restaurantId,
-            cart: formattedCart,
-            subtotal,
-            gst,
-            discount_amount: discountAmount,
-            discount_code: discountCode,
-            total_amount: Math.max(finalToPay, 0),
-            order_type: 'DINE_IN',
-            table_number: activeTable,
-            payment_method: 'Pay Later',
-            phone: phone || '',
-          });
-
-          dineInSession.startDineInOrder(
-            activeTable,
+        if (dineInSession.isActive && (dineInSession.sessionDbId || dineInSession.sessionUid || dineInSession.activeDbOrderId)) {
+          dineInSession.appendOrderRound(
             res.orderId,
             res.dbOrderId,
             formattedCart,
             Math.max(finalToPay, 0)
           );
-          useOrderStore.getState().addPastOrder({
+        } else {
+          dineInSession.startDineInOrder(
+            activeTable,
+            res.orderId,
+            res.dbOrderId,
+            formattedCart,
+            Math.max(finalToPay, 0),
+            { sessionId: res.sessionId, sessionUid: res.sessionUid }
+          );
+        }
+
+        useOrderStore.getState().addPastOrder({
+          orderId: res.orderId,
+          dbOrderId: String(res.dbOrderId),
+          date: new Date().toISOString(),
+          total: Math.max(finalToPay, 0),
+          itemsCount: formattedCart.length,
+          status: 'Preparing',
+          payment_status: 'Pending',
+          table_number: activeTable,
+          order_type: 'Dine In',
+          customer_phone: phone || '',
+          items: formattedCart,
+        });
+        useLiveOrderStore.getState().setLiveOrder('Dine In', res.orderId, String(res.dbOrderId), 'Preparing');
+        useCartStore.getState().clearCart();
+        setSubmitting(false);
+
+        // Immediately navigate to Track Order status screen
+        router.push({
+          pathname: '/track-order',
+          params: {
             orderId: res.orderId,
             dbOrderId: String(res.dbOrderId),
-            date: new Date().toISOString(),
-            total: Math.max(finalToPay, 0),
-            itemsCount: formattedCart.length,
-            status: 'Preparing',
-            payment_status: 'Pending',
-            table_number: activeTable,
-            order_type: 'Dine In',
-            customer_phone: phone || '',
-            items: formattedCart,
-          });
-          useLiveOrderStore.getState().setLiveOrder('Dine In', res.orderId, String(res.dbOrderId), 'Preparing');
-          useCartStore.getState().clearCart();
-          setSubmitting(false);
-
-          // Immediately navigate to Track Order status screen
-          router.push({
-            pathname: '/track-order',
-            params: {
-              orderId: res.orderId,
-              dbOrderId: String(res.dbOrderId),
-              tableNumber: activeTable,
-              orderType: 'Dine In',
-              cart: JSON.stringify(formattedCart),
-            }
-          });
-        } catch (err: any) {
-          setSubmitting(false);
-          Alert.alert("Error", err.message || "Failed to place dine-in order.");
-        }
-        return;
+            sessionId: String(res.sessionId || dineInSession.sessionDbId || ''),
+            sessionUid: res.sessionUid || dineInSession.sessionUid || '',
+            tableNumber: activeTable,
+            orderType: 'Dine In',
+            cart: JSON.stringify(formattedCart),
+          }
+        });
+      } catch (err: any) {
+        setSubmitting(false);
+        Alert.alert("Error", err.message || "Failed to place dine-in order.");
       }
+      return;
     }
 
     // Otherwise standard checkout to payment screen

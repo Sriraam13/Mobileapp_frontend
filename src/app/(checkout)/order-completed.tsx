@@ -15,17 +15,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useCartStore, useOrderStore } from '../../store';
 import { orderApi } from '../../services/apiService';
-
-// ─── Helpers ─────────────────────────────────────────────────────────────────
-
-function formatTime(isoOrUndefined?: string) {
-  const d = isoOrUndefined ? new Date(isoOrUndefined) : new Date();
-  let h = d.getHours();
-  const m = d.getMinutes();
-  const ampm = h >= 12 ? 'PM' : 'AM';
-  h = h % 12 || 12;
-  return `${h}:${m < 10 ? '0' + m : m} ${ampm}`;
-}
+import { formatTime } from '../../utils/dateUtils';
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
@@ -64,7 +54,7 @@ export default function OrderCompletedScreen() {
   const totalAmount = parseFloat(params.totalAmount || '0');
   const completedTime = formatTime(params.date);
 
-  const orderItemsList: any[] = (() => {
+  const initialItems: any[] = (() => {
     if (params.cartItems) {
       try {
         return typeof params.cartItems === 'string'
@@ -74,6 +64,25 @@ export default function OrderCompletedScreen() {
     }
     return [];
   })();
+
+  const [orderItemsList, setOrderItemsList] = useState<any[]>(initialItems);
+  const [billNumber, setBillNumber] = useState<number | string | null>(null);
+
+  useEffect(() => {
+    const fetchId = params.dbOrderId || (params.orderId ? params.orderId.replace(/\D/g, '') : null);
+    if (!fetchId) return;
+
+    orderApi.getOrderDetails(fetchId)
+      .then((data: any) => {
+        if (data?.items && data.items.length > 0) {
+          setOrderItemsList(data.items);
+        }
+        if (data?.order?.bill_no) {
+          setBillNumber(data.order.bill_no);
+        }
+      })
+      .catch(() => {});
+  }, [params.dbOrderId, params.orderId]);
 
   const isTakeAway =
     (params.tableNumber?.toLowerCase().includes('takeaway') ||
@@ -175,6 +184,8 @@ export default function OrderCompletedScreen() {
       pathname: '/invoice',
       params: {
         orderId: displayOrderId,
+        dbOrderId: params.dbOrderId || feedbackOrderId,
+        billNo: billNumber ? String(billNumber) : '',
         finalTotal: totalAmount.toString(),
         subtotal: params.subtotal || totalAmount.toString(),
         mobileNumber: params.phone || 'WALK-IN',
@@ -195,10 +206,10 @@ export default function OrderCompletedScreen() {
   const headerIcon = isTakeAway ? 'bag-check-outline' : isDelivery ? 'bicycle-outline' : 'restaurant-outline';
   const headerTitle = isTakeAway ? 'Picked Up!' : isDelivery ? 'Delivered!' : 'Order Served!';
   const headerSubtitle = isTakeAway
-    ? `Order completed at ${completedTime}  •  ${params.paymentMethod ? `Paid (${params.paymentMethod})` : 'Paid'}  •  Total Rs. ${totalAmount.toFixed(0)}`
+    ? `Order completed at ${completedTime}  •  ${params.paymentMethod ? `Paid (${params.paymentMethod})` : 'Paid'}${billNumber ? `  •  Bill #${billNumber}` : ''}  •  Total Rs. ${totalAmount.toFixed(0)}`
     : isDelivery
-    ? `Delivered at ${completedTime}  •  ${params.paymentMethod ? `Paid (${params.paymentMethod})` : 'Paid'}  •  Total Rs. ${totalAmount.toFixed(0)}`
-    : `Served at ${completedTime}  •  ${params.paymentMethod ? `Paid (${params.paymentMethod})` : 'Paid'}  •  Total Rs. ${totalAmount.toFixed(0)}`;
+    ? `Delivered at ${completedTime}  •  ${params.paymentMethod ? `Paid (${params.paymentMethod})` : 'Paid'}${billNumber ? `  •  Bill #${billNumber}` : ''}  •  Total Rs. ${totalAmount.toFixed(0)}`
+    : `Served at ${completedTime}  •  ${params.paymentMethod ? `Paid (${params.paymentMethod})` : 'Paid'}${billNumber ? `  •  Bill #${billNumber}` : ''}  •  Total Rs. ${totalAmount.toFixed(0)}`;
 
   const feedbackQuestion = isDineIn
     ? 'How was your dine-in experience?'

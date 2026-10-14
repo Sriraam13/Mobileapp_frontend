@@ -10,6 +10,9 @@ import { useRestaurantStore, useLiveOrderStore } from '../../store';
 import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from '../(order)/_MapComponents';
 import MapViewDirections from 'react-native-maps-directions';
 import * as Location from 'expo-location';
+import { formatTime } from '../../utils/dateUtils';
+import { LIGHT_MAP_STYLE } from '../../constants/mapStyle';
+import { resolveOutletLocation } from '../../utils/deliveryArea';
 
 const GOOGLE_MAPS_APIKEY = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY || '';
 
@@ -172,7 +175,7 @@ export default function OrderSuccessScreen() {
                 totalAmount: data.order.total_amount?.toString() || '0.00',
                 paymentMethod: data.order.payment_method || 'UPI',
                 cartItems: JSON.stringify(data.items || []),
-                date: data.order.created_at || new Date().toISOString(),
+                date: data.order.updated_at || data.order.created_at || new Date().toISOString(),
                 phone: params.phone || '',
               }
             });
@@ -257,7 +260,7 @@ export default function OrderSuccessScreen() {
   // Format 15 minutes ahead for ETA
   const etaDate = new Date();
   etaDate.setMinutes(etaDate.getMinutes() + 15);
-  const etaTime = etaDate.toLocaleString('en-US', { hour: 'numeric', minute: 'numeric', hour12: true });
+  const etaTime = formatTime(etaDate);
 
   const status = orderDetails?.order?.status?.toUpperCase() || 'CONFIRMED';
   let progressStep = 1;
@@ -333,64 +336,73 @@ export default function OrderSuccessScreen() {
           </View>
 
           {/* Map Location */}
-          {!isDineIn && (
-            <View style={[styles.mapContainer, { height: 200, overflow: 'hidden' }]}>
-               <MapView
-                 provider={PROVIDER_GOOGLE}
-                 style={{ flex: 1 }}
-                 initialRegion={{
-                   latitude: 13.0270,
-                   longitude: 80.1585,
-                   latitudeDelta: 0.05,
-                   longitudeDelta: 0.05,
-                 }}
-               >
-                 <Marker 
-                   coordinate={{ latitude: 13.0270, longitude: 80.1585 }} 
-                   title={selectedOutlet?.name || "Data Udipi"}
-                   description="Restaurant Location"
-                 >
-                   <Ionicons name="restaurant" size={30} color="#ff4500" />
-                 </Marker>
-                 <Marker 
-                   coordinate={userLocation || { latitude: 13.0320, longitude: 80.1500 }} 
-                   title="You"
-                   description="Your Location"
-                 >
-                   <Ionicons name="person-circle" size={30} color="#00a01d" />
-                 </Marker>
-                 {GOOGLE_MAPS_APIKEY ? (
-                   <MapViewDirections
-                     origin={userLocation || { latitude: 13.0320, longitude: 80.1500 }}
-                     destination={{ latitude: 13.0270, longitude: 80.1585 }}
-                     apikey={GOOGLE_MAPS_APIKEY}
-                     strokeWidth={4}
-                     strokeColor="#00a01d"
-                   />
-                 ) : (
-                   <Polyline 
-                     coordinates={[
-                       userLocation || { latitude: 13.0320, longitude: 80.1500 },
-                       { latitude: 13.0270, longitude: 80.1585 }
-                     ]}
-                     strokeColor="#ff4500"
-                     strokeWidth={3}
-                     lineDashPattern={[5, 5]}
-                   />
-                 )}
-               </MapView>
-               <TouchableOpacity 
-                 style={styles.mapOverlayPill}
-                 onPress={() => {
-                   const destination = encodeURIComponent(selectedOutlet?.name || 'Data Udipi Mugalivakkam');
-                   Linking.openURL(`https://www.google.com/maps/dir/?api=1&destination=${destination}`);
-                 }}
-               >
-                 <Ionicons name="location" size={14} color="#ff4500" />
-                 <Text style={styles.mapPillText} numberOfLines={1}>Directions to {selectedOutlet?.name || 'Restaurant'}</Text>
-               </TouchableOpacity>
-            </View>
-          )}
+          {!isDineIn && (() => {
+            const restaurantLoc = resolveOutletLocation(selectedOutlet);
+            const userLoc = userLocation || {
+              latitude: restaurantLoc.latitude + 0.005,
+              longitude: restaurantLoc.longitude - 0.005,
+            };
+
+            return (
+              <View style={[styles.mapContainer, { height: 200, overflow: 'hidden' }]}>
+                <MapView
+                  provider={PROVIDER_GOOGLE}
+                  style={{ flex: 1 }}
+                  userInterfaceStyle="light"
+                  customMapStyle={LIGHT_MAP_STYLE}
+                  initialRegion={{
+                    latitude: restaurantLoc.latitude,
+                    longitude: restaurantLoc.longitude,
+                    latitudeDelta: 0.05,
+                    longitudeDelta: 0.05,
+                  }}
+                >
+                  <Marker 
+                    coordinate={{ latitude: restaurantLoc.latitude, longitude: restaurantLoc.longitude }} 
+                    title={restaurantLoc.name || "Data Udipi"}
+                    description="Restaurant Location"
+                  >
+                    <Ionicons name="restaurant" size={30} color="#ff4500" />
+                  </Marker>
+                  <Marker 
+                    coordinate={userLoc} 
+                    title="You"
+                    description="Your Location"
+                  >
+                    <Ionicons name="person-circle" size={30} color="#00a01d" />
+                  </Marker>
+                  {GOOGLE_MAPS_APIKEY ? (
+                    <MapViewDirections
+                      origin={userLoc}
+                      destination={{ latitude: restaurantLoc.latitude, longitude: restaurantLoc.longitude }}
+                      apikey={GOOGLE_MAPS_APIKEY}
+                      strokeWidth={4}
+                      strokeColor="#00a01d"
+                    />
+                  ) : (
+                    <Polyline 
+                      coordinates={[
+                        userLoc,
+                        { latitude: restaurantLoc.latitude, longitude: restaurantLoc.longitude }
+                      ]}
+                      strokeColor="#ff4500"
+                      strokeWidth={3}
+                      lineDashPattern={[5, 5]}
+                    />
+                  )}
+                </MapView>
+                <TouchableOpacity 
+                  style={styles.mapOverlayPill}
+                  onPress={() => {
+                    Linking.openURL(`https://www.google.com/maps/dir/?api=1&destination=${restaurantLoc.latitude},${restaurantLoc.longitude}`);
+                  }}
+                >
+                  <Ionicons name="location" size={14} color="#ff4500" />
+                  <Text style={styles.mapPillText} numberOfLines={1}>Directions to {restaurantLoc.name || 'Restaurant'}</Text>
+                </TouchableOpacity>
+              </View>
+            );
+          })()}
 
         </View>
       </ScrollView>

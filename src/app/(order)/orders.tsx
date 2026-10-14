@@ -8,6 +8,7 @@ import { getFullImageUrl } from '../../constants/api';
 import { useAuthStore, useCartStore, useOrderStore, useRestaurantStore } from '../../store';
 import { useDineInSessionStore } from '../../store/useDineInSessionStore';
 import BottomNavBar from '../../components/layout/BottomNavBar';
+import { formatDateTime } from '../../utils/dateUtils';
 
 const parseOrderTypeAndTable = (rawTypeInput: any, rawTableInput: any) => {
   const rawType = String(rawTypeInput || '').toUpperCase();
@@ -255,6 +256,22 @@ export default function Orders() {
   };
 
   const handleOrderPress = (order: any) => {
+    const rawStatus = (order.status || '').toUpperCase();
+    const isCompleted = ['COMPLETED', 'SERVED', 'DELIVERED', 'CANCELLED'].includes(rawStatus);
+
+    // If it's a previous/historical order or user clicked in Completed/Delivered/Cancelled tab
+    if (isCompleted || activeTab === 'Completed' || activeTab === 'Delivered' || activeTab === 'Cancelled') {
+      router.push({
+        pathname: '/order-details',
+        params: {
+          orderId: String(order.dbOrderId || order.dbId || order.id || ''),
+          restaurantId: String(order.restaurant_id || ''),
+          orderJson: JSON.stringify(order),
+        }
+      });
+      return;
+    }
+
     if (order.order_type === 'Delivery') {
       router.push({
         pathname: '/delivery-success',
@@ -295,7 +312,14 @@ export default function Orders() {
           } 
         });
       } else {
-        router.push({ pathname: '/order-details', params: { orderId: order.dbOrderId || order.id || order.dbId } });
+        router.push({
+          pathname: '/order-details',
+          params: {
+            orderId: String(order.dbOrderId || order.dbId || order.id || ''),
+            restaurantId: String(order.restaurant_id || ''),
+            orderJson: JSON.stringify(order),
+          }
+        });
       }
     }
   };
@@ -330,26 +354,7 @@ export default function Orders() {
   };
 
   const formatDate = (isoString: string) => {
-    try {
-      let parsedString = isoString;
-      if (parsedString && parsedString.includes('T') && !parsedString.endsWith('Z') && !parsedString.includes('+')) {
-        parsedString += 'Z';
-      }
-      const d = new Date(parsedString);
-      if (isNaN(d.getTime())) return isoString;
-      const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-      const date = d.getDate();
-      const month = months[d.getMonth()];
-      const year = d.getFullYear();
-      let hours = d.getHours();
-      const minutes = d.getMinutes().toString().padStart(2, '0');
-      const ampm = hours >= 12 ? 'PM' : 'AM';
-      hours = hours % 12;
-      hours = hours ? hours : 12;
-      return `${date} ${month} ${year}, ${hours}:${minutes} ${ampm}`;
-    } catch {
-      return isoString;
-    }
+    return formatDateTime(isoString);
   };
 
   return (
@@ -497,13 +502,13 @@ export default function Orders() {
                       >
                         <Text style={[styles.reorderText, { color: '#ffffff', fontWeight: 'bold' }]}>Track / Pay</Text>
                       </TouchableOpacity>
-                    ) : (order.order_type === 'Delivery' || order.order_type === 'Takeaway' || order.order_type === 'Take Away') ? (
+                    ) : (order.order_type === 'Delivery' || order.order_type === 'Takeaway' || order.order_type === 'Take Away') && !['COMPLETED', 'SERVED', 'DELIVERED', 'CANCELLED'].includes((order.status || '').toUpperCase()) ? (
                       <TouchableOpacity 
                         style={[styles.reorderBtn, { backgroundColor: '#ff4500', borderColor: '#ff4500', minWidth: 100, alignItems: 'center', justifyContent: 'center' }]} 
                         onPress={() => handleOrderPress(order)}
                         activeOpacity={0.8}
                       >
-                        <Text style={[styles.reorderText, { color: '#ffffff', fontWeight: 'bold' }]}>Track / Pay</Text>
+                        <Text style={[styles.reorderText, { color: '#ffffff', fontWeight: 'bold' }]}>Track Order</Text>
                       </TouchableOpacity>
                     ) : (
                       <TouchableOpacity 
@@ -512,7 +517,7 @@ export default function Orders() {
                           if (isCatering) {
                             router.push({ pathname: '/catering-order-details', params: { orderId: order.dbId } });
                           } else {
-                            router.push({ pathname: '/order-details', params: { orderId: order.dbId || order.id } });
+                            handleOrderPress(order);
                           }
                         }}
                         activeOpacity={0.8}

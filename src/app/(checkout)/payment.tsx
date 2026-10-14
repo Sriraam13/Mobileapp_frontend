@@ -7,7 +7,7 @@ import * as WebBrowser from 'expo-web-browser';
 import * as Linking from 'expo-linking';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { API_BASE_URL } from '../../constants/api';
-import { orderApi } from '../../services/apiService';
+import { orderApi, dineInSessionApi } from '../../services/apiService';
 import {
   useAuthStore,
   useAddressStore,
@@ -328,9 +328,35 @@ export default function PaymentScreen() {
         let finalAmount = effectiveTotalVal;
 
         if (isDineInSettlement) {
+          const sessionStore = useDineInSessionStore.getState();
+          if (sessionStore.orderRounds && sessionStore.orderRounds.length > 0) {
+            const allRoundItems = sessionStore.orderRounds
+              .filter((r: any) => (r.status || '').toUpperCase() !== 'CANCELLED')
+              .flatMap((r: any) => r.items || []);
+            if (allRoundItems.length > 0) {
+              finalItems = allRoundItems;
+            }
+          }
+          const targetSessionId = sessionStore.sessionDbId || sessionStore.sessionUid || (params.sessionId as string) || (params.sessionUid as string);
+          const restId = selectedOutlet?.id || 1;
+
+          if (targetSessionId) {
+            try {
+              const sessionRes = await dineInSessionApi.settleSession(targetSessionId, restId, {
+                payment_method: 'Pay at Counter',
+                amount_paid: effectiveTotalVal,
+              });
+              if (sessionRes && sessionRes.totalAmount) {
+                finalAmount = sessionRes.totalAmount;
+              }
+            } catch (sessErr) {
+              console.warn('Session settle error, falling back to order settle:', sessErr);
+            }
+          }
+
           const targetSettleId = settlementDbOrderId || 
             (settlementOrderId ? settlementOrderId.replace(/\D/g, '') : '') || 
-            (useDineInSessionStore.getState().activeDbOrderId ? String(useDineInSessionStore.getState().activeDbOrderId) : '');
+            (sessionStore.activeDbOrderId ? String(sessionStore.activeDbOrderId) : '');
 
           if (targetSettleId) {
             try {

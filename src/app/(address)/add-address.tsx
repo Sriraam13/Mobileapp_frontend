@@ -8,6 +8,7 @@ import { API_BASE_URL } from '../../constants/api';
 import { useAuthStore, useAddressStore } from '../../store';
 import BottomNavBar from '../../components/layout/BottomNavBar';
 import { isWithinDeliveryArea } from '../../utils/deliveryArea';
+import { LIGHT_MAP_STYLE } from '../../constants/mapStyle';
 
 const MapView = Platform.OS !== 'web' ? require('react-native-maps').default : null;
 const { PROVIDER_GOOGLE } = Platform.OS !== 'web' ? require('react-native-maps') : { PROVIDER_GOOGLE: 'google' };
@@ -27,10 +28,10 @@ export default function AddAddress() {
   const [fullAddress, setFullAddress] = useState(params.predefinedAddress || '');
   const [isLocating, setIsLocating] = useState(false);
   const [region, setRegion] = useState({
-    latitude: params.latitude ? Number(params.latitude) : 13.0223,
-    longitude: params.longitude ? Number(params.longitude) : 80.2229,
-    latitudeDelta: 0.015,
-    longitudeDelta: 0.015,
+    latitude: params.latitude ? Number(params.latitude) : 13.0210,
+    longitude: params.longitude ? Number(params.longitude) : 80.1614,
+    latitudeDelta: 0.012,
+    longitudeDelta: 0.012,
   });
   const [refreshing, setRefreshing] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -40,6 +41,23 @@ export default function AddAddress() {
   const [hasConfirmedLocation, setHasConfirmedLocation] = useState(Boolean(params.latitude && params.longitude));
   const [showDeliveryUnavailable, setShowDeliveryUnavailable] = useState(false);
   const mapRef = useRef<any>(null);
+
+  // Automatically detect customer location when opening screen
+  useEffect(() => {
+    if (params.latitude && params.longitude) {
+      const pRegion = {
+        latitude: Number(params.latitude),
+        longitude: Number(params.longitude),
+        latitudeDelta: 0.012,
+        longitudeDelta: 0.012,
+      };
+      setRegion(pRegion);
+      setHasConfirmedLocation(true);
+      return;
+    }
+    detectLocation();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const handleSearch = async (text: string) => {
     setSearchQuery(text);
@@ -96,24 +114,38 @@ export default function AddAddress() {
     setRefreshing(false);
   };
 
-  const detectLocation = async () => {
+  const detectLocation = async (isManualPress = false) => {
     setIsLocating(true);
     try {
       let { status } = await Location.requestForegroundPermissionsAsync();
       if (status !== 'granted') {
-        Alert.alert("Permission Denied", "Could not request location permission. Please fill in details manually.");
+        if (isManualPress) {
+          Alert.alert("Permission Needed", "Please enable location permission to auto-detect your delivery address.");
+        }
         setIsLocating(false);
         return;
       }
       
-      let location = await Location.getCurrentPositionAsync({});
+      let location = await Location.getCurrentPositionAsync({
+        accuracy: Location.Accuracy.Balanced,
+      }).catch(async () => {
+        return await Location.getLastKnownPositionAsync({});
+      });
+
+      if (!location || !location.coords) {
+        if (isManualPress) {
+          Alert.alert("Location Unavailable", "Could not get your current GPS location. You can search for your street or pan the map.");
+        }
+        setIsLocating(false);
+        return;
+      }
+
       const { latitude, longitude } = location.coords;
-      
       const detectedRegion = {
         latitude,
         longitude,
-        latitudeDelta: 0.015,
-        longitudeDelta: 0.015,
+        latitudeDelta: 0.012,
+        longitudeDelta: 0.012,
       };
       setRegion(detectedRegion);
       mapRef.current?.animateToRegion(detectedRegion, 500);
@@ -305,6 +337,10 @@ export default function AddAddress() {
               ref={mapRef}
               style={styles.mapImage}
               region={region}
+              userInterfaceStyle="light"
+              customMapStyle={LIGHT_MAP_STYLE}
+              showsUserLocation={true}
+              showsMyLocationButton={false}
               onRegionChangeComplete={async (newRegion: any, details: any) => {
                 setRegion(newRegion);
                 if (!isLocating && details?.isGesture) {
@@ -342,7 +378,7 @@ export default function AddAddress() {
           {!isLocating && (
             <TouchableOpacity 
               style={{ position: 'absolute', bottom: 16, right: 16, backgroundColor: '#fff', width: 44, height: 44, borderRadius: 22, justifyContent: 'center', alignItems: 'center', shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.2, shadowRadius: 4, elevation: 5 }} 
-              onPress={detectLocation}
+              onPress={() => detectLocation(true)}
             >
               <Ionicons name="locate" size={24} color="#ff4500" />
             </TouchableOpacity>

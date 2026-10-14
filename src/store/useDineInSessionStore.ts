@@ -42,11 +42,24 @@ export interface DineInBatch {
   total: number;
 }
 
+export interface DineInOrderRound {
+  id: number;
+  orderId: string;
+  round?: number;
+  status: string;
+  payment_status: string;
+  total_amount: number;
+  created_at?: string;
+  items: any[];
+}
+
 interface DineInSessionState {
   isActive: boolean;
   tableNumber: string | null;
   tableId: string | null;
   sessionId: string | null;
+  sessionDbId: number | null;
+  sessionUid: string | null;
   activeOrderId: string | null;
   activeDbOrderId: number | string | null;
   orderedItems: DineInItem[];
@@ -54,15 +67,33 @@ interface DineInSessionState {
   unpaidTotal: number;
   paymentStatus: 'Pending' | 'Paid';
   batches: DineInBatch[];
+  orderRounds: DineInOrderRound[];
 
   startDineInOrder: (
     tableNumber: string,
     orderId: string,
     dbOrderId: number | string,
     items: DineInItem[],
+    total: number,
+    sessionData?: { sessionId?: number; sessionUid?: string }
+  ) => void;
+  appendOrderRound: (
+    orderId: string,
+    dbOrderId: number | string,
+    items: DineInItem[],
     total: number
   ) => void;
   appendItemsToOrder: (newItems: DineInItem[], additionalAmount: number) => void;
+  syncWithBackendOrder: (items: DineInItem[], totalAmount: number, paymentStatus?: 'Pending' | 'Paid') => void;
+  syncSessionDetails: (sessionData: {
+    sessionId: number;
+    sessionUid: string;
+    tableNumber: string;
+    totalAmount: number;
+    paymentStatus: 'Pending' | 'Paid';
+    orders: DineInOrderRound[];
+    allItems?: DineInItem[];
+  }) => void;
   completeDineInSession: () => void;
 
   // Backward-compatibility aliases
@@ -79,6 +110,8 @@ export const useDineInSessionStore = create<DineInSessionState>()(
       tableNumber: null,
       tableId: null,
       sessionId: null,
+      sessionDbId: null,
+      sessionUid: null,
       activeOrderId: null,
       activeDbOrderId: null,
       orderedItems: [],
@@ -86,15 +119,18 @@ export const useDineInSessionStore = create<DineInSessionState>()(
       unpaidTotal: 0,
       paymentStatus: 'Pending',
       batches: [],
+      orderRounds: [],
 
-      startDineInOrder: (tableNumber, orderId, dbOrderId, items, total) =>
+      startDineInOrder: (tableNumber, orderId, dbOrderId, items, total, sessionData) =>
         set({
           isActive: true,
           tableNumber,
           tableId: tableNumber,
           activeOrderId: orderId,
           activeDbOrderId: dbOrderId,
-          sessionId: orderId,
+          sessionId: sessionData?.sessionUid || orderId,
+          sessionUid: sessionData?.sessionUid || null,
+          sessionDbId: sessionData?.sessionId || null,
           orderedItems: [...items],
           totalAmount: total,
           unpaidTotal: total,
@@ -107,11 +143,47 @@ export const useDineInSessionStore = create<DineInSessionState>()(
               total,
             },
           ],
+          orderRounds: [
+            {
+              id: Number(dbOrderId) || 1,
+              orderId,
+              round: 1,
+              status: 'PENDING',
+              payment_status: 'Pending',
+              total_amount: total,
+              items: [...items],
+            },
+          ],
+        }),
+
+      appendOrderRound: (orderId, dbOrderId, items, total) =>
+        set((state) => {
+          const newTotal = state.totalAmount + total;
+          const newRounds = [
+            ...state.orderRounds,
+            {
+              id: Number(dbOrderId) || state.orderRounds.length + 1,
+              orderId,
+              round: state.orderRounds.length + 1,
+              status: 'PENDING',
+              payment_status: 'Pending',
+              total_amount: total,
+              items: [...items],
+            },
+          ];
+          const newOrderedItems = [...state.orderedItems, ...items];
+          return {
+            activeOrderId: orderId,
+            activeDbOrderId: dbOrderId,
+            orderedItems: newOrderedItems,
+            totalAmount: newTotal,
+            unpaidTotal: newTotal,
+            orderRounds: newRounds,
+          };
         }),
 
       appendItemsToOrder: (newItems, additionalAmount) =>
         set((state) => {
-          // Merge items or increment quantities if identical item exists
           const existingItems = [...state.orderedItems];
           newItems.forEach((newItem) => {
             const idx = existingItems.findIndex((x) => x.id === newItem.id);
@@ -142,12 +214,42 @@ export const useDineInSessionStore = create<DineInSessionState>()(
           };
         }),
 
+      syncWithBackendOrder: (items, totalAmount, paymentStatus = 'Pending') =>
+        set((state) => ({
+          orderedItems: [...items],
+          totalAmount: totalAmount,
+          unpaidTotal: paymentStatus === 'Paid' ? 0 : totalAmount,
+          paymentStatus: paymentStatus,
+        })),
+
+      syncSessionDetails: (sessionData) =>
+        set((state) => {
+          const items = sessionData.allItems || sessionData.orders.flatMap((o) => o.items || []);
+          const latestOrder = sessionData.orders[sessionData.orders.length - 1];
+          return {
+            isActive: sessionData.paymentStatus !== 'Paid',
+            tableNumber: sessionData.tableNumber || state.tableNumber,
+            sessionDbId: sessionData.sessionId,
+            sessionUid: sessionData.sessionUid,
+            sessionId: sessionData.sessionUid,
+            totalAmount: sessionData.totalAmount,
+            unpaidTotal: sessionData.paymentStatus === 'Paid' ? 0 : sessionData.totalAmount,
+            paymentStatus: sessionData.paymentStatus,
+            orderRounds: sessionData.orders,
+            orderedItems: items.length > 0 ? items : state.orderedItems,
+            activeOrderId: latestOrder ? latestOrder.orderId : state.activeOrderId,
+            activeDbOrderId: latestOrder ? latestOrder.id : state.activeDbOrderId,
+          };
+        }),
+
       completeDineInSession: () =>
         set({
           isActive: false,
           tableNumber: null,
           tableId: null,
           sessionId: null,
+          sessionDbId: null,
+          sessionUid: null,
           activeOrderId: null,
           activeDbOrderId: null,
           orderedItems: [],
@@ -155,6 +257,7 @@ export const useDineInSessionStore = create<DineInSessionState>()(
           unpaidTotal: 0,
           paymentStatus: 'Paid',
           batches: [],
+          orderRounds: [],
         }),
 
       // Backward-compatible methods

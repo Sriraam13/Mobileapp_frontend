@@ -8,6 +8,7 @@ import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Ionicons, MaterialIcons } from '@expo/vector-icons';
 import { useAuthStore } from '../../store/useAuthStore';
 import { cateringOrderApi } from '../../services/apiService';
+import { formatDateTime } from '../../utils/dateUtils';
 
 export default function CateringOrderDetails() {
   const router = useRouter();
@@ -178,7 +179,7 @@ export default function CateringOrderDetails() {
                 <View style={{ flex: 1 }}>
                   <Text style={styles.payHistType}>{p.payment_type} ({p.payment_method})</Text>
                   <Text style={styles.payHistId}>Txn: {p.transaction_id}</Text>
-                  {p.created_at && <Text style={styles.payHistDate}>{new Date(p.created_at).toLocaleString()}</Text>}
+                  {p.created_at && <Text style={styles.payHistDate}>{formatDateTime(p.created_at)}</Text>}
                 </View>
                 <View style={{ alignItems: 'flex-end' }}>
                   <Text style={styles.payHistAmt}>Rs. {p.amount}</Text>

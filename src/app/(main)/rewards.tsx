@@ -6,6 +6,7 @@ import { useRouter } from 'expo-router';
 import { useAuthStore } from '../../store';
 import { customerApi } from '../../services/apiService';
 import BottomNavBar from '../../components/layout/BottomNavBar';
+import { formatDateOnly } from '../../utils/dateUtils';
 
 export default function Rewards() {
   const router = useRouter();
@@ -86,7 +87,7 @@ export default function Rewards() {
               </View>
               <View style={styles.txInfo}>
                 <Text style={styles.txTitle}>{tx.description}</Text>
-                <Text style={styles.txDate}>{new Date(tx.date).toLocaleDateString()}</Text>
+                <Text style={styles.txDate}>{formatDateOnly(tx.date)}</Text>
               </View>
               <Text style={styles.txPoints}>+{tx.points} pts</Text>
             </View>

@@ -6,7 +6,12 @@ const getApiUrl = () => {
   if (envUrl) {
     return envUrl;
   }
-  return 'http://dev-api.dataudipi.com';
+  const hostUri = Constants.expoConfig?.hostUri || (Constants as any).manifest?.debuggerHost;
+  if (hostUri) {
+    const ip = hostUri.split(':')[0];
+    return `http://${ip}:8001`;
+  }
+  return 'http://10.135.33.246:8001';
 };
 
 export const API_BASE_URL = getApiUrl();

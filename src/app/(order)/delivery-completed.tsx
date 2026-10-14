@@ -7,6 +7,7 @@ import { useCartStore } from '../../store';
 import { useAuthStore } from '../../store/useAuthStore';
 import { useRestaurantStore } from '../../store';
 import { orderApi, customerApi, deliveryApi } from '../../services/apiService';
+import { formatDateOnly } from '../../utils/dateUtils';
 
 export default function DeliveryCompletedScreen() {
   const router = useRouter();
@@ -113,7 +114,7 @@ export default function DeliveryCompletedScreen() {
   const deliveredTimelineEvent = trackingData?.timeline?.find((event: any) => event.status === 'DELIVERED');
   const deliveredAt = trackingData?.assignment?.delivered_at || orderData?.order?.delivered_at || deliveredTimelineEvent?.created_at;
   const deliveryDateStr = deliveredAt
-    ? new Date(deliveredAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })
+    ? formatDateOnly(deliveredAt)
     : 'Date unavailable';
 
   const handleReorder = () => {
