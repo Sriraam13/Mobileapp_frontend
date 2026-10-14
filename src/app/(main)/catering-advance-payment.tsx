@@ -94,6 +94,8 @@ export default function AdvancePayment() {
         pathname: '/(main)/catering-order-success',
         params: {
           orderId: orderData.order_id?.toString() || '0',
+          restaurantId: (params.restaurantId as string) || '',
+          restaurantName: (params.restaurantName as string) || '',
           paidAmount: parsedPaymentAmount.toString(),
           totalAmount: totalAmount.toString(),
           packageName,
@@ -154,6 +156,8 @@ export default function AdvancePayment() {
           returnPath: '/(main)/catering-advance-payment',
           returnParams: JSON.stringify({
             sessionId,
+            restaurantId: (params.restaurantId as string) || '',
+            restaurantName: (params.restaurantName as string) || '',
             packageName,
             eventName,
             totalAmount: totalAmount.toString(),

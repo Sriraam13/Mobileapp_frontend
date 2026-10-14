@@ -4,6 +4,7 @@ import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuthStore } from '../../store/useAuthStore';
+import { useRestaurantStore } from '../../store/useRestaurantStore';
 
 interface CateringPackage {
   name: string;
@@ -72,9 +73,17 @@ export default function ChoosePackage() {
         ...(auth.token ? { 'Authorization': `Bearer ${auth.token}` } : {})
       };
 
+      // 1. Resolve and include restaurant_id
+      const { selectedOutlet } = useRestaurantStore.getState();
+      const effectiveRestaurantId = Number(params.restaurantId) ||
+        Number(selectedOutlet?.restaurant_id) ||
+        Number(selectedOutlet?.id) ||
+        1;
+
       // 1. Create Session
       const sessionBody = {
         customer_id: auth.customerId || 1,
+        restaurant_id: effectiveRestaurantId,
         package_code: selectedPackage,
         guest_count: parseInt(params.guestCount as string || '50', 10)
       };
@@ -95,6 +104,7 @@ export default function ChoosePackage() {
 
       // 2. Patch Event Details
       const eventBody: any = {
+        restaurant_id: effectiveRestaurantId,
         event_name: params.eventName,
         serving_time: params.time,
         occasion: params.occasion,
@@ -135,6 +145,8 @@ export default function ChoosePackage() {
         pathname: '/(main)/catering-customise-menu',
         params: {
           sessionId: sessionId.toString(),
+          restaurantId: effectiveRestaurantId.toString(),
+          restaurantName: (params.restaurantName as string) || selectedOutlet?.name || 'Data Udipi',
           packageCode: selectedPackage,
           guestCount: params.guestCount,
           packagePrice: packages.find(p => p.code === selectedPackage)?.price?.toString() || '0',

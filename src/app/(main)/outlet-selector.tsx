@@ -14,7 +14,8 @@ const OUTLETS = [
     address: "Mount-Poonamallee Road, Mugalivakkam, Chennai 600125",
     lat: 13.0210,
     lng: 80.1614,
-    open: true
+    open: true,
+    comingSoon: false
   },
   {
     id: "mgrnagar",
@@ -23,8 +24,18 @@ const OUTLETS = [
     address: "Anna Main Road, MGR Nagar, Chennai 600078",
     lat: 13.0350,
     lng: 80.1970,
-    open: false,
-    comingSoon: true
+    open: true,
+    comingSoon: false
+  },
+  {
+    id: "banglore",
+    restaurant_id: 25,
+    name: "Data Udipi- Banglore",
+    address: "Ganga block 1st cross, Electronic City, Survey No.33, 12th Cross Rd, Bettadasanapura, Karnataka 560100",
+    lat: 12.8399,
+    lng: 77.6770,
+    open: true,
+    comingSoon: false
   }
 ];
 

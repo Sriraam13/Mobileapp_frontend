@@ -160,6 +160,8 @@ export default function AddExtras() {
         pathname: '/(main)/catering-review-quote',
         params: {
           sessionId,
+          restaurantId: (params.restaurantId as string) || '',
+          restaurantName: (params.restaurantName as string) || '',
           packageName: params.packageName,
           guestCount: guestCount.toString(),
           eventName: params.eventName,

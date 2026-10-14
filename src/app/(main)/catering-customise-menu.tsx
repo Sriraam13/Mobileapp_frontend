@@ -383,6 +383,8 @@ export default function CustomiseMenu() {
             pathname: '/(main)/catering-add-extras',
             params: {
               sessionId,
+              restaurantId: (params.restaurantId as string) || '',
+              restaurantName: (params.restaurantName as string) || '',
               packageName,
               guestCount: guestCount.toString(),
               packagePrice: packagePrice.toString(),
