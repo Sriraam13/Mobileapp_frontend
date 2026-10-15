@@ -20,7 +20,7 @@
 import { Alert, NativeModules, Platform, PermissionsAndroid } from 'react-native';
 import { create } from 'zustand';
 import { executeSingleAction, setActiveRouter, UIAction } from '../utils/mobileAgentActionDispatcher';
-import { resolveRoute, getScreenDisplayName } from '../utils/agentRegistry';
+import { resolveRoute } from '../utils/agentRegistry';
 import { getMobileAgentContext } from '../utils/agentContext';
 import { API_BASE_URL } from '../constants/api';
 import { useAuthStore } from '../store/useAuthStore';
@@ -187,7 +187,7 @@ async function handleVapiToolCall(tool: any): Promise<{ toolCallId: string; resu
   if (typeof rawArgs === 'string') {
     try {
       fnArgs = JSON.parse(rawArgs);
-    } catch (e) {
+    } catch {
       console.warn(`[VapiStore] Failed to parse tool arguments string:`, rawArgs);
       fnArgs = {};
     }
@@ -259,7 +259,6 @@ async function handleVapiToolCall(tool: any): Promise<{ toolCallId: string; resu
       }
 
       case 'proceed_to_checkout': {
-        const cartCount = useCartStore.getState().getItemCount();
         const result = await executeSingleAction({ action: 'show_cart' }); // show_cart navigates to checkout
         return { toolCallId, result: JSON.stringify(result) };
       }

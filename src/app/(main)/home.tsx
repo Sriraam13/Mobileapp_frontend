@@ -4,7 +4,7 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { customerApi, menuApi, tableApi, orderApi } from '../../services/apiService';
+import { customerApi, menuApi, tableApi, orderApi, dineInSessionApi } from '../../services/apiService';
 import { getFullImageUrl } from '../../constants/api';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import * as Device from 'expo-device';
@@ -19,25 +19,23 @@ import DineInActiveBanner from '../../components/DineInActiveBanner';
 export default function Home() {
   const router = useRouter();
   const params = useLocalSearchParams<{ autoPromptQR?: string }>();
-  const { phone } = useAuthStore();
-  const { selectedOutlet } = useRestaurantStore();
+  const phone = useAuthStore(s => s.phone);
+  const selectedOutlet = useRestaurantStore(s => s.selectedOutlet);
   const dineInSession = useDineInSessionStore();
   const scrollRef = useRef<ScrollView>(null);
   const slideIndex = useRef(0);
   const [selectedItem, setSelectedItem] = useState<any>(null);
   const insets = useSafeAreaInsets();
-  const { 
-    items: cart, 
-    addItem, 
-    removeItem, 
-    incrementQuantity, 
-    decrementQuantity, 
-    getItemCount, 
-    getSubtotal, 
-    orderType, 
-    setOrderType,
-    clearCart,
-  } = useCartStore();
+  const cart = useCartStore(s => s.items);
+  const addItem = useCartStore(s => s.addItem);
+  const removeItem = useCartStore(s => s.removeItem);
+  const incrementQuantity = useCartStore(s => s.incrementQuantity);
+  const decrementQuantity = useCartStore(s => s.decrementQuantity);
+  const getItemCount = useCartStore(s => s.getItemCount);
+  const getSubtotal = useCartStore(s => s.getSubtotal);
+  const orderType = useCartStore(s => s.orderType);
+  const setOrderType = useCartStore(s => s.setOrderType);
+  const clearCart = useCartStore(s => s.clearCart);
   const [isCartModalVisible, setIsCartModalVisible] = useState(false);
   const [isPlacingOrder, setIsPlacingOrder] = useState(false);
   const cartItemCount = getItemCount();
@@ -337,6 +335,17 @@ export default function Home() {
             .then(data => {
                if (data.valid && data.table) {
                   setTableStatus(data.table.status);
+                  if (data.table.status.toLowerCase() === 'vacant') {
+                    AsyncStorage.removeItem('dineInTable').catch(() => {});
+                    try {
+                      if (typeof localStorage !== 'undefined') localStorage.removeItem('dineInTable');
+                    } catch (e) {}
+                    delete (globalThis as any).dineInTable;
+                    setTableNumber(null);
+                    setTableStatus(null);
+                    useDineInSessionStore.getState().completeDineInSession();
+                    useLiveOrderStore.getState().clearLiveOrder();
+                  }
                }
             })
             .catch(() => {});
@@ -348,6 +357,28 @@ export default function Home() {
     loadSavedTable();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Sync dine-in session when viewing Dine-in tab to detect cancellations
+  useEffect(() => {
+    if (activeTab !== 'Dine-in') return;
+    const sKey = dineInSession.sessionDbId || dineInSession.sessionUid || dineInSession.activeDbOrderId;
+    if (dineInSession.isActive && sKey) {
+      dineInSessionApi.getSessionDetails(sKey)
+        .then(data => {
+          if (!data) return;
+          const isCancelled = (data.status || '').toUpperCase() === 'CANCELLED';
+          const isCompleted = (data.status || '').toUpperCase() === 'COMPLETED';
+          const activeBackRounds = (data.orders || []).filter(
+            (o: any) => (o.status || '').toUpperCase() !== 'CANCELLED'
+          );
+          if (isCancelled || isCompleted || ((data.orders || []).length > 0 && activeBackRounds.length === 0)) {
+            dineInSession.completeDineInSession();
+            useLiveOrderStore.getState().clearLiveOrder();
+          }
+        })
+        .catch(() => {});
+    }
+  }, [activeTab]);
 
   const handleDineInPress = async () => {
     setIsScannerVisible(true);
@@ -638,6 +669,8 @@ export default function Home() {
     delete (globalThis as any).dineInTable;
     setTableNumber(null);
     setTableStatus(null);
+    useDineInSessionStore.getState().completeDineInSession();
+    useLiveOrderStore.getState().clearLiveOrder();
     showPopup("Table Cleared", "You have left the table.", "info");
     } catch (e) {
       console.warn("Failed to clear table:", e);

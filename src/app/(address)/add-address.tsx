@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, Platform, StatusBar, Image, Alert, ActivityIndicator, RefreshControl, Modal, Pressable } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -42,79 +42,7 @@ export default function AddAddress() {
   const [showDeliveryUnavailable, setShowDeliveryUnavailable] = useState(false);
   const mapRef = useRef<any>(null);
 
-  // Automatically detect customer location when opening screen
-  useEffect(() => {
-    if (params.latitude && params.longitude) {
-      const pRegion = {
-        latitude: Number(params.latitude),
-        longitude: Number(params.longitude),
-        latitudeDelta: 0.012,
-        longitudeDelta: 0.012,
-      };
-      setRegion(pRegion);
-      setHasConfirmedLocation(true);
-      return;
-    }
-    detectLocation();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  const handleSearch = async (text: string) => {
-    setSearchQuery(text);
-    if (text.length > 2) {
-      setIsSearching(true);
-      try {
-        const apiKey = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY || 'AIzaSyA2qxAJag8F89Q_TdtjqU_42W6JAVJ5_qg';
-        const url = `https://maps.googleapis.com/maps/api/place/autocomplete/json?input=${encodeURIComponent(text)}&key=${apiKey}&components=country:in`;
-        const response = await fetch(url);
-        const data = await response.json();
-        if (data.status === 'OK') {
-          setSearchResults(data.predictions);
-        } else {
-          setSearchResults([]);
-        }
-      } catch (e) {
-        console.error("Error fetching places:", e);
-      } finally {
-        setIsSearching(false);
-      }
-    } else {
-      setSearchResults([]);
-    }
-  };
-
-  const handleSelectPlace = async (placeId: string, description: string) => {
-    setSearchQuery(description);
-    setSearchResults([]);
-    try {
-      const apiKey = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY || 'AIzaSyA2qxAJag8F89Q_TdtjqU_42W6JAVJ5_qg';
-      const url = `https://maps.googleapis.com/maps/api/place/details/json?place_id=${placeId}&fields=geometry&key=${apiKey}`;
-      const response = await fetch(url);
-      const data = await response.json();
-      if (data.status === 'OK' && data.result?.geometry?.location) {
-        const { lat, lng } = data.result.geometry.location;
-        const selectedRegion = {
-          latitude: lat,
-          longitude: lng,
-          latitudeDelta: 0.015,
-          longitudeDelta: 0.015,
-        };
-        setRegion(selectedRegion);
-        mapRef.current?.animateToRegion(selectedRegion, 500);
-        setHasConfirmedLocation(true);
-        setFullAddress(description);
-      }
-    } catch (e) {
-      console.error("Error fetching place details:", e);
-    }
-  };
-
-  const onRefresh = async () => {
-    setRefreshing(true);
-    setRefreshing(false);
-  };
-
-  const detectLocation = async (isManualPress = false) => {
+  const detectLocation = useCallback(async (isManualPress = false) => {
     setIsLocating(true);
     try {
       let { status } = await Location.requestForegroundPermissionsAsync();
@@ -178,15 +106,81 @@ export default function AddAddress() {
         if (streetNumber) setFlat(streetNumber);
         if (route) setBuilding(route);
         if (sublocality || locality) setLandmark(sublocality || locality);
-      } else {
-        console.warn("Geocoding failed:", data.status, data.error_message);
       }
     } catch (e) {
-      console.error("Error detecting location:", e);
+      console.error("Error auto-detecting location:", e);
+      if (isManualPress) {
+        Alert.alert("Error", "Failed to detect location. Please try searching for your address.");
+      }
     } finally {
       setIsLocating(false);
     }
+  }, []);
+
+  // Automatically detect customer location when opening screen
+  useEffect(() => {
+    if (!params.latitude || !params.longitude) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      detectLocation();
+    }
+  }, [detectLocation, params.latitude, params.longitude]);
+
+  const handleSearch = async (text: string) => {
+    setSearchQuery(text);
+    if (text.length > 2) {
+      setIsSearching(true);
+      try {
+        const apiKey = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY || 'AIzaSyA2qxAJag8F89Q_TdtjqU_42W6JAVJ5_qg';
+        const url = `https://maps.googleapis.com/maps/api/place/autocomplete/json?input=${encodeURIComponent(text)}&key=${apiKey}&components=country:in`;
+        const response = await fetch(url);
+        const data = await response.json();
+        if (data.status === 'OK') {
+          setSearchResults(data.predictions);
+        } else {
+          setSearchResults([]);
+        }
+      } catch (e) {
+        console.error("Error fetching places:", e);
+      } finally {
+        setIsSearching(false);
+      }
+    } else {
+      setSearchResults([]);
+    }
   };
+
+  const handleSelectPlace = async (placeId: string, description: string) => {
+    setSearchQuery(description);
+    setSearchResults([]);
+    try {
+      const apiKey = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY || 'AIzaSyA2qxAJag8F89Q_TdtjqU_42W6JAVJ5_qg';
+      const url = `https://maps.googleapis.com/maps/api/place/details/json?place_id=${placeId}&fields=geometry&key=${apiKey}`;
+      const response = await fetch(url);
+      const data = await response.json();
+      if (data.status === 'OK' && data.result?.geometry?.location) {
+        const { lat, lng } = data.result.geometry.location;
+        const selectedRegion = {
+          latitude: lat,
+          longitude: lng,
+          latitudeDelta: 0.015,
+          longitudeDelta: 0.015,
+        };
+        setRegion(selectedRegion);
+        mapRef.current?.animateToRegion(selectedRegion, 500);
+        setHasConfirmedLocation(true);
+        setFullAddress(description);
+      }
+    } catch (e) {
+      console.error("Error fetching place details:", e);
+    }
+  };
+
+  const onRefresh = async () => {
+    setRefreshing(true);
+    setRefreshing(false);
+  };
+
+
 
   useEffect(() => {
     if (isLocating) return;
@@ -305,7 +299,20 @@ export default function AddAddress() {
             placeholderTextColor="#999"
             value={searchQuery}
             onChangeText={handleSearch}
+            returnKeyType="search"
           />
+          {searchQuery.length > 0 && (
+            <TouchableOpacity
+              onPress={() => {
+                setSearchQuery('');
+                setSearchResults([]);
+              }}
+              style={{ padding: 6 }}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            >
+              <Ionicons name="close-circle" size={20} color="#aaa" />
+            </TouchableOpacity>
+          )}
         </View>
 
         {/* Search Results Dropdown */}
@@ -403,55 +410,122 @@ export default function AddAddress() {
         <View style={styles.row}>
           <View style={styles.halfInputContainer}>
             <Text style={styles.inputLabel}>Flat / House No</Text>
-            <TextInput 
-              style={styles.input} 
-              placeholder="e.g. Flat 101 / House No" 
-              value={flat}
-              onChangeText={setFlat}
-            />
+            <View style={{ position: 'relative', justifyContent: 'center' }}>
+              <TextInput 
+                style={[styles.input, flat.length > 0 && { paddingRight: 32 }]} 
+                placeholder="e.g. Flat 101" 
+                value={flat}
+                onChangeText={setFlat}
+              />
+              {flat.length > 0 && (
+                <TouchableOpacity
+                  onPress={() => setFlat('')}
+                  style={{ position: 'absolute', right: 8, padding: 4 }}
+                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                >
+                  <Ionicons name="close-circle" size={18} color="#9ca3af" />
+                </TouchableOpacity>
+              )}
+            </View>
           </View>
           <View style={styles.halfInputContainer}>
             <Text style={styles.inputLabel}>Floor</Text>
-            <TextInput 
-              style={styles.input} 
-              placeholder="e.g. 1st Floor (Optional)" 
-              value={floor}
-              onChangeText={setFloor}
-            />
+            <View style={{ position: 'relative', justifyContent: 'center' }}>
+              <TextInput 
+                style={[styles.input, floor.length > 0 && { paddingRight: 32 }]} 
+                placeholder="e.g. 1st Floor (Optional)" 
+                value={floor}
+                onChangeText={setFloor}
+              />
+              {floor.length > 0 && (
+                <TouchableOpacity
+                  onPress={() => setFloor('')}
+                  style={{ position: 'absolute', right: 8, padding: 4 }}
+                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                >
+                  <Ionicons name="close-circle" size={18} color="#9ca3af" />
+                </TouchableOpacity>
+              )}
+            </View>
           </View>
         </View>
 
         <View style={styles.inputContainer}>
           <Text style={styles.inputLabel}>Building / Apartment Name</Text>
-          <TextInput 
-            style={styles.input} 
-            placeholder="e.g. Apartment / Building name" 
-            value={building}
-            onChangeText={setBuilding}
-          />
+          <View style={{ position: 'relative', justifyContent: 'center' }}>
+            <TextInput 
+              style={[styles.input, building.length > 0 && { paddingRight: 32 }]} 
+              placeholder="e.g. Apartment / Building name" 
+              value={building}
+              onChangeText={setBuilding}
+            />
+            {building.length > 0 && (
+              <TouchableOpacity
+                onPress={() => setBuilding('')}
+                style={{ position: 'absolute', right: 8, padding: 4 }}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              >
+                <Ionicons name="close-circle" size={18} color="#9ca3af" />
+              </TouchableOpacity>
+            )}
+          </View>
         </View>
 
         <View style={styles.inputContainer}>
           <Text style={styles.inputLabel}>Landmark</Text>
-          <TextInput 
-            style={styles.input} 
-            placeholder="e.g. Nearby landmark" 
-            value={landmark}
-            onChangeText={setLandmark}
-          />
+          <View style={{ position: 'relative', justifyContent: 'center' }}>
+            <TextInput 
+              style={[styles.input, landmark.length > 0 && { paddingRight: 32 }]} 
+              placeholder="e.g. Nearby landmark" 
+              value={landmark}
+              onChangeText={setLandmark}
+            />
+            {landmark.length > 0 && (
+              <TouchableOpacity
+                onPress={() => setLandmark('')}
+                style={{ position: 'absolute', right: 8, padding: 4 }}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              >
+                <Ionicons name="close-circle" size={18} color="#9ca3af" />
+              </TouchableOpacity>
+            )}
+          </View>
         </View>
 
         <View style={styles.inputContainer}>
-          <Text style={styles.inputLabel}>Full Address</Text>
-          <TextInput 
-            style={[styles.input, styles.multilineInput]} 
-            placeholder="e.g. Enter your full address here"
-            multiline
-            numberOfLines={3}
-            textAlignVertical="top"
-            value={fullAddress}
-            onChangeText={setFullAddress}
-          />
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+            <Text style={styles.inputLabel}>Full Address</Text>
+            {fullAddress.length > 0 && (
+              <TouchableOpacity
+                onPress={() => setFullAddress('')}
+                style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 2, paddingHorizontal: 4 }}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              >
+                <Ionicons name="close-circle" size={14} color="#ef4444" style={{ marginRight: 3 }} />
+                <Text style={{ fontSize: 12, color: '#ef4444', fontWeight: '600' }}>Clear Address</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+          <View style={{ position: 'relative' }}>
+            <TextInput 
+              style={[styles.input, styles.multilineInput, fullAddress.length > 0 && { paddingRight: 36 }]} 
+              placeholder="e.g. Enter your full address here"
+              multiline
+              numberOfLines={3}
+              textAlignVertical="top"
+              value={fullAddress}
+              onChangeText={setFullAddress}
+            />
+            {fullAddress.length > 0 && (
+              <TouchableOpacity
+                onPress={() => setFullAddress('')}
+                style={{ position: 'absolute', top: 10, right: 10, padding: 4 }}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              >
+                <Ionicons name="close-circle" size={20} color="#9ca3af" />
+              </TouchableOpacity>
+            )}
+          </View>
         </View>
 
         <TouchableOpacity style={styles.saveBtn} onPress={handleSave} disabled={isSaving}>

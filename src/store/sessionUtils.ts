@@ -2,7 +2,6 @@ import { useCartStore } from './useCartStore';
 import { useOrderStore } from './useOrderStore';
 import { useLiveOrderStore } from './useLiveOrderStore';
 import { useDineInSessionStore } from './useDineInSessionStore';
-import { usePaymentStore } from './usePaymentStore';
 // Note: usePaymentStore might need to be created or imported if it exists
 
 export const completeTakeawaySession = (keepOrderId = true) => {

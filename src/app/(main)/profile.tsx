@@ -7,8 +7,8 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
 import { Ionicons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
-import { useFocusEffect } from 'expo-router';
+import { useRouter, useFocusEffect } from 'expo-router';
+
 import { customerApi } from '../../services/apiService';
 import { getFullImageUrl } from '../../constants/api';
 import BottomNavBar from '../../components/layout/BottomNavBar';

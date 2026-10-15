@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Image, Platform, StatusBar, Linking, BackHandler, ActivityIndicator, Alert, Modal } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Image, StatusBar, Linking, BackHandler, ActivityIndicator, Alert, Modal } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
@@ -64,9 +64,12 @@ export default function TrackOrderScreen() {
   const [cancelModalVisible, setCancelModalVisible] = useState(false);
   const [cancelling, setCancelling] = useState(false);
   const [cancelTargetId, setCancelTargetId] = useState<string | number | null>(null);
+  const [cancelTargetAmount, setCancelTargetAmount] = useState<number | null>(null);
+  const [cancelTargetLabel, setCancelTargetLabel] = useState<string>('');
   const [cancelModalError, setCancelModalError] = useState<string | null>(null);
+  const [cancelAllIds, setCancelAllIds] = useState<(string | number)[]>([]);
 
-  const openCancelModal = (targetOrderId?: string | number) => {
+  const openCancelModal = (targetOrderId?: string | number, roundAmount?: number, label?: string) => {
     let orderIdToCancel = targetOrderId || params.dbOrderId || liveDbOrderId;
     if (!orderIdToCancel && params.orderId) {
       const match = params.orderId.match(/\d+/);
@@ -75,13 +78,36 @@ export default function TrackOrderScreen() {
     if (!orderIdToCancel && orderDetails?.order?.id) {
       orderIdToCancel = orderDetails.order.id;
     }
+    const finalAmount = roundAmount != null ? roundAmount : (orderDetails?.order?.total_amount ? Number(orderDetails.order.total_amount) : null);
     setCancelTargetId(orderIdToCancel || null);
+    setCancelTargetAmount(finalAmount);
+    setCancelTargetLabel(label || '');
+    setCancelAllIds([]);
     setCancelModalError(null);
     setCancelModalVisible(true);
   };
 
+  const openCancelAllModal = () => {
+    const cancellableRounds = (sessionStore.orderRounds || []).filter(
+      (r: any) => ['PENDING', 'CONFIRMED'].includes((r.status || '').toUpperCase())
+    );
+    if (cancellableRounds.length === 0) return;
+    const allAmount = cancellableRounds.reduce((s: number, r: any) => s + Number(r.total_amount || 0), 0);
+    const ids = cancellableRounds.map((r: any) => r.id);
+    setCancelAllIds(ids);
+    setCancelTargetId(null);
+    setCancelTargetAmount(allAmount);
+    setCancelTargetLabel('all cancellable rounds');
+    setCancelModalError(null);
+    setCancelModalVisible(true);
+  };
+
+
   const executeCancelOrder = async () => {
-    if (!cancelTargetId) return;
+    const idsToCancel: (string | number)[] = cancelAllIds.length > 0
+      ? cancelAllIds
+      : (cancelTargetId ? [cancelTargetId] : []);
+    if (idsToCancel.length === 0) return;
     try {
       setCancelling(true);
       setCancelModalError(null);
@@ -90,41 +116,62 @@ export default function TrackOrderScreen() {
         ? Number(orderDetails.order.restaurant_id)
         : (selectedOutlet?.restaurant_id ? Number(selectedOutlet.restaurant_id) : undefined);
 
-      await orderApi.cancelOrder(cancelTargetId, restId);
+      // Cancel each id sequentially
+      let anyError: string | null = null;
+      for (const id of idsToCancel) {
+        try {
+          await orderApi.cancelOrder(id, restId);
+        } catch (err: any) {
+          const msg = String(err?.message || '');
+          if (msg.includes('409') || msg.toLowerCase().includes('preparing') || msg.toLowerCase().includes('already started')) {
+            anyError = `Round #${id} could not be cancelled — kitchen already started.`;
+          } else {
+            anyError = msg || `Unable to cancel round #${id}.`;
+          }
+        }
+      }
 
       // Instantly reflect cancelled status in order state
       setOrderDetails((prev: any) => prev ? {
         ...prev,
-        order: { ...prev.order, status: 'CANCELLED' }
+        order: { ...prev.order, status: idsToCancel.some(id => String(id) === String(prev.order?.id)) ? 'CANCELLED' : prev.order?.status }
       } : null);
 
       if (isDineIn) {
-        // Optimistically update round status in sessionStore
+        // Optimistically update round status in sessionStore for all cancelled ids
         const currentRounds = sessionStore.orderRounds || [];
         const updatedRounds = currentRounds.map((r: any) => {
-          if (String(r.id) === String(cancelTargetId) || String(r.orderId).includes(String(cancelTargetId))) {
+          if (idsToCancel.some(id => String(r.id) === String(id) || String(r.orderId).includes(String(id)))) {
             return { ...r, status: 'CANCELLED' };
           }
           return r;
         });
-        const newTotal = updatedRounds
-          .filter((r: any) => (r.status || '').toUpperCase() !== 'CANCELLED')
-          .reduce((sum: number, r: any) => sum + (Number(r.total_amount) || 0), 0);
+        const nonCancelled = updatedRounds.filter((r: any) => (r.status || '').toUpperCase() !== 'CANCELLED');
+        const newTotal = nonCancelled.reduce((sum: number, r: any) => sum + (Number(r.total_amount) || 0), 0);
 
-        sessionStore.syncSessionDetails({
-          sessionId: sessionStore.sessionDbId || 0,
-          sessionUid: sessionStore.sessionUid || '',
-          tableNumber: sessionStore.tableNumber || '',
-          totalAmount: newTotal,
-          paymentStatus: sessionStore.paymentStatus || 'Pending',
-          orders: updatedRounds,
-          allItems: sessionStore.orderedItems || [],
-        });
+        if (nonCancelled.length === 0) {
+          useLiveOrderStore.getState().clearLiveOrder();
+          sessionStore.completeDineInSession();
+        } else {
+          sessionStore.syncSessionDetails({
+            sessionId: sessionStore.sessionDbId || 0,
+            sessionUid: sessionStore.sessionUid || '',
+            tableNumber: sessionStore.tableNumber || '',
+            totalAmount: newTotal,
+            paymentStatus: sessionStore.paymentStatus || 'Pending',
+            orders: updatedRounds,
+            allItems: sessionStore.orderedItems || [],
+          });
+        }
 
         const sKey = sessionStore.sessionDbId || sessionStore.sessionUid || params.sessionId || params.sessionUid;
         if (sKey) {
           dineInSessionApi.getSessionDetails(sKey, restId || 1).then((sData: any) => {
             if (sData?.success) {
+              const activeBackRounds = (sData.orders || []).filter((o: any) => (o.status || '').toUpperCase() !== 'CANCELLED');
+              if (activeBackRounds.length === 0) {
+                useLiveOrderStore.getState().clearLiveOrder();
+              }
               sessionStore.syncSessionDetails({
                 sessionId: sData.sessionId,
                 sessionUid: sData.sessionUid,
@@ -137,9 +184,15 @@ export default function TrackOrderScreen() {
             }
           }).catch(() => {});
         }
+      } else {
+        useLiveOrderStore.getState().clearLiveOrder();
       }
 
-      setCancelModalVisible(false);
+      if (anyError) {
+        setCancelModalError(anyError);
+      } else {
+        setCancelModalVisible(false);
+      }
     } catch (err: any) {
       const msg = err.message || '';
       if (msg.includes('409') || msg.toLowerCase().includes('preparing') || msg.toLowerCase().includes('already started')) {
@@ -152,7 +205,14 @@ export default function TrackOrderScreen() {
     }
   };
 
-  const renderCancelModal = () => (
+  const renderCancelModal = () => {
+    const isMultiCancel = cancelAllIds.length > 0;
+    const displayOrderLabel = isMultiCancel
+      ? `Cancel All (${cancelAllIds.length} round${cancelAllIds.length > 1 ? 's' : ''})`
+      : (cancelTargetLabel || (params.orderId ? `#${params.orderId}` : `Order #${cancelTargetId || ''}`));
+    const displayAmount = cancelTargetAmount;
+
+    return (
     <Modal
       visible={cancelModalVisible}
       transparent={true}
@@ -169,22 +229,26 @@ export default function TrackOrderScreen() {
           </View>
 
           {/* Title & Subtitle */}
-          <Text style={styles.cancelTitle}>Cancel Order?</Text>
+          <Text style={styles.cancelTitle}>
+            {isMultiCancel ? 'Cancel All Rounds?' : 'Cancel Order?'}
+          </Text>
           <Text style={styles.cancelSubtitle}>
-            Are you sure you want to cancel this order? Once the kitchen starts cooking, cancellation is no longer possible.
+            {isMultiCancel
+              ? `This will cancel all ${cancelAllIds.length} pending round(s). Once the kitchen starts cooking, cancellation is not possible.`
+              : 'Are you sure you want to cancel this order? Once the kitchen starts cooking, cancellation is no longer possible.'}
           </Text>
 
           {/* Order Info Badge */}
           <View style={styles.cancelOrderInfoRow}>
             <View style={styles.cancelOrderInfoLeft}>
               <Ionicons name="receipt-outline" size={15} color="#4B5563" style={{ marginRight: 6 }} />
-              <Text style={styles.cancelOrderInfoText}>
-                {params.orderId ? `#${params.orderId}` : `Order #${cancelTargetId || ''}`}
+              <Text style={styles.cancelOrderInfoText} numberOfLines={1}>
+                {displayOrderLabel}
               </Text>
             </View>
-            <Text style={styles.cancelOrderInfoPrice}>
-              Rs. {orderDetails?.order?.total_amount != null ? Number(orderDetails.order.total_amount) : ''}
-            </Text>
+            {displayAmount != null && displayAmount > 0 && (
+              <Text style={styles.cancelOrderInfoPrice}>Rs. {displayAmount}</Text>
+            )}
           </View>
 
           {/* Error Message if any */}
@@ -226,6 +290,7 @@ export default function TrackOrderScreen() {
       </View>
     </Modal>
   );
+  };
 
   useEffect(() => {
     if (!liveDbOrderId && !params.orderId && !params.dbOrderId) {
@@ -392,7 +457,7 @@ export default function TrackOrderScreen() {
                   dbOrderId: fetchId.toString(),
                   cart: params.cart,
                   totalAmount: orderData.order.total_amount?.toString() || '0',
-                  paymentMethod: orderData.order.payment_method || 'COD',
+                  paymentMethod: orderData.order.payment_method || 'UPI',
                 },
               });
               return;
@@ -419,6 +484,13 @@ export default function TrackOrderScreen() {
             }
 
           } else {
+            // Stop polling and clear live order if order is cancelled
+            if (rawOS === 'CANCELLED') {
+              useLiveOrderStore.getState().clearLiveOrder();
+              if (intervalId) clearInterval(intervalId);
+              return;
+            }
+
             // Non-delivery: handle completion redirect
             const isCompleted = rawOS === 'SERVED' || rawOS === 'COMPLETED' || rawOS === 'DELIVERED';
             const shouldRedirect = isOrderDineIn ? (isCompleted && paymentStatus === 'PAID') : isCompleted;
@@ -489,7 +561,13 @@ export default function TrackOrderScreen() {
   let alertTitle = "Hang tight!";
   let alertSub = "Your order is in the queue";
 
-  if (rawStatus === 'PENDING') {
+  if (rawStatus === 'CANCELLED') {
+    statusLevel = -1;
+    bannerTitle = "Order Cancelled";
+    bannerSub = "This order was cancelled before cooking started";
+    alertTitle = "Order Cancelled";
+    alertSub = "This order is cancelled and will not be prepared";
+  } else if (rawStatus === 'PENDING') {
     statusLevel = 1;
   } else if (rawStatus === 'CONFIRMED') {
     statusLevel = 2;
@@ -849,16 +927,15 @@ export default function TrackOrderScreen() {
 
     const getDineInSubtotal = () => {
       const sessionStore = useDineInSessionStore.getState();
-      if (sessionStore.isActive) {
-        if (sessionStore.orderRounds && sessionStore.orderRounds.length > 0) {
-          const nonCancelled = sessionStore.orderRounds.filter((r: any) => (r.status || '').toUpperCase() !== 'CANCELLED');
-          if (nonCancelled.length > 0) {
-            return nonCancelled.reduce((sum: number, r: any) => sum + (Number(r.total_amount) || 0), 0);
-          }
-        }
-        if (sessionStore.totalAmount > 0) {
-          return sessionStore.totalAmount;
-        }
+      if (sessionStore.orderRounds && sessionStore.orderRounds.length > 0) {
+        const nonCancelled = sessionStore.orderRounds.filter((r: any) => (r.status || '').toUpperCase() !== 'CANCELLED');
+        return nonCancelled.reduce((sum: number, r: any) => sum + (Number(r.total_amount) || 0), 0);
+      }
+      if (sessionStore.isActive && sessionStore.totalAmount > 0) {
+        return sessionStore.totalAmount;
+      }
+      if ((orderDetails?.order?.status || '').toUpperCase() === 'CANCELLED') {
+        return 0;
       }
       if (orderDetails?.order?.total_amount != null && Number(orderDetails.order.total_amount) > 0) {
         return Number(orderDetails.order.total_amount);
@@ -1044,7 +1121,11 @@ export default function TrackOrderScreen() {
                           <Text style={styles.roundCancelNote}>Kitchen not started yet</Text>
                           <TouchableOpacity
                             style={styles.roundCancelBtn}
-                            onPress={() => openCancelModal(roundObj.id)}
+                            onPress={() => openCancelModal(
+                              roundObj.id,
+                              Number(roundObj.total_amount || 0),
+                              `Round ${roundObj.round || rIdx + 1} (#${roundObj.orderId})`
+                            )}
                             activeOpacity={0.7}
                           >
                             <Ionicons name="close-circle-outline" size={13} color="#DC2626" style={{ marginRight: 4 }} />
@@ -1090,24 +1171,31 @@ export default function TrackOrderScreen() {
             )}
 
             {/* Modern Cancellation Option Card */}
-            {['PENDING', 'CONFIRMED'].includes(dineInStatusRaw) && (
-              <View style={styles.cancellationBannerCard}>
-                <View style={{ marginBottom: 10 }}>
-                  <Text style={styles.cancellationBannerTitle}>Need to cancel?</Text>
-                  <Text style={styles.cancellationBannerSub}>
-                    Cancellation is available until the kitchen starts cooking.
-                  </Text>
+            {['PENDING', 'CONFIRMED'].includes(dineInStatusRaw) && (() => {
+              const cancellableRounds = (sessionStore.orderRounds || []).filter(
+                (r: any) => ['PENDING', 'CONFIRMED'].includes((r.status || '').toUpperCase())
+              );
+              if (cancellableRounds.length === 0) return null;
+              const totalCancellable = cancellableRounds.reduce((s: number, r: any) => s + Number(r.total_amount || 0), 0);
+              return (
+                <View style={styles.cancellationBannerCard}>
+                  <View style={{ marginBottom: 10 }}>
+                    <Text style={styles.cancellationBannerTitle}>Need to cancel the whole order?</Text>
+                    <Text style={styles.cancellationBannerSub}>
+                      Cancel all {cancellableRounds.length} pending round{cancellableRounds.length > 1 ? 's' : ''} (Rs. {totalCancellable}) before kitchen preparation begins.
+                    </Text>
+                  </View>
+                  <TouchableOpacity
+                    style={[styles.cancelActionBtn, { alignSelf: 'flex-start' }]}
+                    onPress={openCancelAllModal}
+                    activeOpacity={0.7}
+                  >
+                    <Ionicons name="close-circle-outline" size={15} color="#DC2626" style={{ marginRight: 4 }} />
+                    <Text style={styles.cancelActionBtnText}>Cancel Entire Order</Text>
+                  </TouchableOpacity>
                 </View>
-                <TouchableOpacity
-                  style={[styles.cancelActionBtn, { alignSelf: 'flex-start' }]}
-                  onPress={() => openCancelModal(orderDetails?.order?.id || params.dbOrderId)}
-                  activeOpacity={0.7}
-                >
-                  <Ionicons name="close-circle-outline" size={15} color="#DC2626" style={{ marginRight: 4 }} />
-                  <Text style={styles.cancelActionBtnText}>Cancel Order</Text>
-                </TouchableOpacity>
-              </View>
-            )}
+              );
+            })()}
 
           </View>
         </ScrollView>
@@ -1119,36 +1207,38 @@ export default function TrackOrderScreen() {
             <Text style={styles.dineInCallStaffText}>Call Staff</Text>
           </TouchableOpacity>
 
-          <TouchableOpacity style={styles.dineInPayBillBtn} onPress={() => {
-            const rawId = params.orderId || (orderDetails?.order?.id ? `ORD-${String(orderDetails.order.id).padStart(6, '0')}` : 'ORD-000000');
-            const dbId = params.dbOrderId || (orderDetails?.order?.id ? String(orderDetails.order.id) : '');
-            const tot = getDineInSubtotal();
-            const sessionStore = useDineInSessionStore.getState();
+          {dineInStatusRaw !== 'CANCELLED' && getDineInSubtotal() > 0 && (
+            <TouchableOpacity style={styles.dineInPayBillBtn} onPress={() => {
+              const rawId = params.orderId || (orderDetails?.order?.id ? `ORD-${String(orderDetails.order.id).padStart(6, '0')}` : 'ORD-000000');
+              const dbId = params.dbOrderId || (orderDetails?.order?.id ? String(orderDetails.order.id) : '');
+              const tot = getDineInSubtotal();
+              const sessionStore = useDineInSessionStore.getState();
 
-            // Extract all items from active, non-cancelled rounds
-            const nonCancelledItems = sessionStore.isActive && sessionStore.orderRounds && sessionStore.orderRounds.length > 0
-              ? sessionStore.orderRounds
-                  .filter((r: any) => (r.status || '').toUpperCase() !== 'CANCELLED')
-                  .flatMap((r: any) => r.items || [])
-              : orderItemsList;
+              // Extract all items from active, non-cancelled rounds
+              const nonCancelledItems = sessionStore.isActive && sessionStore.orderRounds && sessionStore.orderRounds.length > 0
+                ? sessionStore.orderRounds
+                    .filter((r: any) => (r.status || '').toUpperCase() !== 'CANCELLED')
+                    .flatMap((r: any) => r.items || [])
+                : orderItemsList;
 
-            router.push({
-              pathname: '/(checkout)/payment',
-              params: {
-                isDineInSettlement: 'true',
-                orderId: rawId,
-                dbOrderId: dbId,
-                sessionId: String(sessionStore.sessionDbId || params.sessionId || ''),
-                sessionUid: sessionStore.sessionUid || params.sessionUid || '',
-                tableNumber: activeTable,
-                totalAmount: String(tot),
-                cartItems: JSON.stringify(nonCancelledItems),
-              }
-            });
-          }}>
-            <Ionicons name="card-outline" size={16} color="#fff" />
-            <Text style={styles.dineInPayBillText}>Pay Bill</Text>
-          </TouchableOpacity>
+              router.push({
+                pathname: '/(checkout)/payment',
+                params: {
+                  isDineInSettlement: 'true',
+                  orderId: rawId,
+                  dbOrderId: dbId,
+                  sessionId: String(sessionStore.sessionDbId || params.sessionId || ''),
+                  sessionUid: sessionStore.sessionUid || params.sessionUid || '',
+                  tableNumber: activeTable,
+                  totalAmount: String(tot),
+                  cartItems: JSON.stringify(nonCancelledItems),
+                }
+              });
+            }}>
+              <Ionicons name="card-outline" size={16} color="#fff" />
+              <Text style={styles.dineInPayBillText}>Pay Bill</Text>
+            </TouchableOpacity>
+          )}
           
           <TouchableOpacity style={styles.dineInOrderMoreBtn} onPress={() => {
             router.push({
@@ -1171,6 +1261,7 @@ export default function TrackOrderScreen() {
   return (
     <View style={styles.container}>
       <StatusBar barStyle="dark-content" backgroundColor="#fafafa" />
+      {/* Main Track Order Scroll Area */}
       <ScrollView contentContainerStyle={{ paddingBottom: 100, paddingTop: insets.top + 10 }} showsVerticalScrollIndicator={false}>
         
         {/* Header */}
@@ -1179,83 +1270,107 @@ export default function TrackOrderScreen() {
            <Text style={styles.pageTitle}>Order Status</Text>
         </View>
 
-        {/* Progress Tracker Box */}
-        <View style={styles.trackerBox}>
-          <View style={styles.stepsRow}>
-             {stepLabels.map((label, idx) => {
-               const step = idx + 1;
-               const isActiveOrDone = statusLevel >= step;
-               const iconName = stepIcons[idx] as any;
-               return (
-                 <View key={step} style={styles.stepItem}>
-                   <View style={[styles.stepCircle, getStepStyle(step)]}>
-                      <Ionicons name={iconName} size={16} color={getStepIconColor(step)} />
-                   </View>
-                   <Text style={[styles.stepLabel, { color: getStepTextColor(step) }]}>
-                     {label.replace(' ', '\n')}
-                   </Text>
-                 </View>
-               )
-             })}
-          </View>
-        </View>
-
-        <View style={{ paddingHorizontal: 16 }}>
-          {/* Status Banner Card */}
-          <View style={styles.bannerCard}>
-             <View style={styles.bannerIconCircle}>
-                <Ionicons name="flame" size={20} color="#ff4500" />
-             </View>
-             <View style={{ marginLeft: 12, flex: 1 }}>
-                <Text style={styles.bannerTitle}>{bannerTitle}</Text>
-                <Text style={styles.bannerSub}>{bannerSub}</Text>
-             </View>
-          </View>
-
-          {/* Estimated Prep Box */}
-          <View style={styles.prepBox}>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.prepBoxLabel}>Estimated preparation</Text>
-              <Text style={styles.prepBoxTime}>Ready in ~8 minutes</Text>
-            </View>
-            <Ionicons name="time-outline" size={24} color="#fff" />
-          </View>
-
-          {/* Alert Box */}
-          <View style={styles.alertBox}>
-            <Ionicons name="warning-outline" size={20} color="#000" />
-            <View style={{ marginLeft: 10 }}>
-              <Text style={styles.alertBoxTitle}>{alertTitle}</Text>
-              <Text style={styles.alertBoxSub}>{alertSub}</Text>
-            </View>
-          </View>
-
-          {/* Takeaway Cancellation Option Card */}
-          {['PENDING', 'CONFIRMED'].includes((orderDetails?.order?.status || '').toUpperCase()) && (
-            <View style={styles.cancellationBannerCard}>
-              <View style={{ marginBottom: 10 }}>
-                <Text style={styles.cancellationBannerTitle}>Need to cancel?</Text>
-                <Text style={styles.cancellationBannerSub}>
-                  Cancellation is available before the kitchen starts preparing your takeaway order.
+        {rawStatus === 'CANCELLED' ? (
+          <View style={{ paddingHorizontal: 16, marginTop: 10 }}>
+            <View style={styles.cancelledStatusBanner}>
+              <View style={styles.cancelledIconWrap}>
+                <Ionicons name="close-circle" size={28} color="#DC2626" />
+              </View>
+              <View style={{ flex: 1, marginLeft: 12 }}>
+                <Text style={styles.cancelledStatusTitle}>Order Cancelled</Text>
+                <Text style={styles.cancelledStatusSub}>
+                  This takeaway order was cancelled before kitchen preparation began.
                 </Text>
               </View>
-              <TouchableOpacity
-                style={[styles.cancelActionBtn, { alignSelf: 'flex-start' }]}
-                onPress={() => openCancelModal(orderDetails?.order?.id || params.dbOrderId)}
-                activeOpacity={0.7}
-              >
-                <Ionicons name="close-circle-outline" size={15} color="#DC2626" style={{ marginRight: 4 }} />
-                <Text style={styles.cancelActionBtnText}>Cancel Takeaway Order</Text>
-              </TouchableOpacity>
             </View>
-          )}
 
-          {/* Dish Prep Status */}
-          <Text style={styles.dishSectionTitle}>Dish preparation status</Text>
-          <View style={styles.dishList}>
-            {orderItemsList.map((item: any, idx: number) => renderItemStatus(item, idx))}
+            {/* Dish List */}
+            <Text style={styles.dishSectionTitle}>Ordered Dishes</Text>
+            <View style={styles.dishList}>
+              {orderItemsList.map((item: any, idx: number) => renderItemStatus(item, idx))}
+            </View>
           </View>
-        </View>
+        ) : (
+          <>
+            {/* Progress Tracker Box */}
+            <View style={styles.trackerBox}>
+              <View style={styles.stepsRow}>
+                 {stepLabels.map((label, idx) => {
+                   const step = idx + 1;
+                   const isActiveOrDone = statusLevel >= step;
+                   const iconName = stepIcons[idx] as any;
+                   return (
+                     <View key={step} style={styles.stepItem}>
+                       <View style={[styles.stepCircle, getStepStyle(step)]}>
+                          <Ionicons name={iconName} size={16} color={getStepIconColor(step)} />
+                       </View>
+                       <Text style={[styles.stepLabel, { color: getStepTextColor(step) }]}>
+                         {label.replace(' ', '\n')}
+                       </Text>
+                     </View>
+                   )
+                 })}
+              </View>
+            </View>
+
+            <View style={{ paddingHorizontal: 16 }}>
+              {/* Status Banner Card */}
+              <View style={styles.bannerCard}>
+                 <View style={styles.bannerIconCircle}>
+                    <Ionicons name="flame" size={20} color="#ff4500" />
+                 </View>
+                 <View style={{ marginLeft: 12, flex: 1 }}>
+                    <Text style={styles.bannerTitle}>{bannerTitle}</Text>
+                    <Text style={styles.bannerSub}>{bannerSub}</Text>
+                 </View>
+              </View>
+
+              {/* Estimated Prep Box */}
+              <View style={styles.prepBox}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.prepBoxLabel}>Estimated preparation</Text>
+                  <Text style={styles.prepBoxTime}>Ready in ~8 minutes</Text>
+                </View>
+                <Ionicons name="time-outline" size={24} color="#fff" />
+              </View>
+
+              {/* Alert Box */}
+              <View style={styles.alertBox}>
+                <Ionicons name="warning-outline" size={20} color="#000" />
+                <View style={{ marginLeft: 10 }}>
+                  <Text style={styles.alertBoxTitle}>{alertTitle}</Text>
+                  <Text style={styles.alertBoxSub}>{alertSub}</Text>
+                </View>
+              </View>
+
+              {/* Takeaway Cancellation Option Card */}
+              {['PENDING', 'CONFIRMED'].includes((orderDetails?.order?.status || '').toUpperCase()) && (
+                <View style={styles.cancellationBannerCard}>
+                  <View style={{ marginBottom: 10 }}>
+                    <Text style={styles.cancellationBannerTitle}>Need to cancel?</Text>
+                    <Text style={styles.cancellationBannerSub}>
+                      Cancellation is available before the kitchen starts preparing your takeaway order.
+                    </Text>
+                  </View>
+                  <TouchableOpacity
+                    style={[styles.cancelActionBtn, { alignSelf: 'flex-start' }]}
+                    onPress={() => openCancelModal(orderDetails?.order?.id || params.dbOrderId)}
+                    activeOpacity={0.7}
+                  >
+                    <Ionicons name="close-circle-outline" size={15} color="#DC2626" style={{ marginRight: 4 }} />
+                    <Text style={styles.cancelActionBtnText}>Cancel Takeaway Order</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+
+              {/* Dish Prep Status */}
+              <Text style={styles.dishSectionTitle}>Dish preparation status</Text>
+              <View style={styles.dishList}>
+                {orderItemsList.map((item: any, idx: number) => renderItemStatus(item, idx))}
+              </View>
+            </View>
+          </>
+        )}
         
       </ScrollView>
 

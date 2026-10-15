@@ -41,14 +41,14 @@ export function AnimatedSplashOverlay() {
   return (
     <Animated.View style={[styles.splashContainer, { opacity: opacityAnim }]}>
       <ImageBackground
-        source={require('@/assets/images/logo-glow.png')}
+        source={require('../../../assets/images/logo-glow.png')}
         style={styles.background}
         blurRadius={10}
       >
         <View style={styles.overlay}>
           <Animated.View style={{ transform: [{ scale: logoScale }], alignItems: 'center' }}>
             <Image
-              source={require('@/assets/images/Dataudupi-Title.jpg')}
+              source={require('../../../assets/images/Dataudupi-Title.jpg')}
               style={styles.logo}
               resizeMode="contain"
             />
@@ -65,7 +65,7 @@ export function AnimatedSplashOverlay() {
             ]}
           >
             <Image
-              source={require('@/assets/images/chef_mascot.png')}
+              source={require('../../../assets/images/chef_mascot.png')}
               style={styles.mascot}
               resizeMode="contain"
             />

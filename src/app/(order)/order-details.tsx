@@ -10,12 +10,13 @@ import {
   StatusBar,
   Alert,
 } from 'react-native';
-import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { orderApi } from '../../services/apiService';
 import { getFullImageUrl } from '../../constants/api';
-import { useCartStore, useRestaurantStore } from '../../store';
+import { useCartStore, useRestaurantStore, useOrderStore, useLiveOrderStore } from '../../store';
+import { useDineInSessionStore } from '../../store/useDineInSessionStore';
 import BottomNavBar from '../../components/layout/BottomNavBar';
 import { formatOrderDate } from '../../utils/dateUtils';
 
@@ -23,7 +24,6 @@ const DEFAULT_FOOD_IMAGE = 'https://images.unsplash.com/photo-1589301760014-d929
 
 export default function OrderDetailsScreen() {
   const router = useRouter();
-  const insets = useSafeAreaInsets();
   const params = useLocalSearchParams<{
     orderId?: string;
     isHistorical?: string;
@@ -59,12 +59,14 @@ export default function OrderDetailsScreen() {
     }
     return [];
   });
-  const [loading, setLoading] = useState(!initialData);
+  const [loading, setLoading] = useState(() => {
+    const rawId = params.orderId || initialData?.dbOrderId || initialData?.dbId || initialData?.id;
+    return Boolean(!initialData && rawId);
+  });
 
   useEffect(() => {
     const rawId = params.orderId || initialData?.dbOrderId || initialData?.dbId || initialData?.id;
     if (!rawId) {
-      setLoading(false);
       return;
     }
 
@@ -104,11 +106,21 @@ export default function OrderDetailsScreen() {
   const handleInvoice = () => {
     if (!order) return;
     router.push({
-      pathname: '/invoice',
+      pathname: '/(checkout)/invoice' as any,
       params: {
         dbOrderId: String(order.id || order.dbOrderId || params.orderId || ''),
-        orderId: order.orderId || order.id || '',
-        orderType: order.order_type || 'Dine In',
+        orderId: String(order.orderId || (order.id ? `ORD-${order.id}` : '') || ''),
+        billNo: order.bill_no ? String(order.bill_no) : '',
+        orderType: String(order.order_type || 'Dine In'),
+        tableNumber: String(order.table_number || order.table || ''),
+        finalTotal: String(order.total_amount || order.finalTotal || order.total || ''),
+        subtotal: String(order.subtotal || ''),
+        discountAmount: String(order.discount_amount || '0'),
+        discountCode: String(order.discount_code || ''),
+        paymentMethod: String(order.payment_method || 'UPI'),
+        mobileNumber: String(order.customer_phone || order.phone || ''),
+        customerName: String(order.customer_name || 'REGISTERED'),
+        cartData: JSON.stringify(items || []),
       },
     });
   };
@@ -159,6 +171,34 @@ export default function OrderDetailsScreen() {
               await orderApi.cancelOrder(rawId, restId);
               Alert.alert("Order Cancelled", "Your order has been cancelled successfully.");
               setOrder((prev: any) => prev ? { ...prev, status: 'CANCELLED' } : null);
+              useLiveOrderStore.getState().clearLiveOrder();
+              useOrderStore.getState().clearCurrentOrder();
+
+              const dStore = useDineInSessionStore.getState();
+              if (dStore.isActive) {
+                const currentRounds = dStore.orderRounds || [];
+                const updatedRounds = currentRounds.map((r: any) => {
+                  if (String(r.id) === String(rawId) || String(r.orderId).includes(String(rawId))) {
+                    return { ...r, status: 'CANCELLED' };
+                  }
+                  return r;
+                });
+                const nonCancelled = updatedRounds.filter((r: any) => (r.status || '').toUpperCase() !== 'CANCELLED');
+                if (nonCancelled.length === 0) {
+                  dStore.completeDineInSession();
+                } else {
+                  const newTotal = nonCancelled.reduce((sum: number, r: any) => sum + (Number(r.total_amount) || 0), 0);
+                  dStore.syncSessionDetails({
+                    sessionId: dStore.sessionDbId || 0,
+                    sessionUid: dStore.sessionUid || '',
+                    tableNumber: dStore.tableNumber || '',
+                    totalAmount: newTotal,
+                    paymentStatus: dStore.paymentStatus || 'Pending',
+                    orders: updatedRounds,
+                    allItems: dStore.orderedItems || [],
+                  });
+                }
+              }
             } catch (err: any) {
               const msg = err.message || '';
               if (msg.includes('409') || msg.toLowerCase().includes('preparing') || msg.toLowerCase().includes('already started')) {
@@ -231,12 +271,11 @@ export default function OrderDetailsScreen() {
   const deliveryFee = isDelivery ? (Number(order?.delivery_fee) || 0) : 0;
   const discountAmount = Number(order?.discount_amount || 0);
   const taxesAmount = useMemo(() => {
-    if (order?.gst_amount !== undefined && order?.gst_amount !== null) {
+    if (order?.gst_amount !== undefined && order?.gst_amount !== null && Number(order.gst_amount) > 0) {
       return Number(order.gst_amount);
     }
-    // Standard 5% GST on food subtotal
-    return Number((subtotal * 0.05).toFixed(2));
-  }, [order, subtotal]);
+    return 0;
+  }, [order]);
 
   const grandTotal = useMemo(() => {
     const rawTotal = Number(order?.total_amount || order?.total || 0);
@@ -392,10 +431,12 @@ export default function OrderDetailsScreen() {
           </View>
         )}
 
-        <View style={styles.billRow}>
-          <Text style={styles.billLabel}>Taxes & charges</Text>
-          <Text style={styles.billValue}>Rs. {taxesAmount.toFixed(2)}</Text>
-        </View>
+        {taxesAmount > 0 && (
+          <View style={styles.billRow}>
+            <Text style={styles.billLabel}>Taxes & charges</Text>
+            <Text style={styles.billValue}>Rs. {taxesAmount.toFixed(2)}</Text>
+          </View>
+        )}
 
         <View style={styles.grandTotalRow}>
           <Text style={styles.grandTotalLabel}>Grand Total</Text>

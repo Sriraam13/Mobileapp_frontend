@@ -91,6 +91,7 @@ interface DineInSessionState {
     tableNumber: string;
     totalAmount: number;
     paymentStatus: 'Pending' | 'Paid';
+    status?: string;
     orders: DineInOrderRound[];
     allItems?: DineInItem[];
   }) => void;
@@ -225,15 +226,23 @@ export const useDineInSessionStore = create<DineInSessionState>()(
       syncSessionDetails: (sessionData) =>
         set((state) => {
           const items = sessionData.allItems || sessionData.orders.flatMap((o) => o.items || []);
-          const latestOrder = sessionData.orders[sessionData.orders.length - 1];
+          const activeRounds = (sessionData.orders || []).filter(
+            (o) => (o.status || '').toUpperCase() !== 'CANCELLED'
+          );
+          const allCancelled = (sessionData.orders || []).length > 0 && activeRounds.length === 0;
+          const isSessionActive = sessionData.paymentStatus !== 'Paid' && !allCancelled && (sessionData.status || '').toUpperCase() !== 'CANCELLED';
+          const latestOrder = activeRounds.length > 0
+            ? activeRounds[activeRounds.length - 1]
+            : (sessionData.orders && sessionData.orders.length > 0 ? sessionData.orders[sessionData.orders.length - 1] : null);
+
           return {
-            isActive: sessionData.paymentStatus !== 'Paid',
+            isActive: isSessionActive,
             tableNumber: sessionData.tableNumber || state.tableNumber,
             sessionDbId: sessionData.sessionId,
             sessionUid: sessionData.sessionUid,
             sessionId: sessionData.sessionUid,
-            totalAmount: sessionData.totalAmount,
-            unpaidTotal: sessionData.paymentStatus === 'Paid' ? 0 : sessionData.totalAmount,
+            totalAmount: isSessionActive ? sessionData.totalAmount : 0,
+            unpaidTotal: sessionData.paymentStatus === 'Paid' || allCancelled ? 0 : sessionData.totalAmount,
             paymentStatus: sessionData.paymentStatus,
             orderRounds: sessionData.orders,
             orderedItems: items.length > 0 ? items : state.orderedItems,

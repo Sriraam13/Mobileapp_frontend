@@ -24,7 +24,7 @@ async function fetchWithTimeout(url: string, options: RequestInit = {}, timeoutM
       try {
         const errorData = await res.json();
         message = errorData.detail || errorData.message || message;
-      } catch (e) {
+      } catch {
         message = res.statusText || message;
       }
       const error: any = new Error(message);
@@ -53,21 +53,38 @@ export const customerApi = {
       body: JSON.stringify(payload),
     }),
 
+  /** POST /api/v1/public/customers/auth/request-otp */
+  requestOtp: (payload: { phone: string; purpose?: string }) =>
+    fetchWithTimeout(`${API_BASE_URL}/api/v1/public/customers/auth/request-otp`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    }),
+
+  /** POST /api/v1/public/customers/auth/verify-otp */
+  verifyOtp: (payload: { phone: string; challenge_id: string; otp: string }) =>
+    fetchWithTimeout(`${API_BASE_URL}/api/v1/public/customers/auth/verify-otp`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    }),
+
   /** POST /api/v1/public/customers/signup */
-  signup: (payload: { name: string; phone: string; otp?: string }) =>
+  signup: (payload: { name: string; phone: string; otp?: string; challenge_id?: string; verification_token?: string }) =>
     fetchWithTimeout(`${API_BASE_URL}/api/v1/public/customers/signup`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     }),
 
-  /** POST /api/v1/public/customers/login — phone-based OTP-less login */
-  login: (payload: { phone: string; otp?: string }) =>
+  /** POST /api/v1/public/customers/login */
+  login: (payload: { phone: string; otp?: string; challenge_id?: string; verification_token?: string }) =>
     fetchWithTimeout(`${API_BASE_URL}/api/v1/public/customers/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     }),
+
 
   /** GET /api/v1/public/customers/{customerId}/loyalty */
   getLoyalty: (customerId: number) =>
@@ -150,12 +167,44 @@ export const customerApi = {
 };
 
 
+interface CacheEntry<T> {
+  timestamp: number;
+  promise?: Promise<T>;
+  data?: T;
+}
+const apiCache = new Map<string, CacheEntry<any>>();
+
+async function cachedFetch<T>(key: string, fetcher: () => Promise<T>, ttlMs = 60000, forceRefresh = false): Promise<T> {
+  const now = Date.now();
+  const existing = apiCache.get(key);
+  if (!forceRefresh && existing) {
+    if (existing.data && (now - existing.timestamp < ttlMs)) {
+      return existing.data;
+    }
+    if (existing.promise) {
+      return existing.promise;
+    }
+  }
+
+  const promise = fetcher().then((res) => {
+    apiCache.set(key, { timestamp: Date.now(), data: res });
+    return res;
+  }).catch((err) => {
+    apiCache.delete(key);
+    throw err;
+  });
+
+  apiCache.set(key, { timestamp: now, promise });
+  return promise;
+}
+
 /**
  * Restaurant Endpoints
  */
 export const restaurantApi = {
   /** GET /api/v1/public/restaurants */
-  getRestaurants: () => fetchWithTimeout(`${API_BASE_URL}/api/v1/public/restaurants`),
+  getRestaurants: (force = false) =>
+    cachedFetch('restaurants', () => fetchWithTimeout(`${API_BASE_URL}/api/v1/public/restaurants`), 120000, force),
 };
 
 /**
@@ -163,18 +212,28 @@ export const restaurantApi = {
  */
 export const menuApi = {
   /** GET /api/v1/public/menu/categories */
-  getCategories: (restaurantId: number) => {
+  getCategories: (restaurantId: number, force = false) => {
     if (!restaurantId) throw new Error("restaurantId is required");
-    return fetchWithTimeout(
-      `${API_BASE_URL}/api/v1/public/menu/categories?restaurant_id=${restaurantId}`,
+    return cachedFetch(
+      `categories_${restaurantId}`,
+      () => fetchWithTimeout(`${API_BASE_URL}/api/v1/public/menu/categories?restaurant_id=${restaurantId}`),
+      60000,
+      force
     );
   },
 
   /** GET /api/v1/public/menu/items */
-  getItems: (restaurantId: number) => {
+  getItems: (restaurantId: number, force = false) => {
     if (!restaurantId) throw new Error("restaurantId is required");
-    return fetchWithTimeout(`${API_BASE_URL}/api/v1/public/menu/items?restaurant_id=${restaurantId}`);
+    return cachedFetch(
+      `items_${restaurantId}`,
+      () => fetchWithTimeout(`${API_BASE_URL}/api/v1/public/menu/items?restaurant_id=${restaurantId}`),
+      60000,
+      force
+    );
   },
+
+  clearCache: () => apiCache.clear(),
 };
 
 /**
@@ -220,36 +279,46 @@ export const orderApi = {
     return res;
   },
 
-  /** GET /api/v1/public/orders/{dbOrderId} — fetch full order details (no auth needed) */
-  getOrderDetails: (dbOrderId: string, restaurantId?: number) => {
-    const q = restaurantId ? `?restaurant_id=${restaurantId}` : '';
+  /** GET /api/v1/public/orders/{dbOrderId} — fetch full order details */
+  getOrderDetails: (dbOrderId: string, restaurantId?: number, sessionUid?: string) => {
+    const params = new URLSearchParams();
+    if (restaurantId) params.append('restaurant_id', String(restaurantId));
+    if (sessionUid) params.append('session_uid', sessionUid);
+    const q = params.toString() ? `?${params.toString()}` : '';
     return fetchWithTimeout(
       `${API_BASE_URL}/api/v1/public/orders/${encodeURIComponent(dbOrderId)}${q}`,
     );
   },
 
-  /** GET /api/orders/{dbOrderId} — fetch order status (same data, backward-compat alias) */
-  getOrderStatus: (dbOrderId: string, restaurantId: number) => {
+  /** GET /api/orders/{dbOrderId} — fetch order status */
+  getOrderStatus: (dbOrderId: string, restaurantId: number, sessionUid?: string) => {
     if (!restaurantId) throw new Error("restaurantId is required");
+    const params = new URLSearchParams();
+    params.append('restaurant_id', String(restaurantId));
+    if (sessionUid) params.append('session_uid', sessionUid);
+    const q = `?${params.toString()}`;
     return fetchWithTimeout(
-      `${API_BASE_URL}/api/orders/${encodeURIComponent(dbOrderId)}?restaurant_id=${restaurantId}`,
+      `${API_BASE_URL}/api/orders/${encodeURIComponent(dbOrderId)}${q}`,
     );
   },
 
   /** POST /api/orders/{orderId}/cancel — cancel whole order before kitchen preparation */
-  cancelOrder: (orderId: number | string, restaurantId?: number, reason?: string) => {
+  cancelOrder: (orderId: number | string, restaurantId?: number, reason?: string, sessionUid?: string) => {
     const rawStr = String(orderId || '').trim();
     const cleanId = rawStr.replace(/\D/g, '') || rawStr;
     const q = restaurantId ? `?restaurant_id=${restaurantId}` : '';
     return fetchWithTimeout(`${API_BASE_URL}/api/orders/${encodeURIComponent(cleanId)}/cancel${q}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ reason: reason || 'Customer requested cancellation' }),
+      body: JSON.stringify({ 
+        reason: reason || 'Customer requested cancellation',
+        session_uid: sessionUid
+      }),
     });
   },
 
   /** POST /api/orders/{orderId}/items/{itemId}/cancel — cancel item before preparation */
-  cancelOrderItem: (orderId: number | string, itemId: number | string, restaurantId?: number, reason?: string) => {
+  cancelOrderItem: (orderId: number | string, itemId: number | string, restaurantId?: number, reason?: string, sessionUid?: string) => {
     const rawOrderStr = String(orderId || '').trim();
     const cleanOrderId = rawOrderStr.replace(/\D/g, '') || rawOrderStr;
     const rawItemStr = String(itemId || '').trim();
@@ -258,17 +327,24 @@ export const orderApi = {
     return fetchWithTimeout(`${API_BASE_URL}/api/orders/${encodeURIComponent(cleanOrderId)}/items/${encodeURIComponent(cleanItemId)}/cancel${q}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ reason: reason || 'Customer requested cancellation' }),
+      body: JSON.stringify({ 
+        reason: reason || 'Customer requested cancellation',
+        session_uid: sessionUid
+      }),
     });
   },
 
   /** GET /api/orders/{orderId}/cancellation-eligibility */
-  checkCancellationEligibility: (orderId: number | string, restaurantId?: number) => {
+  checkCancellationEligibility: (orderId: number | string, restaurantId?: number, sessionUid?: string) => {
     const rawStr = String(orderId || '').trim();
     const cleanId = rawStr.replace(/\D/g, '') || rawStr;
-    const q = restaurantId ? `?restaurant_id=${restaurantId}` : '';
+    const params = new URLSearchParams();
+    if (restaurantId) params.append('restaurant_id', String(restaurantId));
+    if (sessionUid) params.append('session_uid', sessionUid);
+    const q = params.toString() ? `?${params.toString()}` : '';
     return fetchWithTimeout(`${API_BASE_URL}/api/orders/${encodeURIComponent(cleanId)}/cancellation-eligibility${q}`);
   },
+
 
   /** GET /api/v1/public/customers/orders?phone=...&restaurant_id=... — order history */
   getCustomerOrders: (phone: string, restaurantId: number) => {
@@ -348,10 +424,10 @@ export const dineInSessionApi = {
     }),
 
   /** GET /api/dine-in/session/{sessionId}/details?restaurant_id=... */
-  getSessionDetails: (sessionId: string | number, restaurantId: number) => {
-    if (!restaurantId) throw new Error("restaurantId is required");
+  getSessionDetails: (sessionId: string | number, restaurantId?: number) => {
+    const restId = restaurantId || 1;
     return fetchWithTimeout(
-      `${API_BASE_URL}/api/dine-in/session/${encodeURIComponent(sessionId)}/details?restaurant_id=${restaurantId}`
+      `${API_BASE_URL}/api/dine-in/session/${encodeURIComponent(sessionId)}/details?restaurant_id=${restId}`
     );
   },
 

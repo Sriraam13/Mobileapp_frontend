@@ -1,5 +1,5 @@
-import React, { useEffect, useRef } from 'react';
-import { View, Text, StyleSheet, Animated, TouchableOpacity, Platform } from 'react-native';
+import React, { useEffect, useState, useRef, useCallback } from 'react';
+import { View, Text, StyleSheet, Animated, TouchableOpacity } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 
@@ -19,9 +19,26 @@ export default function AddToCartToast({
   bottomOffset = 80,
 }: AddToCartToastProps) {
   const router = useRouter();
-  const translateY = useRef(new Animated.Value(60)).current;
-  const opacity = useRef(new Animated.Value(0)).current;
+  const [translateY] = useState(() => new Animated.Value(60));
+  const [opacity] = useState(() => new Animated.Value(0));
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const handleClose = useCallback(() => {
+    Animated.parallel([
+      Animated.timing(translateY, {
+        toValue: 40,
+        duration: 200,
+        useNativeDriver: true,
+      }),
+      Animated.timing(opacity, {
+        toValue: 0,
+        duration: 200,
+        useNativeDriver: true,
+      }),
+    ]).start(() => {
+      onDismiss();
+    });
+  }, [onDismiss, opacity, translateY]);
 
   useEffect(() => {
     if (visible) {
@@ -62,24 +79,7 @@ export default function AddToCartToast({
     return () => {
       if (timerRef.current) clearTimeout(timerRef.current);
     };
-  }, [visible, itemName]);
-
-  const handleClose = () => {
-    Animated.parallel([
-      Animated.timing(translateY, {
-        toValue: 40,
-        duration: 200,
-        useNativeDriver: true,
-      }),
-      Animated.timing(opacity, {
-        toValue: 0,
-        duration: 200,
-        useNativeDriver: true,
-      }),
-    ]).start(() => {
-      onDismiss();
-    });
-  };
+  }, [visible, itemName, handleClose, opacity, translateY]);
 
   const handleViewCart = () => {
     handleClose();

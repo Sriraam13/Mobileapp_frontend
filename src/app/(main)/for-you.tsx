@@ -42,11 +42,12 @@ interface RecommendationsData {
 
 export default function ForYou() {
   const router = useRouter();
-  const { phone, customerId } = useAuthStore();
-  const { selectedOutlet } = useRestaurantStore();
+  const phone = useAuthStore(s => s.phone);
+  const customerId = useAuthStore(s => s.customerId);
+  const selectedOutlet = useRestaurantStore(s => s.selectedOutlet);
   const { favorites, setFavorites, addFavorite, removeFavorite, isFavorite } = useFavoritesStore();
-  const { addItem } = useCartStore();
-  const cartItemCount = useCartStore((state) => state.getItemCount());
+  const addItem = useCartStore(s => s.addItem);
+  const cartItemCount = useCartStore((state) => Object.values(state.items).reduce((acc, item) => acc + (item?.quantity || 0), 0));
 
   const [data, setData] = useState<RecommendationsData | null>(null);
   const [loading, setLoading] = useState(true);

@@ -1,7 +1,7 @@
 import { View, Text, StyleSheet, TextInput, ScrollView, TouchableOpacity, FlatList, Platform, StatusBar, Image, Modal, BackHandler, Alert, ActivityIndicator, RefreshControl } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useVoiceAgentStore, useAuthStore, useOrderStore, useCartStore, useLiveOrderStore, useDineInSessionStore, useRestaurantStore } from '../../store';
 import { menuApi, orderApi } from '../../services/apiService';
@@ -9,14 +9,121 @@ import { getFullImageUrl } from '../../constants/api';
 import DineInActiveBanner from '../../components/DineInActiveBanner';
 import ViewCartButton from '../../components/layout/ViewCartButton';
 
+interface MenuItemCardProps {
+  item: any;
+  count: number;
+  onSelect: (item: any) => void;
+  onIncrement: (id: any, item?: any) => void;
+  onDecrement: (id: any) => void;
+}
+
+const itemStyles = StyleSheet.create({
+  card: {
+    width: '48%',
+    backgroundColor: '#fcfcfc',
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+    overflow: 'hidden',
+  },
+  imagePlaceholder: {
+    height: 120,
+    width: '100%',
+    backgroundColor: '#e0e0e0',
+  },
+  itemImage: {
+    width: '100%',
+    height: '100%',
+  },
+  cardContent: { padding: 12 },
+  cardHeaderRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 4 },
+  itemName: { fontSize: 12, fontWeight: 'bold', color: '#000', flex: 1, marginRight: 4 },
+  availBadge: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#00a01d', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 10 },
+  unavailBadge: { backgroundColor: '#ff0000' },
+  availDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: '#fff', marginRight: 4 },
+  unavailDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: '#fff', marginRight: 4 },
+  availText: { fontSize: 10, fontWeight: '500', color: '#fff' },
+  unavailText: { color: '#fff' },
+  cardFooter: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  price: { fontSize: 10, color: '#777' },
+  priceVal: { fontSize: 12, fontWeight: 'bold', color: '#000' },
+  stepper: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#f9f9f9', borderRadius: 4, borderWidth: 1, borderColor: '#f4f4f4', padding: 2 },
+  stepBtnMinus: { backgroundColor: '#f2f2f2', padding: 2, borderRadius: 2 },
+  stepBtnPlus: { backgroundColor: '#ff3400', padding: 2, borderRadius: 2 },
+  stepBtnDisabled: { opacity: 0.5 },
+  stepVal: { fontSize: 12, color: '#000', width: 24, textAlign: 'center' },
+});
+
+const MenuItemCard = React.memo(function MenuItemCard({
+  item,
+  count,
+  onSelect,
+  onIncrement,
+  onDecrement,
+}: MenuItemCardProps) {
+  return (
+    <TouchableOpacity activeOpacity={0.9} onPress={() => onSelect(item)} style={itemStyles.card}>
+      <View style={itemStyles.imagePlaceholder}>
+        <Image source={{ uri: item.image }} style={itemStyles.itemImage} resizeMode="cover" />
+      </View>
+      <View style={itemStyles.cardContent}>
+        <View style={itemStyles.cardHeaderRow}>
+          <Text style={itemStyles.itemName} numberOfLines={1}>{item.name}</Text>
+          <View style={[itemStyles.availBadge, !item.available && itemStyles.unavailBadge]}>
+            <View style={[itemStyles.availDot, !item.available && itemStyles.unavailDot]} />
+            <Text style={[itemStyles.availText, !item.available && itemStyles.unavailText]}>
+              {item.available ? 'Available' : 'Not Available'}
+            </Text>
+          </View>
+        </View>
+        
+        <View style={itemStyles.cardFooter}>
+          <Text style={itemStyles.price}>Rs. <Text style={itemStyles.priceVal}>{item.price}</Text></Text>
+          <View style={itemStyles.stepper}>
+            <TouchableOpacity 
+              style={[itemStyles.stepBtnMinus, (!item.available || count === 0) && itemStyles.stepBtnDisabled]}
+              onPress={() => onDecrement(item.id)}
+              disabled={!item.available || count === 0}
+            >
+              <Ionicons name="remove" size={16} color={(!item.available || count === 0) ? "#ccc" : "#f87171"} />
+            </TouchableOpacity>
+            <Text style={itemStyles.stepVal}>{count}</Text>
+            <TouchableOpacity 
+              style={[itemStyles.stepBtnPlus, !item.available && itemStyles.stepBtnDisabled]}
+              onPress={() => onIncrement(item.id, item)}
+              disabled={!item.available}
+            >
+              <Ionicons name="add" size={16} color="#fff" />
+            </TouchableOpacity>
+          </View>
+        </View>
+      </View>
+    </TouchableOpacity>
+  );
+}, (prev, next) => {
+  return prev.item === next.item && prev.count === next.count;
+});
+
 export default function App() {
   const router = useRouter();
-  const { phone } = useAuthStore();
+  const phone = useAuthStore(s => s.phone);
   const dineInSession = useDineInSessionStore();
   const [isPlacingOrder, setIsPlacingOrder] = useState(false);
   const params = useLocalSearchParams<{ orderType?: string; tableNumber?: string; categoryId?: string; categoryName?: string; search?: string }>();
   const insets = useSafeAreaInsets();
-  const { items: cart, addItem, removeItem, incrementQuantity, decrementQuantity, orderType, setOrderType, tableNumber, setTableNumber, getItemCount, getSubtotal, clearCart } = useCartStore();
+  
+  const cart = useCartStore(s => s.items);
+  const orderType = useCartStore(s => s.orderType);
+  const tableNumber = useCartStore(s => s.tableNumber);
+  const addItem = useCartStore(s => s.addItem);
+  const removeItem = useCartStore(s => s.removeItem);
+  const incrementQuantity = useCartStore(s => s.incrementQuantity);
+  const decrementQuantity = useCartStore(s => s.decrementQuantity);
+  const setOrderType = useCartStore(s => s.setOrderType);
+  const setTableNumber = useCartStore(s => s.setTableNumber);
+  const getItemCount = useCartStore(s => s.getItemCount);
+  const getSubtotal = useCartStore(s => s.getSubtotal);
+  const clearCart = useCartStore(s => s.clearCart);
   
   useEffect(() => {
     const onBackPress = () => {
@@ -59,6 +166,7 @@ export default function App() {
       setTableNumber(params.tableNumber as string);
     }
     if (params.search !== undefined) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setSearchQuery(params.search as string);
     }
     if (params.categoryName || params.categoryId) {
@@ -66,7 +174,7 @@ export default function App() {
       setActiveCat(newCat);
       setActiveRegion("All Regions");
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+   
   }, [params.orderType, params.tableNumber, params.search, params.categoryName, params.categoryId, setOrderType, setTableNumber]);
 
   // Automatically scroll horizontal category tabs to bring the active category into view
@@ -110,7 +218,7 @@ export default function App() {
 
   const [refreshing, setRefreshing] = useState(false);
   
-  const { selectedOutlet } = useRestaurantStore();
+  const selectedOutlet = useRestaurantStore(s => s.selectedOutlet);
   const restaurantId = selectedOutlet?.restaurant_id;
 
   useEffect(() => {
@@ -258,11 +366,11 @@ export default function App() {
     }
   };
 
-  const fetchMenu = async () => {
+  const fetchMenu = async (forceRefresh = false) => {
       if (!restaurantId) return;
       try {
             // Fetch items first so we know which categories are actually used
-            const itemData = await menuApi.getItems(restaurantId);
+            const itemData = await menuApi.getItems(restaurantId, forceRefresh);
             const formattedItems = itemData.map((item: any) => ({
                 id: item.id,
                 name: item.name,
@@ -275,7 +383,7 @@ export default function App() {
             
             const activeCategoryIds = new Set(formattedItems.map((i: any) => i.category));
 
-            const catData = await menuApi.getCategories(restaurantId);
+            const catData = await menuApi.getCategories(restaurantId, forceRefresh);
             
             const validRegions = new Set<string>();
             const rawCategoryMap = new Map<string, { id: string; label: string; region?: string }>();
@@ -340,11 +448,11 @@ export default function App() {
 
   const onRefresh = async () => {
     setRefreshing(true);
-    await fetchMenu();
+    await fetchMenu(true);
     setRefreshing(false);
   };
 
-  const handleIncrement = (id: any, itemObj?: any) => {
+  const handleIncrement = useCallback((id: any, itemObj?: any) => {
     const existing = cart[id] || cart[String(id)] || cart[Number(id)];
     if (existing) {
       incrementQuantity(existing.id);
@@ -356,14 +464,14 @@ export default function App() {
         addItem({ id: item.id, name: item.name, price: item.price, image: item.image, category: item.category, desc: item.desc, quantity: 1 });
       }
     }
-  };
+  }, [cart, selectedItem, menuItems, incrementQuantity, addItem]);
 
-  const handleDecrement = (id: any) => {
+  const handleDecrement = useCallback((id: any) => {
     const existing = cart[id] || cart[String(id)] || cart[Number(id)];
     if (existing) {
       decrementQuantity(existing.id);
     }
-  };
+  }, [cart, decrementQuantity]);
 
   const renderHeader = () => (
     <View style={styles.header}>
@@ -399,98 +507,73 @@ export default function App() {
     </View>
   );
 
-  const renderMenuItem = ({ item }: { item: any }) => {
+  const renderMenuItem = useCallback(({ item }: { item: any }) => {
     const count = cart[item.id]?.quantity ?? 0;
-    
     return (
-      <TouchableOpacity activeOpacity={0.9} onPress={() => setSelectedItem(item)} style={styles.card}>
-        <View style={styles.imagePlaceholder}>
-          <Image source={{ uri: item.image }} style={styles.itemImage} resizeMode="cover" />
-        </View>
-        <View style={styles.cardContent}>
-          <View style={styles.cardHeaderRow}>
-            <Text style={styles.itemName}>{item.name}</Text>
-            <View style={[styles.availBadge, !item.available && styles.unavailBadge]}>
-              <View style={[styles.availDot, !item.available && styles.unavailDot]} />
-              <Text style={[styles.availText, !item.available && styles.unavailText]}>
-                {item.available ? 'Available' : 'Not Available'}
-              </Text>
-            </View>
-          </View>
-          
-          <View style={styles.cardFooter}>
-            <Text style={styles.price}>Rs. <Text style={styles.priceVal}>{item.price}</Text></Text>
-            <View style={styles.stepper}>
-              <TouchableOpacity 
-                style={[styles.stepBtnMinus, (!item.available || count === 0) && styles.stepBtnDisabled]}
-                onPress={() => handleDecrement(item.id)}
-                disabled={!item.available || count === 0}
-              >
-                <Ionicons name="remove" size={16} color={(!item.available || count === 0) ? "#ccc" : "#f87171"} />
-              </TouchableOpacity>
-              <Text style={styles.stepVal}>{count}</Text>
-              <TouchableOpacity 
-                style={[styles.stepBtnPlus, !item.available && styles.stepBtnDisabled]}
-                onPress={() => handleIncrement(item.id)}
-                disabled={!item.available}
-              >
-                <Ionicons name="add" size={16} color="#fff" />
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
-      </TouchableOpacity>
+      <MenuItemCard
+        item={item}
+        count={count}
+        onSelect={setSelectedItem}
+        onIncrement={handleIncrement}
+        onDecrement={handleDecrement}
+      />
     );
-  };
+  }, [cart, handleIncrement, handleDecrement]);
 
-  const filteredItems = menuItems.filter(item => {
-    const itemCat = allCategories.find(c => c.id === item.category);
-    
-    // Region match
-    if (activeRegion !== "All Regions") {
-      if (itemCat?.region !== activeRegion) return false;
-    }
-    
-    // Category match by label
-    if (activeCat && activeCat.toLowerCase() !== "all") {
-      const targetCat = activeCat.toLowerCase().replace(/varities/i, 'varieties').trim();
-      const currentCat = (itemCat?.label || '').toLowerCase().replace(/varities/i, 'varieties').trim();
-      if (currentCat !== targetCat && !currentCat.includes(targetCat) && !targetCat.includes(currentCat)) return false;
-    }
-    
-    // Search match
-    if (searchQuery !== "") {
-      if (!item.name.toLowerCase().includes(searchQuery.toLowerCase())) return false;
-    }
-    
-    // Availability Filter
-    if (availabilityFilter === "Available Only") {
-      if (!item.available) return false;
-    }
-    
-    return true;
-  }).sort((a, b) => {
-    if (priceSort === "Low to High") return a.price - b.price;
-    if (priceSort === "High to Low") return b.price - a.price;
-    return 0; // Default
-  });
+  const keyExtractor = useCallback((i: any) => i.id.toString(), []);
+
+  const filteredItems = useMemo(() => {
+    return menuItems.filter(item => {
+      const itemCat = allCategories.find(c => c.id === item.category);
+      
+      // Region match
+      if (activeRegion !== "All Regions") {
+        if (itemCat?.region !== activeRegion) return false;
+      }
+      
+      // Category match by label
+      if (activeCat && activeCat.toLowerCase() !== "all") {
+        const targetCat = activeCat.toLowerCase().replace(/varities/i, 'varieties').trim();
+        const currentCat = (itemCat?.label || '').toLowerCase().replace(/varities/i, 'varieties').trim();
+        if (currentCat !== targetCat && !currentCat.includes(targetCat) && !targetCat.includes(currentCat)) return false;
+      }
+      
+      // Search match
+      if (searchQuery.trim() !== "") {
+        if (!item.name.toLowerCase().includes(searchQuery.toLowerCase())) return false;
+      }
+      
+      // Availability Filter
+      if (availabilityFilter === "Available Only") {
+        if (!item.available) return false;
+      }
+      
+      return true;
+    }).sort((a, b) => {
+      if (priceSort === "Low to High") return a.price - b.price;
+      if (priceSort === "High to Low") return b.price - a.price;
+      return 0; // Default
+    });
+  }, [menuItems, allCategories, activeRegion, activeCat, searchQuery, availabilityFilter, priceSort]);
 
   // Deduplicate categories by clean label for tab display
-  const seenTabLabels = new Set<string>();
-  const uniqueCategoryTabs: { id: string; label: string; region?: string }[] = [];
-  allCategories.forEach(cat => {
-    if (activeRegion !== "All Regions" && cat.region !== activeRegion) return;
-    const lower = cat.label.toLowerCase();
-    if (!seenTabLabels.has(lower)) {
-      seenTabLabels.add(lower);
-      uniqueCategoryTabs.push(cat);
-    }
-  });
+  const categoriesToShow = useMemo(() => {
+    const seenTabLabels = new Set<string>();
+    const uniqueCategoryTabs: { id: string; label: string; region?: string }[] = [];
+    allCategories.forEach(cat => {
+      if (activeRegion !== "All Regions" && cat.region !== activeRegion) return;
+      const lower = cat.label.toLowerCase();
+      if (!seenTabLabels.has(lower)) {
+        seenTabLabels.add(lower);
+        uniqueCategoryTabs.push(cat);
+      }
+    });
 
-  const categoriesToShow = [
-    { id: "all", label: "All" },
-    ...uniqueCategoryTabs
-  ];
+    return [
+      { id: "all", label: "All" },
+      ...uniqueCategoryTabs
+    ];
+  }, [allCategories, activeRegion]);
 
   const cartItemCount = getItemCount();
 
@@ -569,11 +652,16 @@ export default function App() {
         <FlatList 
           ref={flatListRef}
           data={filteredItems}
-          keyExtractor={i => i.id.toString()}
+          keyExtractor={keyExtractor}
           numColumns={2}
           contentContainerStyle={styles.gridContainer}
           columnWrapperStyle={styles.gridRow}
           renderItem={renderMenuItem}
+          extraData={cart}
+          initialNumToRender={8}
+          maxToRenderPerBatch={8}
+          windowSize={5}
+          removeClippedSubviews={Platform.OS !== 'web'}
           showsVerticalScrollIndicator={false}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={['#ff4500']} />}
         />

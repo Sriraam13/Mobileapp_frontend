@@ -6,30 +6,56 @@ import * as Sharing from 'expo-sharing';
 import * as FileSystem from 'expo-file-system/legacy';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRestaurantStore } from '../../store';
 import { orderApi } from '../../services/apiService';
 import { formatDateTime } from '../../utils/dateUtils';
+
+const getAssetBase64 = async (assetRequire: any) => {
+  try {
+    const source = Image.resolveAssetSource(assetRequire);
+    if (!source || !source.uri) return '';
+
+    const uri = source.uri;
+    if (Platform.OS === 'web') {
+      return uri;
+    }
+
+    const isPng = uri.toLowerCase().includes('.png');
+    const mimeType = isPng ? 'image/png' : 'image/jpeg';
+
+    if (uri.startsWith('http://') || uri.startsWith('https://')) {
+      const cacheDir = FileSystem.cacheDirectory || FileSystem.documentDirectory;
+      const ext = isPng ? 'png' : 'jpg';
+      const localPath = `${cacheDir}temp_asset_${Date.now()}.${ext}`;
+      const result = await FileSystem.downloadAsync(uri, localPath);
+      const base64 = await FileSystem.readAsStringAsync(result.uri, {
+        encoding: 'base64',
+      });
+      try {
+        await FileSystem.deleteAsync(localPath, { idempotent: true });
+      } catch { }
+      return `data:${mimeType};base64,${base64}`;
+    } else {
+      const base64 = await FileSystem.readAsStringAsync(uri, {
+        encoding: 'base64',
+      });
+      return `data:${mimeType};base64,${base64}`;
+    }
+  } catch (err) {
+    console.warn("Could not load asset as base64", err);
+    return Image.resolveAssetSource(assetRequire)?.uri || '';
+  }
+};
 
 export default function InvoiceScreen() {
   const { selectedOutlet } = useRestaurantStore();
   const router = useRouter();
   const params = useLocalSearchParams();
   const [downloading, setDownloading] = useState(false);
-  const [rating, setRating] = useState<string | null>(null);
-  const [branchName, setBranchName] = useState('Data Udipi — Mugalivakkam');
-  const [branchAddress, setBranchAddress] = useState('Mount-Poonamallee Road, Mugalivakkam, Chennai 600125');
+  const branchName = selectedOutlet?.name || 'Data Udipi — Mugalivakkam';
+  const branchAddress = selectedOutlet?.address || 'Mount-Poonamallee Road, Mugalivakkam, Chennai 600125';
   const [orderData, setOrderData] = useState<any>(null);
   const [loadingOrder, setLoadingOrder] = useState(Boolean(params.dbOrderId));
-
-  useEffect(() => {
-    if (selectedOutlet) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      if (selectedOutlet.name) setBranchName(selectedOutlet.name);
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      if (selectedOutlet.address) setBranchAddress(selectedOutlet.address);
-    }
-  }, [selectedOutlet]);
 
   useEffect(() => {
     const dbOrderId = (params.dbOrderId as string | undefined) || (params.orderId ? (params.orderId as string).replace(/\D/g, '') : undefined);
@@ -48,36 +74,53 @@ export default function InvoiceScreen() {
   const backendOrder = orderData?.order || {};
   const currentBillNo = backendOrder.bill_no || (params.billNo as string) || null;
   const orderId = (params.orderId as string) || (backendOrder.id ? `ORD-${backendOrder.id}` : 'Invoice');
-  const subtotalVal = orderData?.items?.reduce((sum: number, item: any) => sum + Number(item.price || item.unit_price || 0) * Number(item.quantity || 1), 0) || parseFloat((params.subtotal as string) || '0');
-  const finalTotalVal = Number(backendOrder.total_amount ?? parseFloat((params.finalTotal as string) || '0'));
-  const discountAmountVal = Number(backendOrder.discount_amount ?? parseFloat((params.discountAmount as string) || '0'));
-  const deliveryFeeVal = Number(backendOrder.delivery_fee || 0);
-  const packagingFeeVal = Number(backendOrder.packaging_fee || 0);
-  const tipAmountVal = Number(backendOrder.tip_amount || 0);
-  const gstAmountVal = Number(backendOrder.gst_amount || 0);
-  const deliveryAddress = backendOrder.delivery_address_snapshot;
-  const discountCodeStr = (params.discountCode as string) || '';
-  const mobileNumber = (params.mobileNumber as string) || 'WALK-IN';
-  const customerName = (params.customerName as string) || (mobileNumber === 'WALK-IN' ? 'WALK-IN' : 'REGISTERED');
-  const paymentMethod = backendOrder.payment_method || (params.paymentMethod as string) || 'UPI';
-  const orderType = (params.orderType as string) || 'Dine In';
 
+  const orderItems: any[] = Array.isArray(orderData?.items) ? orderData.items : [];
   let cartData: any[] = [];
   try {
     if (params.cartData) {
-      cartData = typeof params.cartData === 'string' ? JSON.parse(params.cartData) : params.cartData;
+      const parsed = typeof params.cartData === 'string' ? JSON.parse(params.cartData) : params.cartData;
+      if (Array.isArray(parsed)) {
+        cartData = parsed;
+      }
     }
   } catch (e) {
     console.error("Error parsing cart data", e);
   }
-  if (orderData?.items) cartData = orderData.items;
+  const effectiveItems: any[] = orderItems.length > 0 ? orderItems : cartData;
 
-  const totalQty = cartData.reduce((acc, item) => acc + parseInt(item.quantity || item.qty || 1, 10), 0);
+  const subtotalVal = effectiveItems.length > 0
+    ? effectiveItems.reduce((sum: number, item: any) => sum + (Number(item?.price || item?.unit_price || 0) * Number(item?.quantity || item?.qty || 1)), 0)
+    : (parseFloat((params.subtotal as string) || '0') || 0);
+
+  const discountAmountVal = Number(backendOrder.discount_amount ?? (parseFloat((params.discountAmount as string) || '0') || 0)) || 0;
+  const deliveryFeeVal = Number(backendOrder.delivery_fee || (parseFloat((params.deliveryFee as string) || '0') || 0)) || 0;
+  const packagingFeeVal = Number(backendOrder.packaging_fee || (parseFloat((params.packagingFee as string) || '0') || 0)) || 0;
+  const tipAmountVal = Number(backendOrder.tip_amount || (parseFloat((params.tipAmount as string) || '0') || 0)) || 0;
+  const gstAmountVal = Number(backendOrder.gst_amount || (parseFloat((params.gstAmount as string) || '0') || 0)) || 0;
+
+  // Authoritative total calculated from items and fees
+  const calculatedTotal = Math.max(0, subtotalVal + deliveryFeeVal + packagingFeeVal + tipAmountVal + gstAmountVal - discountAmountVal);
+  const fallbackTotal = Number(backendOrder.total_amount ?? (parseFloat((params.finalTotal as string) || '0') || 0)) || 0;
+  const finalTotalVal = calculatedTotal > 0 ? calculatedTotal : fallbackTotal;
+
+  const rawDeliveryAddress = backendOrder.delivery_address_snapshot || backendOrder.delivery_address || params.deliveryAddress;
+  const deliveryAddressStr = rawDeliveryAddress
+    ? (typeof rawDeliveryAddress === 'string' ? rawDeliveryAddress : (rawDeliveryAddress.address || rawDeliveryAddress.full_address || ''))
+    : '';
+  const discountCodeStr = String((params.discountCode as string) || backendOrder.discount_code || '');
+  const mobileNumber = String((params.mobileNumber as string) || backendOrder.customer_phone || 'WALK-IN');
+  const customerName = String((params.customerName as string) || (mobileNumber === 'WALK-IN' ? 'WALK-IN' : 'REGISTERED'));
+  const paymentMethod = String(backendOrder.payment_method || (params.paymentMethod as string) || 'UPI');
+  const orderType = String((params.orderType as string) || backendOrder.order_type || 'Dine In');
+
+  const totalQty = effectiveItems.reduce((acc: number, item: any) => acc + (parseInt(item?.quantity || item?.qty || 1, 10) || 1), 0);
   const invoiceDate = backendOrder.created_at || backendOrder.delivered_at;
   const formattedDate = invoiceDate ? formatDateTime(invoiceDate) : 'Date unavailable';
 
-  const totalGstValFromOrder = gstAmountVal || (finalTotalVal / 1.05 * 0.05);
-  const netTaxableVal = finalTotalVal - totalGstValFromOrder;
+  // No GST / CGST / SGST is deducted or added unless explicitly returned in gstAmountVal
+  const totalGstValFromOrder = gstAmountVal > 0 ? gstAmountVal : 0;
+  const netTaxableVal = Math.max(0, finalTotalVal - totalGstValFromOrder);
   const cgstVal = totalGstValFromOrder / 2;
   const sgstVal = cgstVal;
   const totalGstVal = totalGstValFromOrder;
@@ -90,319 +133,340 @@ export default function InvoiceScreen() {
   const sgst = sgstVal.toFixed(2);
   const totalGst = totalGstVal.toFixed(2);
 
-  const getAssetBase64 = async (assetRequire: any) => {
-    try {
-      const source = Image.resolveAssetSource(assetRequire);
-      if (!source || !source.uri) return '';
+  const tableNumber = String(backendOrder.table_number || (params.tableNumber as string) || (params.table as string) || '');
 
-      const uri = source.uri;
-      if (Platform.OS === 'web') {
-        return uri;
-      }
 
-      const isPng = uri.toLowerCase().includes('.png');
-      const mimeType = isPng ? 'image/png' : 'image/jpeg';
-
-      if (uri.startsWith('http://') || uri.startsWith('https://')) {
-        const cacheDir = FileSystem.cacheDirectory || FileSystem.documentDirectory;
-        const ext = isPng ? 'png' : 'jpg';
-        // eslint-disable-next-line react-hooks/purity
-        const localPath = `${cacheDir}temp_asset_${Math.random().toString(36).substring(7)}.${ext}`;
-        const result = await FileSystem.downloadAsync(uri, localPath);
-        const base64 = await FileSystem.readAsStringAsync(result.uri, {
-          encoding: 'base64',
-        });
-        try {
-          await FileSystem.deleteAsync(localPath, { idempotent: true });
-        } catch (e) { }
-        return `data:${mimeType};base64,${base64}`;
-      } else {
-        const base64 = await FileSystem.readAsStringAsync(uri, {
-          encoding: 'base64',
-        });
-        return `data:${mimeType};base64,${base64}`;
-      }
-    } catch (err) {
-      console.warn("Could not load asset as base64", err);
-      return Image.resolveAssetSource(assetRequire)?.uri || '';
-    }
-  };
 
   const generatePDF = async () => {
     setDownloading(true);
     try {
-      const bannerBase64 = await getAssetBase64(require('../../../assets/images/frontpage_bg.png'));
       const logoBase64 = await getAssetBase64(require('../../../assets/images/udupi-banner.png'));
       const qrCodeUrl = paymentMethod.toUpperCase() === 'UPI'
         ? `https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=upi://pay?pa=dataudipi@upi%26pn=DataUdipi%26am=${finalTotal}%26cu=INR`
         : `https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=CashPaymentConfirmed`;
 
       let itemsHtml = '';
-      cartData.forEach((item, idx) => {
-        const itemCode = 70000 + (item.menu_item_id || item.id || idx + 1);
-        const name = (item.name || item.itemName || 'ITEM').toUpperCase();
-        const price = parseFloat(item.price || 0).toFixed(2);
-        const qty = String(item.quantity || item.qty || 1).padStart(3, '0');
-        const netAmt = (parseFloat(item.price || 0) * parseInt(qty, 10)).toFixed(2);
+      effectiveItems.forEach((item) => {
+        const name = String(item?.name || item?.itemName || 'ITEM').toUpperCase();
+        const price = (parseFloat(item?.price || item?.unit_price || 0) || 0).toFixed(2);
+        const qty = String(parseInt(item?.quantity || item?.qty || 1, 10) || 1).padStart(2, '0');
+        const netAmt = ((parseFloat(item?.price || item?.unit_price || 0) || 0) * (parseInt(item?.quantity || item?.qty || 1, 10) || 1)).toFixed(2);
 
         itemsHtml += `
           <tr>
-            <td>${name}</td>
-            <td>₹${price}</td>
-            <td class="center">${qty}</td>
-            <td class="right">₹${netAmt}</td>
+            <td class="text-left font-medium">${name}</td>
+            <td class="text-right">₹${price}</td>
+            <td class="text-center">${qty}</td>
+            <td class="text-right font-bold">₹${netAmt}</td>
           </tr>
         `;
       });
 
+      const invoiceTitle = totalGstValFromOrder > 0 ? 'TAX INVOICE' : 'RETAIL INVOICE';
+      const cleanBranchTitle = (branchName || '').includes(' — ') ? branchName.split(' — ')[0].trim() : (branchName || '').trim();
+
       const htmlContent = `
+        <!DOCTYPE html>
         <html>
         <head>
+        <meta charset="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>${invoiceTitle} - ${currentBillNo || orderId}</title>
         <style>
+          @page {
+            size: auto;
+            margin: 10mm 12mm;
+          }
+          * {
+            box-sizing: border-box;
+            -webkit-print-color-adjust: exact;
+            print-color-adjust: exact;
+          }
           body {
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-            color: #333;
-            margin: 0;
-            padding: 10px;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            color: #1e293b;
             background-color: #ffffff;
+            margin: 0;
+            padding: 12px;
             display: flex;
             justify-content: center;
           }
           .invoice-card {
-            background-color: #fff;
-            max-width: 450px;
             width: 100%;
-            padding: 16px;
-            box-sizing: border-box;
-          }
-          .banner {
-            position: relative;
-            height: 80px;
-            margin-bottom: 12px;
+            max-width: 500px;
+            margin: 0 auto;
+            padding: 20px 24px;
+            background: #ffffff;
+            border: 1px solid #e2e8f0;
             border-radius: 8px;
-            overflow: hidden;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            background-color: #ff5a1f;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.05);
           }
-          .banner-img {
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            object-fit: cover;
-            opacity: 0.9;
-          }
-          .banner-text {
-            position: relative;
-            z-index: 2;
-            color: #fff;
-            font-size: 13px;
-            font-weight: bold;
-            letter-spacing: 2px;
-            text-shadow: 1px 1px 3px rgba(0,0,0,0.8);
-          }
-          .logo-container {
+          .banner-tag {
+            background: linear-gradient(135deg, #ff5722 0%, #e64a19 100%);
+            color: #ffffff;
             text-align: center;
-            margin-bottom: 8px;
-          }
-          .logo-image {
-            max-width: 180px;
-            height: 35px;
-            object-fit: contain;
-          }
-          .brand-row {
-            display: flex;
-            align-items: flex-start;
-            margin-bottom: 12px;
+            padding: 7px 10px;
+            border-radius: 5px;
             font-size: 11px;
-            color: #444;
-            line-height: 1.4;
+            font-weight: 800;
+            letter-spacing: 2.5px;
+            text-transform: uppercase;
+            margin-bottom: 14px;
           }
-          .brand-name {
-            font-weight: bold;
-            margin-right: 8px;
-          }
-          .brand-address {
-            color: #000;
-            font-weight: bold;
-          }
-          .company-info {
+          .brand-header {
             text-align: center;
-            font-size: 10px;
-            color: #555;
             margin-bottom: 12px;
+          }
+          .brand-logo-img {
+            max-width: 200px;
+            height: 44px;
+            object-fit: contain;
+            margin-bottom: 4px;
+          }
+          .outlet-name {
+            font-size: 13px;
+            font-weight: 800;
+            color: #0f172a;
+            margin-bottom: 3px;
+          }
+          .outlet-address {
+            font-size: 11px;
+            color: #475569;
             line-height: 1.4;
+            max-width: 90%;
+            margin: 0 auto 5px auto;
           }
-          .company-name {
-            font-weight: bold;
-            font-size: 12px;
-            color: #111;
-            margin-bottom: 2px;
+          .company-details {
+            font-size: 10px;
+            color: #64748b;
+            line-height: 1.35;
           }
-          .divider {
-            border-top: 1px dashed #bbb;
-            margin: 10px 0;
+          .company-gstin {
+            font-size: 10.5px;
+            font-weight: 700;
+            color: #334155;
+            margin-top: 2px;
           }
-          .invoice-title {
+          .divider-dashed {
+            border: none;
+            border-top: 1px dashed #cbd5e1;
+            margin: 12px 0;
+          }
+          .invoice-type-badge {
             text-align: center;
-            font-weight: bold;
-            font-size: 15px;
-            letter-spacing: 1px;
-            color: #000;
             margin: 8px 0;
           }
-          .meta-container {
-            display: flex;
-            justify-content: space-between;
-            font-size: 11px;
-            color: #333;
-            margin-bottom: 8px;
-            line-height: 1.5;
+          .invoice-type-text {
+            display: inline-block;
+            font-size: 12px;
+            font-weight: 800;
+            letter-spacing: 1.5px;
+            color: #0f172a;
+            text-transform: uppercase;
+            padding: 3px 12px;
+            border: 1px solid #0f172a;
+            border-radius: 4px;
           }
-          .meta-left {
-            font-weight: bold;
-          }
-          .meta-right {
-            text-align: right;
-          }
-          .table {
+          .meta-table {
             width: 100%;
             border-collapse: collapse;
+            font-size: 11px;
+            line-height: 1.6;
+            margin: 8px 0;
+          }
+          .meta-table td {
+            vertical-align: top;
+            padding: 1px 0;
+          }
+          .meta-label {
+            color: #64748b;
+            font-weight: 500;
+          }
+          .meta-val {
+            color: #0f172a;
+            font-weight: 600;
+          }
+          .bill-highlight {
+            color: #16a34a;
+            font-weight: 800;
+            font-size: 12px;
+          }
+          .delivery-note {
+            background: #f8fafc;
+            border: 1px solid #e2e8f0;
+            border-radius: 4px;
+            padding: 6px 10px;
+            font-size: 10.5px;
+            color: #334155;
+            margin: 6px 0;
+          }
+          table.items-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 8px 0;
+            font-size: 11px;
+          }
+          table.items-table th {
+            padding: 7px 4px;
+            font-weight: 700;
+            color: #0f172a;
+            border-top: 1.5px solid #0f172a;
+            border-bottom: 1.5px solid #0f172a;
+            text-transform: uppercase;
+            font-size: 10px;
+            letter-spacing: 0.5px;
+          }
+          table.items-table td {
+            padding: 6px 4px;
+            color: #1e293b;
+            border-bottom: 1px dashed #e2e8f0;
+          }
+          table.items-table tr:last-child td {
+            border-bottom: 1.5px solid #0f172a;
+          }
+          .text-left { text-align: left; }
+          .text-center { text-align: center; }
+          .text-right { text-align: right; }
+          .font-medium { font-weight: 600; }
+          .font-bold { font-weight: 700; }
+          .totals-block {
             margin-top: 8px;
-          }
-          .table th {
             font-size: 11px;
-            font-weight: bold;
-            color: #000;
-            border-bottom: 1px dashed #bbb;
-            padding: 6px 0;
-            text-align: left;
           }
-          .table td {
-            font-size: 11px;
-            color: #333;
-            padding: 6px 0;
-            border-bottom: 1px solid #eee;
-          }
-          .table td.center, .table th.center {
-            text-align: center;
-          }
-          .table td.right, .table th.right {
-            text-align: right;
-          }
-          .totals-container {
-            margin-top: 12px;
-            display: flex;
-            flex-direction: column;
-            gap: 5px;
-          }
-          .total-row {
+          .totals-row {
             display: flex;
             justify-content: space-between;
-            font-size: 11px;
-            color: #444;
+            padding: 3px 0;
+            color: #334155;
           }
-          .total-row.bold {
-            font-weight: bold;
-            color: #000;
-            font-size: 13px;
-            margin-top: 3px;
+          .totals-row.discount {
+            color: #16a34a;
+            font-weight: 700;
           }
-          .payment-section {
-            margin-top: 12px;
-            font-size: 11px;
-            color: #333;
+          .grand-total-strip {
+            margin-top: 8px;
+            padding: 8px 10px;
+            background: #f8fafc;
+            border-top: 1.5px solid #0f172a;
+            border-bottom: 1.5px solid #0f172a;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
           }
-          .payment-title {
-            font-weight: bold;
-            text-align: center;
-            margin-bottom: 8px;
+          .grand-total-label {
             font-size: 12px;
-            color: #000;
+            font-weight: 800;
+            color: #0f172a;
+            letter-spacing: 0.5px;
+            text-transform: uppercase;
           }
-          .qr-section {
+          .grand-total-value {
+            font-size: 15px;
+            font-weight: 800;
+            color: #0f172a;
+          }
+          .payment-box {
+            margin-top: 10px;
+            background: #f8fafc;
+            border: 1px solid #e2e8f0;
+            border-radius: 5px;
+            padding: 8px 10px;
+            font-size: 11px;
+          }
+          .payment-heading {
+            font-weight: 700;
+            color: #0f172a;
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 4px;
+          }
+          .count-strip {
+            display: flex;
+            justify-content: space-between;
+            margin-top: 6px;
+            padding-top: 5px;
+            border-top: 1px dashed #cbd5e1;
+            font-size: 10px;
+            color: #475569;
+            font-weight: 600;
+          }
+          .qr-box {
             text-align: center;
-            margin: 15px 0;
+            margin: 14px 0 6px 0;
           }
-          .qr-image {
-            width: 120px;
-            height: 120px;
+          .qr-img {
+            width: 105px;
+            height: 105px;
+            border: 1px solid #e2e8f0;
+            padding: 3px;
+            border-radius: 4px;
           }
-          .terms {
-            text-align: center;
+          .qr-text {
             font-size: 9px;
-            color: #666;
-            line-height: 1.4;
+            color: #64748b;
+            margin-top: 4px;
+          }
+          .footer-box {
+            text-align: center;
+            font-size: 9.5px;
+            color: #64748b;
+            line-height: 1.45;
+            margin-top: 10px;
+          }
+          .footer-highlight {
+            font-weight: 700;
+            color: #0f172a;
+            font-size: 10.5px;
+            margin-top: 4px;
           }
         </style>
         </head>
         <body>
         <div class="invoice-card">
-          ${bannerBase64 ? `
-          <div class="banner">
-            <img src="${bannerBase64}" class="banner-img" />
-            <div class="banner-text">40 YEARS OF EXCELLENCE</div>
-          </div>
-          ` : ''}
+          <div class="banner-tag">40 YEARS OF EXCELLENCE</div>
           
-          ${logoBase64 ? `
-          <div class="logo-container">
-            <img src="${logoBase64}" class="logo-image" />
-          </div>
-          ` : ''}
-          
-          <div class="brand-row">
-            <span class="brand-name">${branchName.split(' — ')[0]} :</span>
-            <div style="flex: 1;">
-              <div class="brand-address">${branchAddress}</div>
-              <div style="display: flex; justify-content: flex-end; align-items: center; margin-top: 4px;">
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#ff4500" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                  <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path>
-                  <circle cx="12" cy="10" r="3"></circle>
-                </svg>
-                <span style="color: #ff4500; font-size: 10px; margin-left: 2px; font-weight: bold;">location</span>
-              </div>
-            </div>
+          <div class="brand-header">
+            ${logoBase64 ? `<img src="${logoBase64}" class="brand-logo-img" alt="Data Udipi" />` : ''}
+            <div class="outlet-name">${cleanBranchTitle}</div>
+            <div class="outlet-address">${branchAddress}</div>
+            <div class="company-details">Data Udipi Limited • Regd. Office: Chennai</div>
+            <div class="company-gstin">GSTIN: 29AAACT1836J1ZC</div>
           </div>
 
-          <div class="company-info">
-            <div class="company-name">Data Udipi Limited</div>
-            <div>Place Of Supply : ${branchName} - ${branchAddress}.</div>
-            <div>Regd. Office: Chennai.</div>
-            <div style="font-weight: bold; margin-top: 2px;">GSTIN NO: 29AAACT1836J1ZC</div>
+          <div class="divider-dashed"></div>
+          <div class="invoice-type-badge">
+            <span class="invoice-type-text">${invoiceTitle}</span>
           </div>
+          <div class="divider-dashed"></div>
 
-          <div class="divider"></div>
-          <div class="invoice-title">TAX INVOICE</div>
-          <div class="divider"></div>
+          <table class="meta-table">
+            <tr>
+              <td style="width: 55%;">
+                <div><span class="meta-label">Invoice No : </span><span class="meta-val">${currentBillNo ? `BILL #${currentBillNo}` : orderId}</span></div>
+                ${currentBillNo ? `<div><span class="meta-label">Bill No : </span><span class="bill-highlight">${currentBillNo}</span></div><div><span class="meta-label">Order Ref : </span><span class="meta-val">${orderId}</span></div>` : ''}
+                <div><span class="meta-label">Order Type : </span><span class="meta-val">${orderType}</span></div>
+                ${tableNumber ? `<div><span class="meta-label">Table : </span><span class="meta-val">${tableNumber}</span></div>` : (orderType.toLowerCase().includes('dine') ? `<div><span class="meta-label">Order Place : </span><span class="meta-val">Dine In</span></div>` : '')}
+                <div><span class="meta-label">Mobile : </span><span class="meta-val">${mobileNumber}</span></div>
+              </td>
+              <td style="width: 45%; text-align: right;">
+                <div><span class="meta-val">${formattedDate}</span></div>
+                <div><span class="meta-label">Customer : </span><span class="meta-val">${customerName}</span></div>
+                <div><span class="meta-label">Payment Mode : </span><span class="meta-val">${paymentMethod.toUpperCase()}</span></div>
+                <div><span class="meta-label">Status : </span><span class="meta-val" style="color: #16a34a;">PAID</span></div>
+              </td>
+            </tr>
+          </table>
 
-          <div class="meta-container">
-            <div class="meta-left">
-              <div>Invoice No : ${currentBillNo ? `BILL #${currentBillNo}` : orderId}</div>
-              ${currentBillNo ? `<div style="color: #00a01d; font-weight: bold;">Bill No : ${currentBillNo}</div><div>Order Ref : ${orderId}</div>` : ''}
-              <div>Order Type : ${orderType}</div>
-              <div>Counter : 4</div>
-              <div>Mobile No : ${mobileNumber}</div>
-            </div>
-            <div class="meta-right">
-              <div>${formattedDate}</div>
-            </div>
-          </div>
-          ${deliveryAddress ? `<div style="font-size: 11px; margin: 8px 0;"><strong>Delivery Address:</strong> ${typeof deliveryAddress === 'string' ? deliveryAddress : (deliveryAddress.address || deliveryAddress.full_address || '')}</div>` : ''}
+          ${deliveryAddressStr ? `<div class="delivery-note"><strong>Delivery Address:</strong> ${deliveryAddressStr}</div>` : ''}
 
-          <div class="divider"></div>
-          
-          <table class="table">
+          <table class="items-table">
             <thead>
               <tr>
-                <th style="width: 50%;">Description</th>
-                <th class="center" style="width: 15%;">Price</th>
-                <th class="center" style="width: 15%;">QTY</th>
-                <th class="right" style="width: 20%;">Net Amt</th>
+                <th class="text-left" style="width: 46%;">Description</th>
+                <th class="text-right" style="width: 18%;">Price</th>
+                <th class="text-center" style="width: 14%;">Qty</th>
+                <th class="text-right" style="width: 22%;">Net Amt</th>
               </tr>
             </thead>
             <tbody>
@@ -410,48 +474,49 @@ export default function InvoiceScreen() {
             </tbody>
           </table>
 
-          <div class="divider"></div>
-
-          <div class="totals-container">
-            <div class="total-row"><span>Gross Total :</span><span>₹${subtotal}</span></div>
-            ${packagingFeeVal > 0 ? `<div class="total-row"><span>Packaging Fee :</span><span>₹${packagingFeeVal.toFixed(2)}</span></div>` : ''}
-            ${deliveryFeeVal > 0 ? `<div class="total-row"><span>Delivery Fee :</span><span>₹${deliveryFeeVal.toFixed(2)}</span></div>` : ''}
-            ${tipAmountVal > 0 ? `<div class="total-row"><span>Rider Tip :</span><span>₹${tipAmountVal.toFixed(2)}</span></div>` : ''}
-            ${discountAmountVal > 0 ? `<div class="total-row" style="color: #00a01d;"><span>Discount (${discountCodeStr}) :</span><span>-₹${discountAmount}</span></div>` : ''}
-            <div class="total-row"><span>Net Taxable Value :</span><span>₹${netTaxable}</span></div>
-            <div class="total-row"><span>CGST @ 2.5% :</span><span>₹${cgst}</span></div>
-            <div class="total-row"><span>SGST @ 2.5% :</span><span>₹${sgst}</span></div>
-            <div class="total-row"><span>Total GST Amount :</span><span>₹${totalGst}</span></div>
-            <div class="total-row bold"><span>Total Invoice Amount :</span><span>₹${finalTotal}</span></div>
+          <div class="totals-block">
+            <div class="totals-row"><span>Gross Total :</span><span>₹${subtotal}</span></div>
+            ${packagingFeeVal > 0 ? `<div class="totals-row"><span>Packaging Fee :</span><span>₹${packagingFeeVal.toFixed(2)}</span></div>` : ''}
+            ${deliveryFeeVal > 0 ? `<div class="totals-row"><span>Delivery Fee :</span><span>₹${deliveryFeeVal.toFixed(2)}</span></div>` : ''}
+            ${tipAmountVal > 0 ? `<div class="totals-row"><span>Rider Tip :</span><span>₹${tipAmountVal.toFixed(2)}</span></div>` : ''}
+            ${discountAmountVal > 0 ? `<div class="totals-row discount"><span>Discount (${discountCodeStr}) :</span><span>-₹${discountAmount}</span></div>` : ''}
+            ${totalGstValFromOrder > 0 ? `
+            <div class="totals-row"><span>Net Taxable Value :</span><span>₹${netTaxable}</span></div>
+            <div class="totals-row"><span>CGST @ 2.5% :</span><span>₹${cgst}</span></div>
+            <div class="totals-row"><span>SGST @ 2.5% :</span><span>₹${sgst}</span></div>
+            <div class="totals-row"><span>Total GST Amount :</span><span>₹${totalGst}</span></div>
+            ` : ''}
           </div>
 
-          <div class="divider"></div>
+          <div class="grand-total-strip">
+            <span class="grand-total-label">Total Invoice Amount :</span>
+            <span class="grand-total-value">₹${finalTotal}</span>
+          </div>
 
-          <div class="payment-section">
-            <div class="payment-title">Payment & Delivery</div>
-            <div class="total-row">
-              <span>${paymentMethod.toUpperCase()}</span>
-              <span style="font-weight: bold;">₹${finalTotal}</span>
+          <div class="payment-box">
+            <div class="payment-heading">Payment Details</div>
+            <div class="totals-row">
+              <span>Mode : ${paymentMethod.toUpperCase()}</span>
+              <span class="font-bold">₹${finalTotal}</span>
             </div>
-            <div class="total-row" style="font-weight: bold; margin-top: 3px;">
-              <span>Total received amount :</span>
+            <div class="totals-row" style="font-weight: 700; margin-top: 2px;">
+              <span>Total Received Amount :</span>
               <span>₹${finalTotal}</span>
             </div>
-            <div class="divider"></div>
-            <div class="total-row">
-              <span>No of items : ${String(cartData.length).padStart(2, '0')}</span>
-              <span>Total qty : ${totalQty.toFixed(2)}</span>
+            <div class="count-strip">
+              <span>Items Count : ${String(effectiveItems.length).padStart(2, '0')}</span>
+              <span>Total Quantity : ${totalQty.toFixed(0)}</span>
             </div>
           </div>
 
-          <div class="qr-section">
-            <img src="${qrCodeUrl}" class="qr-image" />
+          <div class="qr-box">
+            <img src="${qrCodeUrl}" class="qr-img" alt="QR Code" />
+            <div class="qr-text">Scan to verify invoice details</div>
           </div>
 
-          <div class="terms">
-            <div>Terms: * Taxes extra as applicable.</div>
+          <div class="footer-box">
             <div>No return / exchange on prepared food items.</div>
-            <div style="font-weight: bold; margin-top: 2px;">Thank you for dining with us!</div>
+            <div class="footer-highlight">Thank you for dining with Data Udipi!</div>
           </div>
         </div>
         </body>
@@ -492,7 +557,7 @@ export default function InvoiceScreen() {
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.canGoBack() ? router.back() : router.replace('/home')} style={styles.backButton}>
+        <TouchableOpacity onPress={() => router.canGoBack() ? router.back() : router.replace('/(main)/home' as any)} style={styles.backButton}>
           <Ionicons name="arrow-back" size={24} color="#000" />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Invoice</Text>
@@ -511,7 +576,7 @@ export default function InvoiceScreen() {
           </View>
 
           <View style={styles.brandRow}>
-            <Text style={styles.brandName}>{branchName.split(' — ')[0]} : {branchAddress}</Text>
+            <Text style={styles.brandName}>{(branchName || '').includes(' — ') ? branchName.split(' — ')[0].trim() : (branchName || '').trim()} : {branchAddress}</Text>
           </View>
 
           <View style={styles.companyInfo}>
@@ -522,7 +587,7 @@ export default function InvoiceScreen() {
           </View>
 
           <View style={styles.divider} />
-          <Text style={styles.invoiceTitle}>TAX INVOICE</Text>
+          <Text style={styles.invoiceTitle}>{totalGstValFromOrder > 0 ? 'TAX INVOICE' : 'RETAIL INVOICE'}</Text>
           <View style={styles.divider} />
 
           <View style={styles.metaRow}>
@@ -536,10 +601,14 @@ export default function InvoiceScreen() {
             </View>
           ) : null}
           <Text style={styles.metaLabel}>Order Type : {orderType}</Text>
-          <Text style={styles.metaLabel}>Counter : 4</Text>
+          {tableNumber ? (
+            <Text style={styles.metaLabel}>Table : {tableNumber}</Text>
+          ) : (String(orderType).toLowerCase().includes('dine') ? (
+            <Text style={styles.metaLabel}>Order Place : Dine In</Text>
+          ) : null)}
           <Text style={styles.metaLabel}>Customer : {customerName}</Text>
           <Text style={styles.metaLabel}>Mobile No : {mobileNumber}</Text>
-          {deliveryAddress && <Text style={styles.metaLabel}>Delivery Address : {typeof deliveryAddress === 'string' ? deliveryAddress : deliveryAddress.address || deliveryAddress.full_address || ''}</Text>}
+          {deliveryAddressStr ? <Text style={styles.metaLabel}>Delivery Address : {deliveryAddressStr}</Text> : null}
 
           <View style={styles.divider} />
 
@@ -550,14 +619,20 @@ export default function InvoiceScreen() {
             <Text style={[styles.tableCol, { flex: 1, textAlign: 'right' }]}>Net Amt</Text>
           </View>
 
-          {cartData.map((item, idx) => (
-            <View key={idx} style={styles.tableRow}>
-              <Text style={[styles.tableColData, { flex: 2 }]} numberOfLines={2}>{(item.name || item.itemName || 'ITEM').toUpperCase()}</Text>
-              <Text style={[styles.tableColData, { flex: 1, textAlign: 'center' }]}>₹{parseFloat(item.price || 0).toFixed(2)}</Text>
-              <Text style={[styles.tableColData, { flex: 1, textAlign: 'center' }]}>{String(item.quantity || item.qty || 1).padStart(3, '0')}</Text>
-              <Text style={[styles.tableColData, { flex: 1, textAlign: 'right' }]}>₹{(parseFloat(item.price || 0) * parseInt(item.quantity || item.qty || 1, 10)).toFixed(2)}</Text>
-            </View>
-          ))}
+          {effectiveItems.map((item, idx) => {
+            const name = String(item?.name || item?.itemName || 'ITEM').toUpperCase();
+            const price = parseFloat(item?.price || item?.unit_price || 0) || 0;
+            const qty = parseInt(item?.quantity || item?.qty || 1, 10) || 1;
+            const netAmt = price * qty;
+            return (
+              <View key={item?.id ? `inv-${item.id}-${idx}` : `inv-${idx}`} style={styles.tableRow}>
+                <Text style={[styles.tableColData, { flex: 2 }]} numberOfLines={2}>{name}</Text>
+                <Text style={[styles.tableColData, { flex: 1, textAlign: 'center' }]}>₹{price.toFixed(2)}</Text>
+                <Text style={[styles.tableColData, { flex: 1, textAlign: 'center' }]}>{String(qty).padStart(2, '0')}</Text>
+                <Text style={[styles.tableColData, { flex: 1, textAlign: 'right' }]}>₹{netAmt.toFixed(2)}</Text>
+              </View>
+            );
+          })}
 
           <View style={styles.divider} />
 
@@ -571,6 +646,14 @@ export default function InvoiceScreen() {
                 <Text style={[styles.totalLabel, { color: '#00a01d' }]}>Discount ({discountCodeStr}) :</Text>
                 <Text style={[styles.totalValue, { color: '#00a01d' }]}>-₹{discountAmount}</Text>
               </View>
+            )}
+            {totalGstValFromOrder > 0 && (
+              <>
+                <View style={styles.totalRow}><Text style={styles.totalLabel}>Net Taxable Value :</Text><Text style={styles.totalValue}>₹{netTaxable}</Text></View>
+                <View style={styles.totalRow}><Text style={styles.totalLabel}>CGST @ 2.5% :</Text><Text style={styles.totalValue}>₹{cgst}</Text></View>
+                <View style={styles.totalRow}><Text style={styles.totalLabel}>SGST @ 2.5% :</Text><Text style={styles.totalValue}>₹{sgst}</Text></View>
+                <View style={styles.totalRow}><Text style={styles.totalLabel}>Total GST Amount :</Text><Text style={styles.totalValue}>₹{totalGst}</Text></View>
+              </>
             )}
             <View style={styles.totalRow}><Text style={styles.totalLabelBold}>Total Invoice Amount :</Text><Text style={styles.totalValueBold}>₹{finalTotal}</Text></View>
           </View>
@@ -589,8 +672,8 @@ export default function InvoiceScreen() {
             </View>
             <View style={styles.divider} />
             <View style={styles.totalRow}>
-              <Text style={styles.totalLabel}>No of items : {String(cartData.length).padStart(2, '0')}</Text>
-              <Text style={styles.totalLabel}>Total qty : {totalQty.toFixed(2)}</Text>
+              <Text style={styles.totalLabel}>No of items : {String(effectiveItems.length).padStart(2, '0')}</Text>
+              <Text style={styles.totalLabel}>Total qty : {totalQty.toFixed(0)}</Text>
             </View>
           </View>
 
@@ -599,9 +682,8 @@ export default function InvoiceScreen() {
           </View>
 
           <View style={styles.terms}>
-            <Text style={styles.termText}>Terms: * Taxes extra as applicable.</Text>
             <Text style={styles.termText}>No return / exchange on prepared food items.</Text>
-            <Text style={styles.termText}>Thank you for dining with us!</Text>
+            <Text style={styles.termText}>Thank you for dining with Data Udipi!</Text>
           </View>
         </View>
 
@@ -615,7 +697,7 @@ export default function InvoiceScreen() {
             <Text style={styles.downloadBtnText}>{downloading ? 'Generating...' : 'Download bill'}</Text>
           </TouchableOpacity>
 
-          <TouchableOpacity style={styles.backBtn} onPress={() => { router.dismissAll(); router.replace('/home'); }}>
+          <TouchableOpacity style={styles.backBtn} onPress={() => router.replace('/(main)/home' as any)}>
             <Ionicons name="home" size={18} color="#fff" style={{ marginRight: 8 }} />
             <Text style={styles.backBtnText}>Back to Home</Text>
           </TouchableOpacity>
@@ -654,7 +736,10 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff',
     borderRadius: 12,
     padding: 16,
-    boxShadow: '0px 2px 8px rgba(0, 0, 0, 0.1)',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
     elevation: 3,
   },
   banner: {

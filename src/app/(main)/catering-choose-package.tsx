@@ -63,7 +63,7 @@ export default function ChoosePackage() {
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchPackages();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+   
   }, []);
 
   const handleProceed = async () => {

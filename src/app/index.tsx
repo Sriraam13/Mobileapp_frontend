@@ -1,5 +1,5 @@
-import React, { useEffect, useRef, useState } from 'react';
-import { View, Text, Image, StyleSheet, Dimensions, StatusBar, TouchableOpacity, Animated, Easing, Platform } from 'react-native';
+import React, { useEffect, useState, useCallback } from 'react';
+import { View, Image, StyleSheet, Dimensions, StatusBar, TouchableOpacity, Animated, Easing, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useAuthStore, useRestaurantStore } from '../store';
@@ -12,7 +12,7 @@ export default function SplashScreen() {
   const { isAuthenticated } = useAuthStore();
   const { selectedOutlet } = useRestaurantStore();
 
-  const navigateToHome = () => {
+  const navigateToHome = useCallback(() => {
     if (isAuthenticated) {
       if (selectedOutlet) {
         router.replace('/home');
@@ -22,14 +22,14 @@ export default function SplashScreen() {
     } else {
       router.replace('/login');
     }
-  };
+  }, [isAuthenticated, selectedOutlet, router]);
 
   useEffect(() => {
     const timer = setTimeout(navigateToHome, 3500);
     return () => clearTimeout(timer);
-  }, [isAuthenticated, selectedOutlet]);
+  }, [navigateToHome]);
 
-  // Animated values using React Native built-in Animated
+  // Animated values using React Native built-in Animated with stable useState lazy initializers
   const [bgScale] = useState(() => new Animated.Value(1.08));
   const [bgOpacity] = useState(() => new Animated.Value(0));
   const [topBoardTranslateY] = useState(() => new Animated.Value(-35));
@@ -113,6 +113,7 @@ export default function SplashScreen() {
       clearTimeout(timer4);
       clearTimeout(timer5);
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const spin = rotation.interpolate({

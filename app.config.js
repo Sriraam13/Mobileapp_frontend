@@ -1,10 +1,8 @@
 export default ({ config }) => {
   return {
     ...config,
-    newArchEnabled: false,
     ios: {
       ...config.ios,
-      newArchEnabled: false,
       config: {
         ...config.ios?.config,
         googleMapsApiKey: process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY || 'AIzaSyA2qxAJag8F89Q_TdtjqU_42W6JAVJ5_qg'
@@ -12,7 +10,6 @@ export default ({ config }) => {
     },
     android: {
       ...config.android,
-      newArchEnabled: false,
       config: {
         ...config.android?.config,
         googleMaps: {

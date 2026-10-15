@@ -1,6 +1,3 @@
-import { Platform } from 'react-native';
-import Constants from 'expo-constants';
-
 const getApiUrl = () => {
   const envUrl = process.env.EXPO_PUBLIC_API_BASE_URL?.trim();
   if (envUrl) {

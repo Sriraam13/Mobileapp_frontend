@@ -181,7 +181,7 @@ export default function OrderCompletedScreen() {
 
   const handleDownloadInvoice = () => {
     router.push({
-      pathname: '/invoice',
+      pathname: '/(checkout)/invoice' as any,
       params: {
         orderId: displayOrderId,
         dbOrderId: params.dbOrderId || feedbackOrderId,

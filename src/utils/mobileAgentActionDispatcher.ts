@@ -18,11 +18,9 @@ import { router } from 'expo-router';
 import { DeviceEventEmitter } from 'react-native';
 import { useCartStore } from '../store/useCartStore';
 import { useLiveOrderStore } from '../store/useLiveOrderStore';
-import { useDineInSessionStore } from '../store/useDineInSessionStore';
-import { useAuthStore } from '../store/useAuthStore';
 import { useRestaurantStore } from '../store/useRestaurantStore';
 import { useVoiceAgentStore } from '../store/useVoiceAgentStore';
-import { SUPPORTED_ACTIONS, SCREEN_REGISTRY, resolveRoute } from './agentRegistry';
+import { SUPPORTED_ACTIONS, resolveRoute } from './agentRegistry';
 
 // ─── Active Router Reference ──────────────────────────────────────────────────
 let activeRouter: any = null;
@@ -133,7 +131,7 @@ export async function executeSingleAction(act: UIAction): Promise<ActionResult> 
       case 'go_back': {
         try {
           useVoiceAgentStore.getState().hideAgent();
-        } catch (_) {}
+        } catch {}
         const r = getActiveRouter();
         setTimeout(() => {
           if (r.canGoBack && r.canGoBack()) {

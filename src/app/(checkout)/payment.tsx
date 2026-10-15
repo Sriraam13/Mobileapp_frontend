@@ -60,9 +60,11 @@ export default function PaymentScreen() {
   const { setCurrentOrder, addPastOrder } = useOrderStore();
   const { selectedDeliveryAddress } = useAddressStore();
 
-  const [selectedMethod, setSelectedMethod] = useState<PaymentMethod>(
-    isDineInSettlement || orderType === 'Dine In' ? 'Pay at Counter' : (orderType === 'Delivery' ? 'Cash' : 'UPI')
+  const isDigitalOnly = orderType === 'Take Away' || orderType === 'Delivery';
+  const [selectedMethodRaw, setSelectedMethod] = useState<PaymentMethod>(
+    isDineInSettlement || orderType === 'Dine In' ? 'Pay at Counter' : 'UPI'
   );
+  const selectedMethod: PaymentMethod = isDigitalOnly ? 'UPI' : selectedMethodRaw;
   const [loading, setLoading] = useState(false);
   const [isPollingCash, setIsPollingCash] = useState(false);
   const [paymentFailedReason, setPaymentFailedReason] = useState('');
@@ -578,23 +580,10 @@ export default function PaymentScreen() {
               </View>
               <View style={{ flex: 1 }}>
                 <Text style={styles.delMethodName}>UPI / Online Payment</Text>
-                <Text style={styles.delMethodDesc}>Google Pay, PhonePe, Paytm & Netbanking</Text>
+                <Text style={styles.delMethodDesc}>Google Pay, PhonePe, Paytm, Cards & Netbanking</Text>
               </View>
               <View style={[styles.radioCircle, selectedMethod === 'UPI' ? styles.radioSelected : styles.radioUnselected]}>
                 {selectedMethod === 'UPI' && <Ionicons name="checkmark" size={14} color="#fff" />}
-              </View>
-            </TouchableOpacity>
-
-            <TouchableOpacity style={[styles.delMethodItem, selectedMethod === 'Cash' && styles.delMethodItemActive]} onPress={() => setSelectedMethod('Cash')} activeOpacity={0.8}>
-              <View style={styles.delMethodIcon}>
-                <Ionicons name="cash-outline" size={24} color="#00a01d" />
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.delMethodName}>Cash on Delivery (COD)</Text>
-                <Text style={styles.delMethodDesc}>Pay cash to delivery partner on arrival</Text>
-              </View>
-              <View style={[styles.radioCircle, selectedMethod === 'Cash' ? styles.radioSelected : styles.radioUnselected]}>
-                {selectedMethod === 'Cash' && <Ionicons name="checkmark" size={14} color="#fff" />}
               </View>
             </TouchableOpacity>
           </View>
@@ -609,8 +598,6 @@ export default function PaymentScreen() {
             <Text style={styles.delPayBtnText}>
               {loading
                 ? 'Processing Order...'
-                : selectedMethod === 'Cash'
-                ? `Confirm Cash on Delivery (Rs. ${totalVal.toFixed(0)})`
                 : `Pay Rs. ${totalVal.toFixed(0)} via UPI`}
             </Text>
           </TouchableOpacity>
@@ -652,35 +639,37 @@ export default function PaymentScreen() {
 
           <View style={styles.methodsContainer}>
 
-            {/* Pay at Counter Option */}
-            <View>
-              <TouchableOpacity
-                style={[styles.methodCard, selectedMethod === 'Pay at Counter' ? styles.methodSelected : styles.methodUnselected]}
-                onPress={() => setSelectedMethod('Pay at Counter')}
-                activeOpacity={0.8}
-              >
-                <View style={[styles.methodIconWrap, selectedMethod === 'Pay at Counter' ? styles.iconBgOrange : styles.iconBgWhite]}>
-                  <Ionicons name="cash-outline" size={20} color={selectedMethod === 'Pay at Counter' ? '#fff' : '#888'} />
-                </View>
-                <View style={styles.methodTextContainer}>
-                  <Text style={styles.methodName}>Pay at Counter</Text>
-                  <Text style={styles.methodDesc}>Pay cash or card at counter (marked as paid)</Text>
-                </View>
-                <View style={[styles.radioCircle, selectedMethod === 'Pay at Counter' ? styles.radioSelected : styles.radioUnselected]}>
-                  {selectedMethod === 'Pay at Counter' && <Ionicons name="checkmark" size={14} color="#fff" />}
-                </View>
-              </TouchableOpacity>
+            {/* Pay at Counter Option - only for Dine In, removed for Take Away */}
+            {orderType !== 'Take Away' && (
+              <View>
+                <TouchableOpacity
+                  style={[styles.methodCard, selectedMethod === 'Pay at Counter' ? styles.methodSelected : styles.methodUnselected]}
+                  onPress={() => setSelectedMethod('Pay at Counter')}
+                  activeOpacity={0.8}
+                >
+                  <View style={[styles.methodIconWrap, selectedMethod === 'Pay at Counter' ? styles.iconBgOrange : styles.iconBgWhite]}>
+                    <Ionicons name="cash-outline" size={20} color={selectedMethod === 'Pay at Counter' ? '#fff' : '#888'} />
+                  </View>
+                  <View style={styles.methodTextContainer}>
+                    <Text style={styles.methodName}>Pay at Counter</Text>
+                    <Text style={styles.methodDesc}>Pay cash or card at counter (marked as paid)</Text>
+                  </View>
+                  <View style={[styles.radioCircle, selectedMethod === 'Pay at Counter' ? styles.radioSelected : styles.radioUnselected]}>
+                    {selectedMethod === 'Pay at Counter' && <Ionicons name="checkmark" size={14} color="#fff" />}
+                  </View>
+                </TouchableOpacity>
 
-              {/* Info Box for Pay at Counter */}
-              {selectedMethod === 'Pay at Counter' && (
-                <View style={styles.paymentInfoBox}>
-                  <Ionicons name="checkmark-done-circle-outline" size={20} color="#00a01d" />
-                  <Text style={styles.paymentInfoText}>
-                    Order will be immediately marked as Paid at the counter. You can view and download your invoice on the next screen.
-                  </Text>
-                </View>
-              )}
-            </View>
+                {/* Info Box for Pay at Counter */}
+                {selectedMethod === 'Pay at Counter' && (
+                  <View style={styles.paymentInfoBox}>
+                    <Ionicons name="checkmark-done-circle-outline" size={20} color="#00a01d" />
+                    <Text style={styles.paymentInfoText}>
+                      Order will be immediately marked as Paid at the counter. You can view and download your invoice on the next screen.
+                    </Text>
+                  </View>
+                )}
+              </View>
+            )}
 
             {/* UPI Option */}
             <View>

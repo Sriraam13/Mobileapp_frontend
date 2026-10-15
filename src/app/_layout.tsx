@@ -1,4 +1,3 @@
-import 'react-native-gesture-handler';
 import 'react-native-get-random-values';
 import React, { Component, ErrorInfo, ReactNode, useEffect } from 'react';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
@@ -41,6 +40,11 @@ class RootErrorBoundary extends Component<Props, State> {
         <View style={errorStyles.container}>
           <Text style={errorStyles.title}>Data Udipi</Text>
           <Text style={errorStyles.message}>Something went wrong while starting the app.</Text>
+          {this.state.error?.message ? (
+            <View style={errorStyles.errorBox}>
+              <Text style={errorStyles.errorBoxText}>{this.state.error.message}</Text>
+            </View>
+          ) : null}
           <TouchableOpacity style={errorStyles.button} onPress={this.handleReset}>
             <Text style={errorStyles.buttonText}>Restart App</Text>
           </TouchableOpacity>
@@ -86,7 +90,19 @@ const errorStyles = StyleSheet.create({
     fontSize: 15,
     color: '#d1d5db',
     textAlign: 'center',
-    marginBottom: 24,
+    marginBottom: 16,
+  },
+  errorBox: {
+    backgroundColor: '#1f2937',
+    padding: 12,
+    borderRadius: 8,
+    marginBottom: 20,
+    maxWidth: '90%',
+  },
+  errorBoxText: {
+    color: '#ef4444',
+    fontSize: 12,
+    textAlign: 'center',
   },
   button: {
     backgroundColor: '#f59e0b',

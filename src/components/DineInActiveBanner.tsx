@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -6,15 +6,13 @@ import {
   TouchableOpacity,
   Modal,
   ScrollView,
-  ActivityIndicator,
-  Alert,
   Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useDineInSessionStore } from '../store/useDineInSessionStore';
-import { orderApi } from '../services/apiService';
+import { dineInSessionApi } from '../services/apiService';
 
 interface DineInActiveBannerProps {
   bottomOffset?: number;
@@ -28,19 +26,96 @@ export default function DineInActiveBanner({ bottomOffset }: DineInActiveBannerP
     tableNumber,
     activeOrderId,
     activeDbOrderId,
-    orderedItems,
-    totalAmount,
+    orderRounds,
+    sessionUid,
+    sessionDbId,
     completeDineInSession,
+    syncSessionDetails,
   } = useDineInSessionStore();
 
   const [isSettleModalVisible, setIsSettleModalVisible] = useState(false);
 
-  if (!isActive || !activeOrderId) {
+  // ── Sync session state with backend to detect cancelled orders / completed sessions ──
+  useEffect(() => {
+    const sKey = sessionDbId || sessionUid;
+    if (!isActive || !sKey) return;
+
+    let isMounted = true;
+    const syncStatus = async () => {
+      try {
+        const data = await dineInSessionApi.getSessionDetails(sKey);
+        if (!isMounted || !data) return;
+
+        const isCancelled = (data.status || '').toUpperCase() === 'CANCELLED';
+        const isPaid = (data.paymentStatus || '').toLowerCase() === 'paid';
+        const isCompleted = (data.status || '').toUpperCase() === 'COMPLETED';
+
+        const backendActive = (data.orders || []).filter(
+          (o: any) => (o.status || '').toUpperCase() !== 'CANCELLED'
+        );
+
+        if (isCancelled || isPaid || isCompleted || ((data.orders || []).length > 0 && backendActive.length === 0)) {
+          // All orders in session have been cancelled or paid
+          completeDineInSession();
+          return;
+        }
+
+        syncSessionDetails({
+          sessionId: data.sessionId,
+          sessionUid: data.sessionUid,
+          tableNumber: data.tableNumber,
+          totalAmount: data.totalAmount,
+          paymentStatus: data.paymentStatus,
+          status: data.status,
+          orders: data.orders || [],
+          allItems: data.allItems || [],
+        });
+      } catch (err) {
+        // Silently ignore background poll errors
+      }
+    };
+
+    syncStatus();
+    const timer = setInterval(syncStatus, 5000);
+    return () => {
+      isMounted = false;
+      clearInterval(timer);
+    };
+  }, [isActive, sessionDbId, sessionUid]);
+
+  // ── Derive active (non-cancelled) items and total from rounds ──────────────
+  const activeRounds = (orderRounds || []).filter(
+    (r: any) => (r.status || '').toUpperCase() !== 'CANCELLED'
+  );
+
+  // If session is not active or all rounds are cancelled, hide the banner completely
+  if (!isActive || !activeOrderId || activeRounds.length === 0) {
     return null;
   }
 
+  const activeItems: any[] = activeRounds.flatMap((r: any) =>
+    (r.items || []).filter((item: any) => (item.status || '').toUpperCase() !== 'CANCELLED')
+  );
+  const activeTotalAmount = activeRounds.reduce(
+    (sum: number, r: any) => sum + (Number(r.total_amount) || 0),
+    0
+  );
+
+  // If active rounds have total <= 0, hide banner
+  if (activeTotalAmount <= 0) {
+    return null;
+  }
+
+  const displayItems = activeItems;
+  const displayTotal = activeTotalAmount;
+  const displayItemCount = displayItems.reduce((sum: number, i: any) => sum + (Number(i.quantity || i.qty || 1)), 0);
+
   const defaultBottom = (Platform.OS === 'android' ? 68 : 60) + insets.bottom + 10;
   const computedBottom = bottomOffset !== undefined ? bottomOffset : defaultBottom;
+
+  const latestActiveRound = activeRounds[activeRounds.length - 1];
+  const roundStatus = (latestActiveRound?.status || 'In Kitchen').replace(/_/g, ' ');
+  const bannerOrderId = latestActiveRound?.orderId || activeOrderId;
 
   const handleOrderMore = () => {
     setIsSettleModalVisible(false);
@@ -62,8 +137,8 @@ export default function DineInActiveBanner({ bottomOffset }: DineInActiveBannerP
         orderId: activeOrderId,
         dbOrderId: activeDbOrderId ? String(activeDbOrderId) : '',
         tableNumber: tableNumber || 'T-01',
-        totalAmount: totalAmount.toString(),
-        cartItems: JSON.stringify(orderedItems),
+        totalAmount: String(displayTotal),
+        cartItems: JSON.stringify(displayItems),
       },
     });
   };
@@ -79,10 +154,10 @@ export default function DineInActiveBanner({ bottomOffset }: DineInActiveBannerP
               <Text style={styles.tableBadgeText}>{tableNumber || 'Table'}</Text>
             </View>
             <View style={styles.infoCol}>
-              <Text style={styles.orderIdText}>{activeOrderId} • In Kitchen</Text>
+              <Text style={styles.orderIdText}>{bannerOrderId} • {roundStatus}</Text>
               <Text style={styles.totalText}>
-                {orderedItems.reduce((sum, item) => sum + item.quantity, 0)} items • Rs.{' '}
-                {totalAmount.toFixed(0)}
+                {displayItemCount} item{displayItemCount !== 1 ? 's' : ''} • Rs.{' '}
+                {displayTotal.toFixed(0)}
               </Text>
             </View>
           </View>
@@ -139,29 +214,40 @@ export default function DineInActiveBanner({ bottomOffset }: DineInActiveBannerP
             </View>
 
             <Text style={styles.sectionHeading}>Items Ordered in this Session</Text>
-            <ScrollView
-              style={styles.itemsScroll}
-              contentContainerStyle={{ paddingBottom: 8 }}
-              showsVerticalScrollIndicator={false}
-            >
-              {orderedItems.map((item, index) => (
-                <View key={`${item.id}-${index}`} style={styles.billItemRow}>
-                  <View style={styles.billItemLeft}>
-                    <Text style={styles.billItemQty}>{item.quantity}x</Text>
-                    <Text style={styles.billItemName} numberOfLines={1}>
-                      {item.name}
+            {displayItems.length === 0 ? (
+              <View style={{ paddingVertical: 20, alignItems: 'center' }}>
+                <Ionicons name="checkmark-circle-outline" size={36} color="#aaa" />
+                <Text style={{ color: '#aaa', fontSize: 14, marginTop: 8, textAlign: 'center' }}>
+                  All items have been cancelled.
+                </Text>
+              </View>
+            ) : (
+              <ScrollView
+                style={styles.itemsScroll}
+                contentContainerStyle={{ paddingBottom: 8 }}
+                showsVerticalScrollIndicator={false}
+              >
+                {displayItems.map((item: any, index: number) => (
+                  <View key={`${item.id}-${index}`} style={styles.billItemRow}>
+                    <View style={styles.billItemLeft}>
+                      <Text style={styles.billItemQty}>{item.quantity || item.qty || 1}x</Text>
+                      <Text style={styles.billItemName} numberOfLines={1}>
+                        {item.name || item.itemName || 'Item'}
+                      </Text>
+                    </View>
+                    <Text style={styles.billItemPrice}>
+                      Rs. {(Number(item.price || item.unit_price || 0) * (item.quantity || item.qty || 1)).toFixed(0)}
                     </Text>
                   </View>
-                  <Text style={styles.billItemPrice}>
-                    Rs. {(item.price * item.quantity).toFixed(0)}
-                  </Text>
-                </View>
-              ))}
-            </ScrollView>
+                ))}
+              </ScrollView>
+            )}
 
             <View style={styles.totalRow}>
               <Text style={styles.totalLabel}>Grand Total Due</Text>
-              <Text style={styles.totalValue}>Rs. {totalAmount.toFixed(0)}</Text>
+              <Text style={[styles.totalValue, displayTotal === 0 && { color: '#00a01d' }]}>
+                Rs. {displayTotal.toFixed(0)}
+              </Text>
             </View>
 
             <View style={styles.sheetActions}>
@@ -175,13 +261,14 @@ export default function DineInActiveBanner({ bottomOffset }: DineInActiveBannerP
               </TouchableOpacity>
 
               <TouchableOpacity
-                style={styles.payNowBtn}
+                style={[styles.payNowBtn, displayTotal === 0 && { opacity: 0.5 }]}
                 onPress={handleNavigateToPayment}
                 activeOpacity={0.85}
+                disabled={displayTotal === 0}
               >
                 <Ionicons name="arrow-forward-circle-outline" size={18} color="#fff" />
                 <Text style={styles.payNowBtnText}>
-                  Pay & Complete Meal (Rs. {totalAmount.toFixed(0)})
+                  Pay & Complete Meal (Rs. {displayTotal.toFixed(0)})
                 </Text>
               </TouchableOpacity>
             </View>

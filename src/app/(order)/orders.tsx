@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Platform, StatusBar, Image, RefreshControl, ActivityIndicator } from 'react-native';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import { View, Text, StyleSheet, FlatList, TouchableOpacity, StatusBar, Image, RefreshControl, ActivityIndicator, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter, useNavigation } from 'expo-router';
@@ -40,8 +40,10 @@ const parseOrderTypeAndTable = (rawTypeInput: any, rawTableInput: any) => {
 export default function Orders() {
   const router = useRouter();
   const navigation = useNavigation();
-  const { phone } = useAuthStore();
-  const { clearCart, addItem, setOrderType } = useCartStore();
+  const phone = useAuthStore(s => s.phone);
+  const clearCart = useCartStore(s => s.clearCart);
+  const addItem = useCartStore(s => s.addItem);
+  const setOrderType = useCartStore(s => s.setOrderType);
   const [activeTab, setActiveTab] = useState('All');
   const [orders, setOrders] = useState<any[]>([]);
   const [refreshing, setRefreshing] = useState(false);
@@ -52,8 +54,8 @@ export default function Orders() {
     await loadOrders();
     setRefreshing(false);
   };
-  const { pastOrders } = useOrderStore();
-  const { selectedOutlet } = useRestaurantStore();
+  const pastOrders = useOrderStore(s => s.pastOrders);
+  const selectedOutlet = useRestaurantStore(s => s.selectedOutlet);
   const dineInSession = useDineInSessionStore();
 
   const loadOrders = async () => {
@@ -169,8 +171,13 @@ export default function Orders() {
         });
       }
 
-      // Merge active ongoing dine-in order under ONE single order ID
-      if (dineInSession.isActive && dineInSession.activeOrderId) {
+      // Merge active ongoing dine-in order under ONE single order ID only if truly active
+      const activeRounds = (dineInSession.orderRounds || []).filter(
+        (r: any) => (r.status || '').toUpperCase() !== 'CANCELLED'
+      );
+      const isDineInActuallyActive = dineInSession.isActive && dineInSession.activeOrderId && (activeRounds.length > 0 || (dineInSession.orderRounds || []).length === 0) && Number(dineInSession.totalAmount || 0) > 0;
+
+      if (isDineInActuallyActive) {
         const existingIndex = formattedOrders.findIndex(
           (o: any) => o.id === dineInSession.activeOrderId || String(o.dbId) === String(dineInSession.activeDbOrderId)
         );
@@ -190,11 +197,14 @@ export default function Orders() {
         };
 
         if (existingIndex >= 0) {
-          formattedOrders[existingIndex] = {
-            ...formattedOrders[existingIndex],
-            ...activeOrderCard,
-            status: formattedOrders[existingIndex].status || 'PREPARING',
-          };
+          const currentStatus = (formattedOrders[existingIndex].status || '').toUpperCase();
+          if (currentStatus !== 'CANCELLED') {
+            formattedOrders[existingIndex] = {
+              ...formattedOrders[existingIndex],
+              ...activeOrderCard,
+              status: formattedOrders[existingIndex].status || 'PREPARING',
+            };
+          }
         } else {
           formattedOrders.unshift(activeOrderCard);
         }
@@ -269,21 +279,24 @@ export default function Orders() {
       loadOrders();
     });
     return unsubscribe;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [navigation]);
 
-  const filteredOrders = orders.filter(order => {
-    if (activeTab === 'All') return true;
-    
-    const status = (order.status || '').toUpperCase();
-    if (activeTab === 'Delivered' || activeTab === 'Completed') {
-      return ['SERVED', 'COMPLETED', 'DELIVERED'].includes(status) && order.payment_status?.toUpperCase() === 'PAID';
-    }
-    if (activeTab === 'Cancelled' || activeTab === 'CANCELLED') {
-      return status === 'CANCELLED';
-    }
-    
-    return status === activeTab.toUpperCase();
-  });
+  const filteredOrders = useMemo(() => {
+    return orders.filter(order => {
+      if (activeTab === 'All') return true;
+      
+      const status = (order.status || '').toUpperCase();
+      if (activeTab === 'Delivered' || activeTab === 'Completed') {
+        return ['SERVED', 'COMPLETED', 'DELIVERED'].includes(status) && order.payment_status?.toUpperCase() === 'PAID';
+      }
+      if (activeTab === 'Cancelled' || activeTab === 'CANCELLED') {
+        return status === 'CANCELLED';
+      }
+      
+      return status === activeTab.toUpperCase();
+    });
+  }, [orders, activeTab]);
 
   const handleReorder = (order: any) => {
     clearCart();
@@ -351,8 +364,9 @@ export default function Orders() {
         }
       });
     } else {
+      const isCancelled = (order.status || '').toUpperCase() === 'CANCELLED';
       const isUnpaid = (order.payment_status || '').toUpperCase() !== 'PAID';
-      if (isUnpaid || order.isOngoingDineIn) {
+      if (!isCancelled && (isUnpaid || order.isOngoingDineIn)) {
         router.push({ 
           pathname: '/track-order', 
           params: { 
@@ -408,6 +422,167 @@ export default function Orders() {
     return formatDateTime(isoString);
   };
 
+
+  const keyExtractor = useCallback((item: any) => String(item.id || item.dbId), []);
+
+  const renderOrderItem = useCallback(({ item: order }: { item: any }) => {
+    const isDineIn = order.order_type === 'Dine In';
+    const isCatering = order.isCatering;
+    const normPayMethod = (order.payment_method || '').toLowerCase().replace(/[\s_-]/g, '');
+    const isCounter = normPayMethod === 'payatcounter' || normPayMethod === 'counter';
+    const isPartiallyPaid = (order.payment_status || '').toUpperCase() === 'PARTIALLY_PAID';
+    const isPaid = (order.payment_status || '').toUpperCase() === 'PAID';
+    const isCancelled = (order.status || '').toUpperCase() === 'CANCELLED';
+    const isUnpaidDineIn = isDineIn && (!isPaid || order.isOngoingDineIn) && !isCancelled;
+    const isUnpaidNonCatering = !isPaid && !isCatering && !isCancelled;
+
+    return (
+      <TouchableOpacity 
+        style={styles.orderCard}
+        onPress={() => {
+          if (order.isCatering) return; // Ignore full card press for catering, use buttons instead
+          handleOrderPress(order);
+        }}
+      >
+        <View style={styles.orderHeader}>
+          <View style={{ flex: 1, paddingRight: 12 }}>
+            <Text style={styles.restaurantName} numberOfLines={1}>{order.restaurant}</Text>
+            <Text style={styles.orderDate} numberOfLines={1}>{formatDate(order.date)}</Text>
+          </View>
+          <View style={[
+            styles.statusBadge, 
+            order.status?.toUpperCase() === 'CANCELLED' ? styles.statusCancelled : styles.statusDelivered
+          ]}>
+            <Text style={[
+              styles.statusText,
+              order.status?.toUpperCase() === 'CANCELLED' ? styles.statusTextCancelled : styles.statusTextDelivered
+            ]}>{getDisplayStatus(order.status, order.order_type)}</Text>
+          </View>
+        </View>
+
+        <View style={{ flexDirection: 'row', gap: 12, marginBottom: 15, flexWrap: 'wrap' }}>
+          <View style={styles.infoBadge}>
+            <Text style={styles.infoBadgeLabel}>Order ID</Text>
+            <Text style={styles.infoBadgeValue}>{order.id}</Text>
+          </View>
+          <View style={styles.infoBadge}>
+            <Text style={styles.infoBadgeLabel}>Type</Text>
+            <Text style={styles.infoBadgeValue}>
+              {isDineIn
+                ? `Dine In${order.table_number ? ` (${order.table_number})` : ''}`
+                : order.order_type}
+            </Text>
+          </View>
+          <View style={[styles.infoBadge, isCancelled ? { backgroundColor: '#fee2e2' } : isPaid ? { backgroundColor: '#e8f5e9' } : (isPartiallyPaid ? {backgroundColor: '#e3f2fd'} : { backgroundColor: '#fff3e0' })]}>
+            <Text style={styles.infoBadgeLabel}>Payment</Text>
+            <Text style={[styles.infoBadgeValue, { color: isCancelled ? '#dc2626' : isPaid ? '#16a34a' : (isPartiallyPaid ? '#0284c7' : '#ff4500'), fontWeight: 'bold' }]}>
+              {isCancelled ? 'Cancelled' : isPaid ? 'Paid' : (isPartiallyPaid ? 'Partially Paid' : (order.order_type === 'Delivery' ? 'Cash on Delivery' : (isCounter ? 'Pay at Counter' : 'Pay Later')))}
+            </Text>
+          </View>
+        </View>
+
+        <View style={styles.orderDetails}>
+          {order.image && order.image !== 'https://via.placeholder.com/150' ? (
+            <Image source={{ uri: order.image }} style={styles.orderImage} />
+          ) : (
+            <View style={[styles.orderImage, { backgroundColor: '#fff0eb', alignItems: 'center', justifyContent: 'center' }]}>
+              {isCatering ? (
+                <Ionicons name="people-outline" size={26} color="#ff4500" />
+              ) : (
+                <Ionicons name="restaurant-outline" size={26} color="#ff4500" />
+              )}
+            </View>
+          )}
+          <View style={styles.orderInfo}>
+            <Text style={styles.orderItems} numberOfLines={2}>
+              {isCatering && Array.isArray(order.items) && order.items[0]
+                ? `${order.items[0].name} (x${order.items[0].quantity} Guests)`
+                : Array.isArray(order.items) 
+                ? order.items.map((i: any) => `${i.quantity || 1}x ${i.name || 'Item'}`).join(', ') 
+                : (typeof order.items === 'string' ? order.items : 'Items')}
+            </Text>
+            <Text style={styles.orderPrice}>Rs. {order.total}</Text>
+            {isCatering && isPartiallyPaid && (
+              <Text style={{ fontSize: 12, color: '#666', marginTop: 4 }}>
+                Paid: Rs. {order.paid_amount || 0} • Bal: Rs. {order.balance_amount || 0}
+              </Text>
+            )}
+          </View>
+          {isCatering && isPartiallyPaid ? (
+            <TouchableOpacity 
+              style={[styles.reorderBtn, { backgroundColor: '#3395FF', borderColor: '#3395FF', minWidth: 100, alignItems: 'center', justifyContent: 'center' }]} 
+              onPress={(e) => {
+                e.stopPropagation();
+                handlePayBalance(order);
+              }}
+              activeOpacity={0.8}
+            >
+              <Text style={[styles.reorderText, { color: '#ffffff', fontWeight: 'bold' }]}>Pay Balance</Text>
+            </TouchableOpacity>
+          ) : isUnpaidDineIn ? (
+            <TouchableOpacity 
+              style={[styles.reorderBtn, { backgroundColor: '#ff4500', borderColor: '#ff4500', minWidth: 100, alignItems: 'center', justifyContent: 'center' }]} 
+              onPress={() => handleOrderPress(order)}
+              activeOpacity={0.8}
+            >
+              <Text style={[styles.reorderText, { color: '#ffffff', fontWeight: 'bold' }]}>Track / Pay</Text>
+            </TouchableOpacity>
+          ) : (order.order_type === 'Delivery' || order.order_type === 'Takeaway' || order.order_type === 'Take Away') && !['COMPLETED', 'SERVED', 'DELIVERED', 'CANCELLED'].includes((order.status || '').toUpperCase()) ? (
+            <TouchableOpacity 
+              style={[styles.reorderBtn, { backgroundColor: '#ff4500', borderColor: '#ff4500', minWidth: 100, alignItems: 'center', justifyContent: 'center' }]} 
+              onPress={() => handleOrderPress(order)}
+              activeOpacity={0.8}
+            >
+              <Text style={[styles.reorderText, { color: '#ffffff', fontWeight: 'bold' }]}>Track Order</Text>
+            </TouchableOpacity>
+          ) : isUnpaidNonCatering ? (
+            <TouchableOpacity 
+              style={[styles.reorderBtn, { backgroundColor: '#ff4500', borderColor: '#ff4500', minWidth: 100, alignItems: 'center', justifyContent: 'center' }]} 
+              onPress={() => handleOrderPress(order)}
+              activeOpacity={0.8}
+            >
+              <Text style={[styles.reorderText, { color: '#ffffff', fontWeight: 'bold' }]}>Track / Pay</Text>
+            </TouchableOpacity>
+          ) : (
+            <TouchableOpacity 
+              style={[styles.reorderBtn, { backgroundColor: '#fff', borderColor: '#ff4500', minWidth: 100, alignItems: 'center', justifyContent: 'center' }]} 
+              onPress={() => {
+                if (isCatering) {
+                  router.push({ pathname: '/catering-order-details', params: { orderId: order.dbId } });
+                } else {
+                  handleOrderPress(order);
+                }
+              }}
+              activeOpacity={0.8}
+            >
+              <Text style={[styles.reorderText, { color: '#ff4500', fontWeight: 'bold' }]}>View Details</Text>
+            </TouchableOpacity>
+          )}
+        </View>
+
+        {/* Payment History for Catering */}
+        {isCatering && order.payments && order.payments.length > 0 && (
+          <View style={{ marginTop: 12, paddingTop: 12, borderTopWidth: 1, borderTopColor: '#f0f0f0' }}>
+            <Text style={{ fontSize: 13, fontWeight: 'bold', color: '#444', marginBottom: 8 }}>Payment History</Text>
+            {order.payments.map((p: any) => (
+              <View key={p.id} style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6, backgroundColor: '#f9f9f9', padding: 8, borderRadius: 6 }}>
+                <View>
+                  <Text style={{ fontSize: 12, fontWeight: 'bold', color: '#333' }}>{p.payment_type} ({p.payment_method})</Text>
+                  <Text style={{ fontSize: 10, color: '#777', marginTop: 2 }}>Txn: {p.transaction_id || 'N/A'}</Text>
+                  <Text style={{ fontSize: 10, color: '#777' }}>{formatDate(p.created_at)}</Text>
+                </View>
+                <View style={{ alignItems: 'flex-end', justifyContent: 'center' }}>
+                  <Text style={{ fontSize: 13, fontWeight: 'bold', color: p.payment_status === 'SUCCESS' ? '#16a34a' : '#ff4500' }}>Rs. {p.amount}</Text>
+                  <Text style={{ fontSize: 10, color: p.payment_status === 'SUCCESS' ? '#16a34a' : '#ff4500', marginTop: 2 }}>{p.payment_status}</Text>
+                </View>
+              </View>
+            ))}
+          </View>
+        )}
+      </TouchableOpacity>
+    );
+  }, [router]);
+
   return (
     <SafeAreaView style={styles.container}>
       <StatusBar barStyle='dark-content' backgroundColor='#fff' />
@@ -426,7 +601,6 @@ export default function Orders() {
       {/* Filter Tabs */}
       <View style={styles.filterContainer}>
         {['All', 'Completed', 'Cancelled'].map(tab => {
-          // Note: Mapping 'Completed' to 'Delivered' in the data logic
           const isSelected = activeTab === tab || (activeTab === 'Delivered' && tab === 'Completed');
           return (
             <TouchableOpacity 
@@ -440,178 +614,31 @@ export default function Orders() {
         })}
       </View>
 
-      <ScrollView 
-        contentContainerStyle={styles.scrollContent} 
-        showsVerticalScrollIndicator={false}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={['#ff4500']} />}
-      >
-        {isLoading ? (
-          <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', marginTop: 100 }}>
-            <ActivityIndicator size="large" color="#ff4500" />
-            <Text style={{ marginTop: 10, color: '#666' }}>Loading your orders...</Text>
-          </View>
-        ) : filteredOrders.map(order => (
-          <TouchableOpacity 
-            key={order.id} 
-            style={styles.orderCard}
-            onPress={() => {
-              if (order.isCatering) return; // Ignore full card press for catering, use buttons instead
-              handleOrderPress(order);
-            }}
-          >
-            <View style={styles.orderHeader}>
-              <View style={{ flex: 1, paddingRight: 12 }}>
-                <Text style={styles.restaurantName} numberOfLines={1}>{order.restaurant}</Text>
-                <Text style={styles.orderDate} numberOfLines={1}>{formatDate(order.date)}</Text>
-              </View>
-              <View style={[
-                styles.statusBadge, 
-                order.status?.toUpperCase() === 'CANCELLED' ? styles.statusCancelled : styles.statusDelivered
-              ]}>
-                <Text style={[
-                  styles.statusText,
-                  order.status?.toUpperCase() === 'CANCELLED' ? styles.statusTextCancelled : styles.statusTextDelivered
-                ]}>{getDisplayStatus(order.status, order.order_type)}</Text>
-              </View>
+      {isLoading ? (
+        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', marginTop: 100 }}>
+          <ActivityIndicator size="large" color="#ff4500" />
+          <Text style={{ marginTop: 10, color: '#666' }}>Loading your orders...</Text>
+        </View>
+      ) : (
+        <FlatList
+          data={filteredOrders}
+          keyExtractor={keyExtractor}
+          renderItem={renderOrderItem}
+          initialNumToRender={5}
+          maxToRenderPerBatch={5}
+          windowSize={5}
+          removeClippedSubviews={Platform.OS !== 'web'}
+          contentContainerStyle={styles.scrollContent}
+          showsVerticalScrollIndicator={false}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={['#ff4500']} />}
+          ListEmptyComponent={
+            <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', marginTop: 80 }}>
+              <Ionicons name="receipt-outline" size={54} color="#ccc" />
+              <Text style={{ marginTop: 12, color: '#888', fontSize: 16 }}>No orders found</Text>
             </View>
-
-            {(() => {
-              const isDineIn = order.order_type === 'Dine In';
-              const isCatering = order.isCatering;
-              const normPayMethod = (order.payment_method || '').toLowerCase().replace(/[\s_-]/g, '');
-              const isCounter = normPayMethod === 'payatcounter' || normPayMethod === 'counter';
-              const isPartiallyPaid = (order.payment_status || '').toUpperCase() === 'PARTIALLY_PAID';
-              const isPaid = (order.payment_status || '').toUpperCase() === 'PAID';
-              const isUnpaidDineIn = isDineIn && (!isPaid || order.isOngoingDineIn);
-              const isUnpaidNonCatering = !isPaid && !isCatering && (order.status || '').toUpperCase() !== 'CANCELLED';
-
-              return (
-                <>
-                  <View style={{ flexDirection: 'row', gap: 12, marginBottom: 15, flexWrap: 'wrap' }}>
-                    <View style={styles.infoBadge}>
-                      <Text style={styles.infoBadgeLabel}>Order ID</Text>
-                      <Text style={styles.infoBadgeValue}>{order.id}</Text>
-                    </View>
-                    <View style={styles.infoBadge}>
-                      <Text style={styles.infoBadgeLabel}>Type</Text>
-                      <Text style={styles.infoBadgeValue}>
-                        {isDineIn
-                          ? `Dine In${order.table_number ? ` (${order.table_number})` : ''}`
-                          : order.order_type}
-                      </Text>
-                    </View>
-                    <View style={[styles.infoBadge, isPaid ? { backgroundColor: '#e8f5e9' } : (isPartiallyPaid ? {backgroundColor: '#e3f2fd'} : { backgroundColor: '#fff3e0' })]}>
-                      <Text style={styles.infoBadgeLabel}>Payment</Text>
-                      <Text style={[styles.infoBadgeValue, { color: isPaid ? '#16a34a' : (isPartiallyPaid ? '#0284c7' : '#ff4500'), fontWeight: 'bold' }]}>
-                        {isPaid ? 'Paid' : (isPartiallyPaid ? 'Partially Paid' : (order.order_type === 'Delivery' ? 'Cash on Delivery' : (isCounter ? 'Pay at Counter' : 'Pay Later')))}
-                      </Text>
-                    </View>
-                  </View>
-
-                  <View style={styles.orderDetails}>
-                    {order.image && order.image !== 'https://via.placeholder.com/150' ? (
-                      <Image source={{ uri: order.image }} style={styles.orderImage} />
-                    ) : (
-                      <View style={[styles.orderImage, { backgroundColor: '#fff0eb', alignItems: 'center', justifyContent: 'center' }]}>
-                        {isCatering ? (
-                          <Ionicons name="people-outline" size={26} color="#ff4500" />
-                        ) : (
-                          <Ionicons name="restaurant-outline" size={26} color="#ff4500" />
-                        )}
-                      </View>
-                    )}
-                    <View style={styles.orderInfo}>
-                      <Text style={styles.orderItems} numberOfLines={2}>
-                        {isCatering && Array.isArray(order.items) && order.items[0]
-                          ? `${order.items[0].name} (x${order.items[0].quantity} Guests)`
-                          : Array.isArray(order.items) 
-                          ? order.items.map((i: any) => `${i.quantity || 1}x ${i.name || 'Item'}`).join(', ') 
-                          : (typeof order.items === 'string' ? order.items : 'Items')}
-                      </Text>
-                      <Text style={styles.orderPrice}>Rs. {order.total}</Text>
-                      {isCatering && isPartiallyPaid && (
-                        <Text style={{ fontSize: 12, color: '#666', marginTop: 4 }}>
-                          Paid: Rs. {order.paid_amount || 0} • Bal: Rs. {order.balance_amount || 0}
-                        </Text>
-                      )}
-                    </View>
-                    {isCatering && isPartiallyPaid ? (
-                      <TouchableOpacity 
-                        style={[styles.reorderBtn, { backgroundColor: '#3395FF', borderColor: '#3395FF', minWidth: 100, alignItems: 'center', justifyContent: 'center' }]} 
-                        onPress={(e) => {
-                          e.stopPropagation();
-                          handlePayBalance(order);
-                        }}
-                        activeOpacity={0.8}
-                      >
-                        <Text style={[styles.reorderText, { color: '#ffffff', fontWeight: 'bold' }]}>Pay Balance</Text>
-                      </TouchableOpacity>
-                    ) : isUnpaidDineIn ? (
-                      <TouchableOpacity 
-                        style={[styles.reorderBtn, { backgroundColor: '#ff4500', borderColor: '#ff4500', minWidth: 100, alignItems: 'center', justifyContent: 'center' }]} 
-                        onPress={() => handleOrderPress(order)}
-                        activeOpacity={0.8}
-                      >
-                        <Text style={[styles.reorderText, { color: '#ffffff', fontWeight: 'bold' }]}>Track / Pay</Text>
-                      </TouchableOpacity>
-                    ) : (order.order_type === 'Delivery' || order.order_type === 'Takeaway' || order.order_type === 'Take Away') && !['COMPLETED', 'SERVED', 'DELIVERED', 'CANCELLED'].includes((order.status || '').toUpperCase()) ? (
-                      <TouchableOpacity 
-                        style={[styles.reorderBtn, { backgroundColor: '#ff4500', borderColor: '#ff4500', minWidth: 100, alignItems: 'center', justifyContent: 'center' }]} 
-                        onPress={() => handleOrderPress(order)}
-                        activeOpacity={0.8}
-                      >
-                        <Text style={[styles.reorderText, { color: '#ffffff', fontWeight: 'bold' }]}>Track Order</Text>
-                      </TouchableOpacity>
-                    ) : isUnpaidNonCatering ? (
-                      <TouchableOpacity 
-                        style={[styles.reorderBtn, { backgroundColor: '#ff4500', borderColor: '#ff4500', minWidth: 100, alignItems: 'center', justifyContent: 'center' }]} 
-                        onPress={() => handleOrderPress(order)}
-                        activeOpacity={0.8}
-                      >
-                        <Text style={[styles.reorderText, { color: '#ffffff', fontWeight: 'bold' }]}>Track / Pay</Text>
-                      </TouchableOpacity>
-                    ) : (
-                      <TouchableOpacity 
-                        style={[styles.reorderBtn, { backgroundColor: '#fff', borderColor: '#ff4500', minWidth: 100, alignItems: 'center', justifyContent: 'center' }]} 
-                        onPress={() => {
-                          if (isCatering) {
-                            router.push({ pathname: '/catering-order-details', params: { orderId: order.dbId } });
-                          } else {
-                            handleOrderPress(order);
-                          }
-                        }}
-                        activeOpacity={0.8}
-                      >
-                        <Text style={[styles.reorderText, { color: '#ff4500', fontWeight: 'bold' }]}>View Details</Text>
-                      </TouchableOpacity>
-                    )}
-                  </View>
-
-                  {/* Payment History for Catering */}
-                  {isCatering && order.payments && order.payments.length > 0 && (
-                    <View style={{ marginTop: 12, paddingTop: 12, borderTopWidth: 1, borderTopColor: '#f0f0f0' }}>
-                      <Text style={{ fontSize: 13, fontWeight: 'bold', color: '#444', marginBottom: 8 }}>Payment History</Text>
-                      {order.payments.map((p: any) => (
-                        <View key={p.id} style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6, backgroundColor: '#f9f9f9', padding: 8, borderRadius: 6 }}>
-                          <View>
-                            <Text style={{ fontSize: 12, fontWeight: 'bold', color: '#333' }}>{p.payment_type} ({p.payment_method})</Text>
-                            <Text style={{ fontSize: 10, color: '#777', marginTop: 2 }}>Txn: {p.transaction_id || 'N/A'}</Text>
-                            <Text style={{ fontSize: 10, color: '#777' }}>{formatDate(p.created_at)}</Text>
-                          </View>
-                          <View style={{ alignItems: 'flex-end', justifyContent: 'center' }}>
-                            <Text style={{ fontSize: 13, fontWeight: 'bold', color: p.payment_status === 'SUCCESS' ? '#16a34a' : '#ff4500' }}>Rs. {p.amount}</Text>
-                            <Text style={{ fontSize: 10, color: p.payment_status === 'SUCCESS' ? '#16a34a' : '#ff4500', marginTop: 2 }}>{p.payment_status}</Text>
-                          </View>
-                        </View>
-                      ))}
-                    </View>
-                  )}
-                </>
-              );
-            })()}
-          </TouchableOpacity>
-        ))}
-      </ScrollView>
+          }
+        />
+      )}
 
       {/* Bottom Navigation */}
       <BottomNavBar activeTab="orders" />

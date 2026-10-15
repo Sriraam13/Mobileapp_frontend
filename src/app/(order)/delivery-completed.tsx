@@ -3,9 +3,9 @@ import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Share, Alert, Pla
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useRouter, useLocalSearchParams } from 'expo-router';
-import { useCartStore } from '../../store';
+import { useCartStore, useRestaurantStore } from '../../store';
 import { useAuthStore } from '../../store/useAuthStore';
-import { useRestaurantStore } from '../../store';
+
 import { orderApi, customerApi, deliveryApi } from '../../services/apiService';
 import { formatDateOnly } from '../../utils/dateUtils';
 
@@ -109,7 +109,7 @@ export default function DeliveryCompletedScreen() {
   const tipAmt = Number(orderData?.order?.tip_amount || 0);
   const discountAmt = Number(orderData?.order?.discount_amount || 0);
   const grandTotal = totalAmt;
-  const paymentMethod = orderData?.order?.payment_method || params.paymentMethod || 'COD';
+  const paymentMethod = orderData?.order?.payment_method || params.paymentMethod || 'UPI';
   
   const deliveredTimelineEvent = trackingData?.timeline?.find((event: any) => event.status === 'DELIVERED');
   const deliveredAt = trackingData?.assignment?.delivered_at || orderData?.order?.delivered_at || deliveredTimelineEvent?.created_at;
@@ -142,7 +142,7 @@ export default function DeliveryCompletedScreen() {
       `🧾 Order Invoice — Udupi Restaurant`,
       `Order ID: ${orderIdDisplay}`,
       `Date: ${new Date().toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' })}`,
-      `Payment: ${params.paymentMethod || 'COD'}`,
+      `Payment: ${params.paymentMethod || 'UPI'}`,
       ``,
       `Items:`,
       ...items.map((i: any) => `  ${i.name} x${i.quantity || 1}  —  Rs. ${Number(i.price) * (i.quantity || 1)}`),
@@ -345,14 +345,24 @@ export default function DeliveryCompletedScreen() {
 
           <TouchableOpacity
             style={styles.homeBtn}
-            onPress={() => router.push({ pathname: '/invoice', params: { dbOrderId: params.dbOrderId || '', orderType: 'Delivery' } })}
+            onPress={() => router.push({
+              pathname: '/(checkout)/invoice' as any,
+              params: {
+                dbOrderId: String(params.dbOrderId || ''),
+                orderId: orderIdDisplay || '',
+                orderType: 'Delivery',
+                paymentMethod: paymentMethod || 'UPI',
+                finalTotal: String(totalAmt || ''),
+                cartData: JSON.stringify(items || []),
+              },
+            })}
             disabled={!params.dbOrderId}
           >
             <Ionicons name="document-text-outline" size={18} color="#fff" style={{ marginRight: 8 }} />
             <Text style={styles.homeBtnText}>Download Invoice</Text>
           </TouchableOpacity>
 
-          <TouchableOpacity style={styles.homeBtn} onPress={() => { router.dismissAll(); router.replace('/home'); }}>
+          <TouchableOpacity style={styles.homeBtn} onPress={() => router.replace('/(main)/home' as any)}>
             <Text style={styles.homeBtnText}>Back to Home</Text>
           </TouchableOpacity>
 
