@@ -60,7 +60,8 @@ export default function PaymentScreen() {
   const { setCurrentOrder, addPastOrder } = useOrderStore();
   const { selectedDeliveryAddress } = useAddressStore();
 
-  const isDigitalOnly = orderType === 'Take Away' || orderType === 'Delivery';
+  // Delivery temporarily allows Cash (COD) for testing purposes
+  const isDigitalOnly = orderType === 'Take Away';
   const [selectedMethodRaw, setSelectedMethod] = useState<PaymentMethod>(
     isDineInSettlement || orderType === 'Dine In' ? 'Pay at Counter' : 'UPI'
   );
@@ -484,6 +485,7 @@ export default function PaymentScreen() {
             },
           });
         } else if (orderType === 'Delivery') {
+          useLiveOrderStore.getState().setLiveOrder('Delivery', finalOrderId || '', String(finalDbId || ''), 'Preparing');
           const finalOrder = {
             orderId: finalOrderId,
             dbOrderId: finalDbId,
@@ -590,6 +592,29 @@ export default function PaymentScreen() {
                 {selectedMethod === 'UPI' && <Ionicons name="checkmark" size={14} color="#fff" />}
               </View>
             </TouchableOpacity>
+
+            {/* Cash on Delivery (COD) Option for Testing */}
+            <TouchableOpacity 
+              style={[styles.delMethodItem, selectedMethod === 'Cash' && styles.delMethodItemActive]} 
+              onPress={() => setSelectedMethod('Cash')} 
+              activeOpacity={0.8}
+            >
+              <View style={styles.delMethodIcon}>
+                <Ionicons name="cash-outline" size={24} color="#05a660" />
+              </View>
+              <View style={{ flex: 1 }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                  <Text style={styles.delMethodName}>Cash on Delivery (COD)</Text>
+                  <View style={styles.testBadge}>
+                    <Text style={styles.testBadgeText}>TESTING</Text>
+                  </View>
+                </View>
+                <Text style={styles.delMethodDesc}>Pay in cash to the rider upon delivery</Text>
+              </View>
+              <View style={[styles.radioCircle, selectedMethod === 'Cash' ? styles.radioSelected : styles.radioUnselected]}>
+                {selectedMethod === 'Cash' && <Ionicons name="checkmark" size={14} color="#fff" />}
+              </View>
+            </TouchableOpacity>
           </View>
         </ScrollView>
 
@@ -602,6 +627,8 @@ export default function PaymentScreen() {
             <Text style={styles.delPayBtnText}>
               {loading
                 ? 'Processing Order...'
+                : selectedMethod === 'Cash'
+                ? `Place Order (COD) • Rs. ${totalVal.toFixed(0)}`
                 : `Pay Rs. ${totalVal.toFixed(0)} via UPI`}
             </Text>
           </TouchableOpacity>
@@ -1231,6 +1258,18 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 16,
     fontWeight: 'bold',
+  },
+  testBadge: {
+    backgroundColor: '#e6f7f1',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 6,
+    marginLeft: 8,
+  },
+  testBadgeText: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#057a55',
   },
   failedDetailLabel: {
     fontSize: 12,

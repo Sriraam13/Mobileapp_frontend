@@ -87,7 +87,7 @@ export default function DeliveryCheckoutScreen() {
         <View style={styles.contactRow}>
           <View>
             <Text style={styles.sectionTitle}>Contact Number</Text>
-            <Text style={styles.contactNumberText}>{phone ||''}</Text>
+            <Text style={styles.contactNumberText}>{phone || '+91 98765 43210'}</Text>
           </View>
           <TouchableOpacity>
             <Text style={styles.changeBtnText}>Change</Text>
