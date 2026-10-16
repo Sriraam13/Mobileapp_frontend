@@ -91,6 +91,8 @@ export default function CheckoutScreen() {
           cart: formattedCart,
           subtotal,
           gst,
+          delivery_fee: 0,
+          packaging_fee: 0,
           discount_amount: discountAmount,
           discount_code: discountCode,
           total_amount: Math.max(finalToPay, 0),

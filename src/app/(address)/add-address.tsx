@@ -1,13 +1,14 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, Platform, StatusBar, Image, Alert, ActivityIndicator, RefreshControl, Modal, Pressable } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import * as Location from 'expo-location';
 import { API_BASE_URL } from '../../constants/api';
-import { useAuthStore, useAddressStore } from '../../store';
+import { useAuthStore, useAddressStore, useRestaurantStore } from '../../store';
 import BottomNavBar from '../../components/layout/BottomNavBar';
-import { isWithinDeliveryArea } from '../../utils/deliveryArea';
+import { isWithinDeliveryArea, checkDeliveryCoverage, DeliveryCoverageResult } from '../../utils/deliveryArea';
+import DeliveryUnavailableModal from '../../components/ui/DeliveryUnavailableModal';
 import { LIGHT_MAP_STYLE } from '../../constants/mapStyle';
 
 const MapView = Platform.OS !== 'web' ? require('react-native-maps').default : null;
@@ -19,6 +20,7 @@ export default function AddAddress() {
   const params = useLocalSearchParams<{ predefinedAddress?: string; latitude?: string; longitude?: string; addressType?: string }>();
   const { phone, customerId, customerName } = useAuthStore();
   const { addAddress, addresses, setSelectedDeliveryAddress } = useAddressStore();
+  const { selectedOutlet } = useRestaurantStore();
   
   const [addressType, setAddressType] = useState(params.addressType as string || 'Home');
   const [flat, setFlat] = useState('');
@@ -40,7 +42,15 @@ export default function AddAddress() {
   const [isSaving, setIsSaving] = useState(false);
   const [hasConfirmedLocation, setHasConfirmedLocation] = useState(Boolean(params.latitude && params.longitude));
   const [showDeliveryUnavailable, setShowDeliveryUnavailable] = useState(false);
+  const [coverageResult, setCoverageResult] = useState<DeliveryCoverageResult | null>(null);
   const mapRef = useRef<any>(null);
+
+  // Live coverage check against the selected branch (strict radius)
+  const liveCoverage = useMemo(
+    () => checkDeliveryCoverage(region.latitude, region.longitude, selectedOutlet),
+    [region.latitude, region.longitude, selectedOutlet],
+  );
+  const isOutOfRange = hasConfirmedLocation && !liveCoverage.isEligible;
 
   const detectLocation = useCallback(async (isManualPress = false) => {
     setIsLocating(true);
@@ -130,17 +140,39 @@ export default function AddAddress() {
     if (text.length > 2) {
       setIsSearching(true);
       try {
-        const apiKey = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY || 'AIzaSyA2qxAJag8F89Q_TdtjqU_42W6JAVJ5_qg';
-        const url = `https://maps.googleapis.com/maps/api/place/autocomplete/json?input=${encodeURIComponent(text)}&key=${apiKey}&components=country:in`;
-        const response = await fetch(url);
-        const data = await response.json();
-        if (data.status === 'OK') {
-          setSearchResults(data.predictions);
+        if (Platform.OS === 'web') {
+          // On Web, direct calls to Google Places API fail due to CORS.
+          // Use Expo Location geocoding or fallback gracefully.
+          try {
+            const geocoded = await Location.geocodeAsync(text + ', Chennai, Tamil Nadu');
+            if (geocoded && geocoded.length > 0) {
+              setSearchResults(
+                geocoded.slice(0, 5).map((item, idx) => ({
+                  place_id: `geo_${idx}_${item.latitude}_${item.longitude}`,
+                  description: `${text} (approx. ${item.latitude.toFixed(4)}, ${item.longitude.toFixed(4)})`,
+                  coords: { lat: item.latitude, lng: item.longitude },
+                }))
+              );
+            } else {
+              setSearchResults([]);
+            }
+          } catch {
+            setSearchResults([]);
+          }
         } else {
-          setSearchResults([]);
+          const apiKey = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY || 'AIzaSyA2qxAJag8F89Q_TdtjqU_42W6JAVJ5_qg';
+          const url = `https://maps.googleapis.com/maps/api/place/autocomplete/json?input=${encodeURIComponent(text)}&key=${apiKey}&components=country:in`;
+          const response = await fetch(url);
+          const data = await response.json();
+          if (data.status === 'OK') {
+            setSearchResults(data.predictions);
+          } else {
+            setSearchResults([]);
+          }
         }
       } catch (e) {
-        console.error("Error fetching places:", e);
+        // Silently handle network/CORS error and fallback to empty results
+        setSearchResults([]);
       } finally {
         setIsSearching(false);
       }
@@ -149,10 +181,41 @@ export default function AddAddress() {
     }
   };
 
-  const handleSelectPlace = async (placeId: string, description: string) => {
+  const handleSelectPlace = async (placeId: string, description: string, directCoords?: { lat: number; lng: number }) => {
     setSearchQuery(description);
     setSearchResults([]);
     try {
+      if (directCoords) {
+        const selectedRegion = {
+          latitude: directCoords.lat,
+          longitude: directCoords.lng,
+          latitudeDelta: 0.015,
+          longitudeDelta: 0.015,
+        };
+        setRegion(selectedRegion);
+        mapRef.current?.animateToRegion(selectedRegion, 500);
+        setHasConfirmedLocation(true);
+        setFullAddress(description);
+        return;
+      }
+
+      if (Platform.OS === 'web') {
+        const geocoded = await Location.geocodeAsync(description);
+        if (geocoded && geocoded.length > 0) {
+          const { latitude, longitude } = geocoded[0];
+          const selectedRegion = {
+            latitude,
+            longitude,
+            latitudeDelta: 0.015,
+            longitudeDelta: 0.015,
+          };
+          setRegion(selectedRegion);
+          setHasConfirmedLocation(true);
+          setFullAddress(description);
+        }
+        return;
+      }
+
       const apiKey = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY || 'AIzaSyA2qxAJag8F89Q_TdtjqU_42W6JAVJ5_qg';
       const url = `https://maps.googleapis.com/maps/api/place/details/json?place_id=${placeId}&fields=geometry&key=${apiKey}`;
       const response = await fetch(url);
@@ -171,7 +234,7 @@ export default function AddAddress() {
         setFullAddress(description);
       }
     } catch (e) {
-      console.error("Error fetching place details:", e);
+      // Fallback
     }
   };
 
@@ -202,7 +265,9 @@ export default function AddAddress() {
       return;
     }
 
-    if (!hasConfirmedLocation || !isWithinDeliveryArea(region.latitude, region.longitude)) {
+    const coverage = checkDeliveryCoverage(region.latitude, region.longitude, selectedOutlet);
+    if (!hasConfirmedLocation || !coverage.isEligible || !Number.isFinite(coverage.distanceKm)) {
+      setCoverageResult(coverage);
       setShowDeliveryUnavailable(true);
       return;
     }
@@ -322,7 +387,7 @@ export default function AddAddress() {
               <TouchableOpacity 
                 key={item.place_id} 
                 style={[styles.searchResultItem, index < searchResults.length - 1 && styles.searchResultBorder]}
-                onPress={() => handleSelectPlace(item.place_id, item.description)}
+                onPress={() => handleSelectPlace(item.place_id, item.description, item.coords)}
               >
                 <Ionicons name="location-outline" size={18} color="#666" style={{marginRight: 10}} />
                 <Text style={styles.searchResultText} numberOfLines={2}>{item.description}</Text>
@@ -528,7 +593,20 @@ export default function AddAddress() {
           </View>
         </View>
 
-        <TouchableOpacity style={styles.saveBtn} onPress={handleSave} disabled={isSaving}>
+        {isOutOfRange && (
+          <View style={{ marginHorizontal: 20, marginTop: 4, padding: 12, borderRadius: 12, backgroundColor: '#fff1f2', borderWidth: 1, borderColor: '#fecdd3', flexDirection: 'row', alignItems: 'center' }}>
+            <Ionicons name="warning" size={18} color="#e11d48" style={{ marginRight: 8 }} />
+            <Text style={{ flex: 1, color: '#be123c', fontSize: 12.5, fontWeight: '600' }}>
+              This location is {liveCoverage.distanceKm} km from {liveCoverage.outletName}. We deliver only within {liveCoverage.maxRadiusKm} km.
+            </Text>
+          </View>
+        )}
+
+        <TouchableOpacity
+          style={[styles.saveBtn, isOutOfRange && { backgroundColor: '#cbd5e1' }]}
+          onPress={handleSave}
+          disabled={isSaving}
+        >
           {isSaving ? (
             <ActivityIndicator color="#fff" size="small" />
           ) : (
@@ -538,31 +616,22 @@ export default function AddAddress() {
 
       </ScrollView>
 
-      <Modal
+      <DeliveryUnavailableModal
         visible={showDeliveryUnavailable}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setShowDeliveryUnavailable(false)}
-      >
-        <Pressable style={styles.deliveryModalBackdrop} onPress={() => setShowDeliveryUnavailable(false)}>
-          <Pressable style={styles.deliveryModalCard} onPress={() => undefined}>
-            <View style={styles.deliveryModalIcon}>
-              <Ionicons name="location-outline" size={26} color="#0BA01E" />
-            </View>
-            <Text style={styles.deliveryModalTitle}>Delivery unavailable</Text>
-            <Text style={styles.deliveryModalMessage}>Data Udipi isn&apos;t available here.</Text>
-            <TouchableOpacity
-              style={styles.deliveryModalButton}
-              onPress={() => {
-                setShowDeliveryUnavailable(false);
-                setSearchQuery('');
-              }}
-            >
-              <Text style={styles.deliveryModalButtonText}>Try another location</Text>
-            </TouchableOpacity>
-          </Pressable>
-        </Pressable>
-      </Modal>
+        onClose={() => {
+          setShowDeliveryUnavailable(false);
+          setSearchQuery('');
+        }}
+        distanceKm={coverageResult?.distanceKm}
+        maxRadiusKm={coverageResult?.maxRadiusKm || 5}
+        restaurantName={coverageResult?.outletName || selectedOutlet?.name || 'Data Udipi'}
+        alternateBranch={coverageResult?.alternateBranch}
+        customMessage={coverageResult?.message}
+        onTryAnotherAddress={() => {
+          setShowDeliveryUnavailable(false);
+          setSearchQuery('');
+        }}
+      />
 
       {/* Bottom Navigation */}
       <BottomNavBar activeTab="profile" />

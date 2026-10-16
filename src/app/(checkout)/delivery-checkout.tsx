@@ -5,8 +5,9 @@ import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useCartStore } from '../../store/useCartStore';
 import { useAddressStore } from '../../store/useAddressStore';
-import { useAuthStore } from '../../store';
-import { getDistanceInKm, isWithinDeliveryArea } from '../../utils/deliveryArea';
+import { useAuthStore, useRestaurantStore } from '../../store';
+import { getDistanceInKm, checkDeliveryCoverage, DeliveryCoverageResult } from '../../utils/deliveryArea';
+import DeliveryUnavailableModal from '../../components/ui/DeliveryUnavailableModal';
 
 export default function DeliveryCheckoutScreen() {
   const router = useRouter();
@@ -15,9 +16,12 @@ export default function DeliveryCheckoutScreen() {
   const { getSubtotal, getGst, getDiscountAmount } = useCartStore();
   const { selectedDeliveryAddress, addresses, selectedAddressId } = useAddressStore();
   const { phone } = useAuthStore();
+  const { selectedOutlet } = useRestaurantStore();
   
   const [instruction, setInstruction] = useState('');
   const [selectedTip, setSelectedTip] = useState<number | null>(null);
+  const [showCoverageModal, setShowCoverageModal] = useState(false);
+  const [coverageResult, setCoverageResult] = useState<DeliveryCoverageResult | null>(null);
   
   const selectedAddressObj = addresses.find(a => a.id == selectedAddressId);
   const deliveryAddressType = selectedAddressObj ? selectedAddressObj.type : 'Home';
@@ -25,7 +29,7 @@ export default function DeliveryCheckoutScreen() {
   const subtotal = getSubtotal();
   const gst = getGst();
   const discountAmount = getDiscountAmount();
-  const packagingCharges = 10;
+  const packagingCharges = 0;
   const deliveryFee = 30;
   
   const baseTotal = subtotal + packagingCharges + gst - discountAmount + deliveryFee;
@@ -83,7 +87,7 @@ export default function DeliveryCheckoutScreen() {
         <View style={styles.contactRow}>
           <View>
             <Text style={styles.sectionTitle}>Contact Number</Text>
-            <Text style={styles.contactNumberText}>{phone || '+91 98765 43210'}</Text>
+            <Text style={styles.contactNumberText}>{phone ||''}</Text>
           </View>
           <TouchableOpacity>
             <Text style={styles.changeBtnText}>Change</Text>
@@ -145,15 +149,14 @@ export default function DeliveryCheckoutScreen() {
               Alert.alert("Address Required", "Please select or add a delivery address before proceeding.");
               return;
             }
-            if (!isWithinDeliveryArea(selectedAddressObj?.latitude, selectedAddressObj?.longitude)) {
-              const distance = selectedAddressObj?.latitude != null && selectedAddressObj?.longitude != null
-                ? ` This location is approximately ${getDistanceInKm(selectedAddressObj.latitude, selectedAddressObj.longitude).toFixed(1)} km from Mugalivakkam.`
-                : '';
-              Alert.alert(
-                "Delivery unavailable",
-                `Data Udipi isn't available here. Delivery is available within 15 km.${distance}`,
-                [{ text: "Try another location", onPress: () => router.push('/add-address') }],
-              );
+            const coverage = checkDeliveryCoverage(
+              selectedAddressObj?.latitude,
+              selectedAddressObj?.longitude,
+              selectedOutlet
+            );
+            if (!coverage.isEligible) {
+              setCoverageResult(coverage);
+              setShowCoverageModal(true);
               return;
             }
             router.push({ pathname: '/payment', params: { tipAmount: selectedTip || 0, instructions: instruction } });
@@ -162,6 +165,20 @@ export default function DeliveryCheckoutScreen() {
           <Text style={styles.proceedBtnText}>Continue to Payment</Text>
         </TouchableOpacity>
       </View>
+
+      <DeliveryUnavailableModal
+        visible={showCoverageModal}
+        onClose={() => setShowCoverageModal(false)}
+        distanceKm={coverageResult?.distanceKm}
+        maxRadiusKm={coverageResult?.maxRadiusKm || 5}
+        restaurantName={coverageResult?.outletName || selectedOutlet?.name || 'Data Udipi'}
+        alternateBranch={coverageResult?.alternateBranch}
+        customMessage={coverageResult?.message}
+        onTryAnotherAddress={() => {
+          setShowCoverageModal(false);
+          router.push('/add-address');
+        }}
+      />
     </SafeAreaView>
   );
 }

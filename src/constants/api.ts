@@ -1,5 +1,5 @@
 const getApiUrl = () => {
-  const envUrl = process.env.EXPO_PUBLIC_API_BASE_URL?.trim();
+  const envUrl = process.env.EXPO_PUBLIC_API_URL?.trim() || process.env.EXPO_PUBLIC_API_BASE_URL?.trim();
   if (envUrl) {
     return envUrl;
   }

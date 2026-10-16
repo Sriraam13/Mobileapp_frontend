@@ -81,7 +81,7 @@ export default function PaymentScreen() {
   let baseDeliveryTotal = 0;
   if (orderType === 'Delivery') {
     const deliveryFee = 30;
-    const packagingCharges = 10;
+    const packagingCharges = 0;
     baseDeliveryTotal = subtotal + deliveryFee + packagingCharges + gst - discountAmount;
     totalVal = baseDeliveryTotal + tipAmount;
   }
@@ -142,6 +142,8 @@ export default function PaymentScreen() {
           customer_latitude: selectedAddressObj?.latitude,
           customer_longitude: selectedAddressObj?.longitude,
           delivery_instructions: (params.instructions as string) || selectedAddressObj?.delivery_instructions || null,
+          delivery_fee: orderType === 'Delivery' ? 30 : 0,
+          packaging_fee: 0,
           tip_amount: tipAmount,
           payment_method: selectedMethod,
           phone: userPhone,
@@ -421,6 +423,8 @@ export default function PaymentScreen() {
             customer_latitude: selectedAddressObj?.latitude,
             customer_longitude: selectedAddressObj?.longitude,
             delivery_instructions: (params.instructions as string) || selectedAddressObj?.delivery_instructions || null,
+            delivery_fee: orderType === 'Delivery' ? 30 : 0,
+            packaging_fee: 0,
             tip_amount: tipAmount,
             payment_method: selectedMethod || 'Cash',
             phone: userPhone,
