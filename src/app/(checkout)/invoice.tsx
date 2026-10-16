@@ -61,7 +61,7 @@ export default function InvoiceScreen() {
     const dbOrderId = (params.dbOrderId as string | undefined) || (params.orderId ? (params.orderId as string).replace(/\D/g, '') : undefined);
     if (!dbOrderId) return;
 
-    const restaurantId = Number(selectedOutlet?.restaurant_id || selectedOutlet?.id || 1);
+    const restaurantId = Number(params.restaurantId || selectedOutlet?.restaurant_id || selectedOutlet?.id || 1);
 
     orderApi.getOrderDetails(dbOrderId, restaurantId)
       .then(data => setOrderData(data))

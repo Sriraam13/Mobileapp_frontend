@@ -113,6 +113,7 @@ export default function OrderDetailsScreen() {
         billNo: order.bill_no ? String(order.bill_no) : '',
         orderType: String(order.order_type || 'Dine In'),
         tableNumber: String(order.table_number || order.table || ''),
+        restaurantId: String(order.restaurant_id || params.restaurantId || ''),
         finalTotal: String(order.total_amount || order.finalTotal || order.total || ''),
         subtotal: String(order.subtotal || ''),
         discountAmount: String(order.discount_amount || '0'),

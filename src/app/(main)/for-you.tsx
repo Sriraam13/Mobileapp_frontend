@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, StatusBar, Image, Alert, ActivityIndicator, Platform } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 
@@ -9,7 +9,6 @@ import { useAuthStore, useRestaurantStore, useFavoritesStore, useCartStore } fro
 import { customerApi } from '../../services/apiService';
 import BottomNavBar from '../../components/layout/BottomNavBar';
 import ViewCartButton from '../../components/layout/ViewCartButton';
-import AddToCartToast from '../../components/ui/AddToCartToast';
 
 interface RecommendationItem {
   id: number;
@@ -46,13 +45,15 @@ export default function ForYou() {
   const customerId = useAuthStore(s => s.customerId);
   const selectedOutlet = useRestaurantStore(s => s.selectedOutlet);
   const { favorites, setFavorites, addFavorite, removeFavorite, isFavorite } = useFavoritesStore();
+  const insets = useSafeAreaInsets();
   const addItem = useCartStore(s => s.addItem);
-  const cartItemCount = useCartStore((state) => Object.values(state.items).reduce((acc, item) => acc + (item?.quantity || 0), 0));
+  const incrementQuantity = useCartStore(s => s.incrementQuantity);
+  const decrementQuantity = useCartStore(s => s.decrementQuantity);
+  const cart = useCartStore(s => s.items);
+  const cartItemCount = useCartStore((state) => Object.keys(state.items).length);
 
   const [data, setData] = useState<RecommendationsData | null>(null);
   const [loading, setLoading] = useState(true);
-  const [toastVisible, setToastVisible] = useState(false);
-  const [addedItemName, setAddedItemName] = useState('');
 
   useEffect(() => {
     const loadForYouData = async () => {
@@ -100,15 +101,15 @@ export default function ForYou() {
           name: currentItem.name,
           price: currentItem.price,
           image_url: currentItem.image_url || null,
-          is_veg: currentItem.is_veg || true
+          is_veg: currentItem.is_veg ?? true
         });
         // Optimistically update local data
         if (data) {
           setData({ ...data, favorites: [...data.favorites, currentItem] });
         }
       }
-    } catch (e) {
-      Alert.alert('Error', 'Failed to update favorites');
+    } catch (e: any) {
+      Alert.alert('Error', e?.message || 'Failed to update favorites');
     }
   };
 
@@ -124,9 +125,8 @@ export default function ForYou() {
       price: Number(item.price),
       image: getFullImageUrl(item.image_url, item.name),
       category: 'Favorite',
+      quantity: 1,
     });
-    setAddedItemName(item.name);
-    setToastVisible(true);
   };
 
   const handleComboAddToCart = (combo: any) => {
@@ -136,9 +136,8 @@ export default function ForYou() {
       price: Number(combo.price),
       image: getFullImageUrl(combo.image_url, combo.name),
       category: 'Combo',
+      quantity: 1,
     });
-    setAddedItemName(combo.name);
-    setToastVisible(true);
   };
 
   const renderItemCard = (item: RecommendationItem) => (
@@ -169,13 +168,33 @@ export default function ForYou() {
 
       <View style={styles.priceRow}>
         <Text style={styles.dishPrice}>Rs. {item.price}</Text>
-        <TouchableOpacity
-          style={styles.addCircleBtn}
-          activeOpacity={0.8}
-          onPress={() => handleAddToCart(item)}
-        >
-          <Ionicons name="add" size={18} color="#fff" />
-        </TouchableOpacity>
+        {cart[item.menu_item_id] && cart[item.menu_item_id].quantity > 0 ? (
+          <View style={styles.stepper}>
+            <TouchableOpacity
+              style={styles.stepBtnMinus}
+              activeOpacity={0.7}
+              onPress={() => decrementQuantity(item.menu_item_id)}
+            >
+              <Ionicons name="remove" size={14} color="#ff4500" />
+            </TouchableOpacity>
+            <Text style={styles.stepVal}>{cart[item.menu_item_id].quantity}</Text>
+            <TouchableOpacity
+              style={styles.stepBtnPlus}
+              activeOpacity={0.7}
+              onPress={() => incrementQuantity(item.menu_item_id)}
+            >
+              <Ionicons name="add" size={14} color="#fff" />
+            </TouchableOpacity>
+          </View>
+        ) : (
+          <TouchableOpacity
+            style={styles.addCircleBtn}
+            activeOpacity={0.8}
+            onPress={() => handleAddToCart(item)}
+          >
+            <Ionicons name="add" size={18} color="#fff" />
+          </TouchableOpacity>
+        )}
       </View>
     </View>
   );
@@ -332,18 +351,9 @@ export default function ForYou() {
         </ScrollView>
       )}
 
-      {/* Add To Cart Toast Notification */}
-      <AddToCartToast
-        visible={toastVisible}
-        itemName={addedItemName}
-        itemCount={cartItemCount}
-        onDismiss={() => setToastVisible(false)}
-        bottomOffset={Platform.OS === 'ios' ? 84 : 74}
-      />
-
-      {/* Floating View Cart Button when cart has items and toast is not showing */}
-      {cartItemCount > 0 && !toastVisible && (
-        <View style={styles.floatingCartContainer}>
+      {/* Floating View Cart Button (same placement as Home/Menu) */}
+      {cartItemCount > 0 && (
+        <View style={[styles.floatingCartContainer, { bottom: Math.max(insets.bottom, Platform.OS === 'android' ? 24 : 12) + 76 }]}>
           <ViewCartButton />
         </View>
       )}
@@ -570,10 +580,40 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     fontSize: 14,
   },
+  stepper: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#ff4500',
+    borderRadius: 16,
+    overflow: 'hidden',
+    height: 30,
+  },
+  stepBtnMinus: {
+    width: 28,
+    height: '100%',
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#fff',
+  },
+  stepBtnPlus: {
+    width: 28,
+    height: '100%',
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#ff4500',
+  },
+  stepVal: {
+    minWidth: 22,
+    textAlign: 'center',
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#1c1c1e',
+  },
   floatingCartContainer: {
     position: 'absolute',
-    bottom: 74,
-    alignSelf: 'center',
-    zIndex: 999,
+    right: 16,
+    alignItems: 'flex-end',
+    zIndex: 99,
   },
 });

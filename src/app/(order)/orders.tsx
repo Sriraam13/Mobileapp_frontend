@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import { View, Text, StyleSheet, FlatList, TouchableOpacity, StatusBar, Image, RefreshControl, ActivityIndicator, Platform } from 'react-native';
+import { View, Text, StyleSheet, FlatList, TouchableOpacity, StatusBar, Image, RefreshControl, ActivityIndicator, Platform, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter, useNavigation } from 'expo-router';
@@ -93,6 +93,9 @@ export default function Orders() {
               id: finalOrderId,
               dbId: o.id,
               restaurant: o.restaurant_id === 2 ? 'MGR Nagar' : 'Mugalivakkam',
+              restaurant_id: o.restaurant_id,
+              bill_no: o.bill_no,
+              dine_in_session_id: o.dine_in_session_id,
               date: o.created_at || '2000-01-01T00:00:00Z',
               status: o.status || 'Pending',
               payment_status: isPaidStatus ? 'Paid' : (o.payment_status || (isCounter ? 'Pay at Counter' : 'Pending')),
@@ -157,7 +160,10 @@ export default function Orders() {
           return {
             id: o.orderId || `ORD-${String(o.dbOrderId || o.id || 0).padStart(6, '0')}`,
             dbId: o.dbOrderId || o.id,
-            restaurant: 'Data Udipi',
+            restaurant: o.restaurant_id === 2 ? 'MGR Nagar' : 'Mugalivakkam',
+            restaurant_id: o.restaurant_id || o.restaurantId,
+            bill_no: o.bill_no || o.billNo,
+            dine_in_session_id: o.dine_in_session_id || o.sessionId,
             date: o.date || o.created_at || '2000-01-01T00:00:00Z',
             status: o.status || 'Pending',
             payment_status: isPaidStatus ? 'Paid' : (o.payment_status || (isCounter ? 'Pay at Counter' : 'Pending')),
@@ -171,6 +177,94 @@ export default function Orders() {
         });
       }
 
+      // Consolidate Dine In orders belonging to the same bill or dine-in session
+      const consolidateDineInOrders = (orderList: any[]) => {
+        const consolidated: any[] = [];
+        const groupMap = new Map<string, any>();
+
+        for (const ord of orderList) {
+          if (ord.isCatering || ord.order_type !== 'Dine In') {
+            consolidated.push(ord);
+            continue;
+          }
+
+          let groupKey: string | null = null;
+          if (ord.bill_no) {
+            groupKey = `bill_${ord.restaurant_id || ord.restaurant}_${ord.bill_no}`;
+          } else if (ord.dine_in_session_id) {
+            groupKey = `sess_${ord.restaurant_id || ord.restaurant}_${ord.dine_in_session_id}`;
+          } else if (ord.table_number && (ord.payment_status || '').toUpperCase() !== 'PAID') {
+            groupKey = `unpaid_table_${ord.restaurant_id || ord.restaurant}_${ord.table_number}`;
+          }
+
+          if (!groupKey) {
+            consolidated.push(ord);
+            continue;
+          }
+
+          if (groupMap.has(groupKey)) {
+            const existing = groupMap.get(groupKey);
+
+            // Merge items: combine quantities for matching menu items
+            const existingItems = [...(existing.items || [])];
+            const incomingItems = Array.isArray(ord.items) ? ord.items : [];
+
+            for (const newItem of incomingItems) {
+              const matchIdx = existingItems.findIndex((it: any) => {
+                const sameId = (it.menu_item_id && newItem.menu_item_id && it.menu_item_id === newItem.menu_item_id) ||
+                               (it.id && newItem.id && it.id === newItem.id);
+                const sameName = it.name && newItem.name && it.name.trim().toLowerCase() === newItem.name.trim().toLowerCase();
+                return sameId || sameName;
+              });
+
+              if (matchIdx >= 0) {
+                existingItems[matchIdx] = {
+                  ...existingItems[matchIdx],
+                  quantity: (Number(existingItems[matchIdx].quantity) || 1) + (Number(newItem.quantity) || 1),
+                };
+              } else {
+                existingItems.push(newItem);
+              }
+            }
+            existing.items = existingItems;
+
+            // Recalculate combined total
+            const itemsSum = existingItems.reduce(
+              (sum: number, it: any) => sum + (Number(it.price) || 0) * (Number(it.quantity) || 1),
+              0
+            );
+            existing.total = Math.max(Number(existing.total) || 0, Number(ord.total) || 0, itemsSum);
+
+            if (!existing.bill_no && ord.bill_no) existing.bill_no = ord.bill_no;
+            if (!existing.dine_in_session_id && ord.dine_in_session_id) existing.dine_in_session_id = ord.dine_in_session_id;
+
+            const curStatus = (existing.status || '').toUpperCase();
+            const newStatus = (ord.status || '').toUpperCase();
+            if (['PREPARING', 'READY', 'CONFIRMED', 'PENDING'].includes(newStatus)) {
+              existing.status = ord.status;
+            } else if (curStatus !== 'SERVED' && newStatus === 'SERVED') {
+              existing.status = 'SERVED';
+            }
+
+            if ((ord.payment_status || '').toUpperCase() === 'PAID') {
+              existing.payment_status = 'Paid';
+            }
+
+            if ((!existing.image || existing.image.includes('placeholder')) && existingItems[0]) {
+              const firstIt = existingItems[0];
+              existing.image = firstIt.image_url ? getFullImageUrl(firstIt.image_url, firstIt.name) : (firstIt.image || existing.image);
+            }
+          } else {
+            groupMap.set(groupKey, ord);
+            consolidated.push(ord);
+          }
+        }
+
+        return consolidated;
+      };
+
+      formattedOrders = consolidateDineInOrders(formattedOrders);
+
       // Merge active ongoing dine-in order under ONE single order ID only if truly active
       const activeRounds = (dineInSession.orderRounds || []).filter(
         (r: any) => (r.status || '').toUpperCase() !== 'CANCELLED'
@@ -178,36 +272,49 @@ export default function Orders() {
       const isDineInActuallyActive = dineInSession.isActive && dineInSession.activeOrderId && (activeRounds.length > 0 || (dineInSession.orderRounds || []).length === 0) && Number(dineInSession.totalAmount || 0) > 0;
 
       if (isDineInActuallyActive) {
-        const existingIndex = formattedOrders.findIndex(
-          (o: any) => o.id === dineInSession.activeOrderId || String(o.dbId) === String(dineInSession.activeDbOrderId)
-        );
+        // Collect all indices of orders that belong to this active session
+        const matchingIndices: number[] = [];
+        formattedOrders.forEach((o: any, idx: number) => {
+          const isSameSession = Boolean(dineInSession.sessionDbId && o.dine_in_session_id && Number(o.dine_in_session_id) === Number(dineInSession.sessionDbId));
+          const isSameOrder = o.id === dineInSession.activeOrderId || String(o.dbId) === String(dineInSession.activeDbOrderId);
+          const isRoundOrder = (dineInSession.orderRounds || []).some((r: any) => String(r.id) === String(o.dbId) || String(r.orderId) === String(o.id));
+          const isSameTableUnpaid = o.order_type === 'Dine In' && o.table_number && dineInSession.tableNumber && o.table_number === dineInSession.tableNumber && (o.payment_status || '').toUpperCase() !== 'PAID';
+
+          if (isSameSession || isSameOrder || isRoundOrder || isSameTableUnpaid) {
+            matchingIndices.push(idx);
+          }
+        });
+
+        let sessionBillNo = null;
+        for (const idx of matchingIndices) {
+          if (formattedOrders[idx].bill_no) {
+            sessionBillNo = formattedOrders[idx].bill_no;
+            break;
+          }
+        }
+
+        const primaryMatch = matchingIndices.length > 0 ? formattedOrders[matchingIndices[0]] : null;
+
         const activeOrderCard = {
-          id: dineInSession.activeOrderId,
-          dbId: dineInSession.activeDbOrderId,
-          restaurant: selectedOutlet?.name || 'Data Udipi',
+          id: dineInSession.activeOrderId || (primaryMatch ? primaryMatch.id : 'ORD-ACTIVE'),
+          dbId: dineInSession.activeDbOrderId || (primaryMatch ? primaryMatch.dbId : null),
+          restaurant: (primaryMatch ? primaryMatch.restaurant : null) || selectedOutlet?.name || 'Data Udipi',
+          restaurant_id: (primaryMatch ? primaryMatch.restaurant_id : null) || selectedOutlet?.restaurant_id || 1,
+          bill_no: sessionBillNo,
+          dine_in_session_id: dineInSession.sessionDbId,
           date: new Date().toISOString(),
           status: 'PREPARING',
-          payment_status: 'Pending',
+          payment_status: 'Pay Later',
           table_number: dineInSession.tableNumber,
-          items: dineInSession.orderedItems || [],
-          total: dineInSession.totalAmount || 0,
-          image: dineInSession.orderedItems?.[0]?.image ? getFullImageUrl(dineInSession.orderedItems[0].image, dineInSession.orderedItems[0].name) : 'https://via.placeholder.com/150',
+          items: (dineInSession.orderedItems && dineInSession.orderedItems.length > 0) ? dineInSession.orderedItems : (primaryMatch ? primaryMatch.items : []),
+          total: Number(dineInSession.totalAmount || 0) > 0 ? dineInSession.totalAmount : (primaryMatch ? primaryMatch.total : 0),
+          image: dineInSession.orderedItems?.[0]?.image ? getFullImageUrl(dineInSession.orderedItems[0].image, dineInSession.orderedItems[0].name) : (primaryMatch ? primaryMatch.image : 'https://via.placeholder.com/150'),
           order_type: 'Dine In',
           isOngoingDineIn: true,
         };
 
-        if (existingIndex >= 0) {
-          const currentStatus = (formattedOrders[existingIndex].status || '').toUpperCase();
-          if (currentStatus !== 'CANCELLED') {
-            formattedOrders[existingIndex] = {
-              ...formattedOrders[existingIndex],
-              ...activeOrderCard,
-              status: formattedOrders[existingIndex].status || 'PREPARING',
-            };
-          }
-        } else {
-          formattedOrders.unshift(activeOrderCard);
-        }
+        formattedOrders = formattedOrders.filter((_, idx) => !matchingIndices.includes(idx));
+        formattedOrders.unshift(activeOrderCard);
       }
 
       // Helper to compute timestamps safely
@@ -287,11 +394,33 @@ export default function Orders() {
       if (activeTab === 'All') return true;
       
       const status = (order.status || '').toUpperCase();
-      if (activeTab === 'Delivered' || activeTab === 'Completed') {
-        return ['SERVED', 'COMPLETED', 'DELIVERED'].includes(status) && order.payment_status?.toUpperCase() === 'PAID';
+      const isPaid = (order.payment_status || '').toUpperCase() === 'PAID';
+      const isCancelled = status === 'CANCELLED';
+
+      if (activeTab === 'Ongoing') {
+        if (isCancelled) return false;
+        if (order.isOngoingDineIn) return true;
+        if (order.order_type === 'Dine In') {
+          return !isPaid || ['CONFIRMED', 'PENDING', 'PREPARING', 'READY'].includes(status);
+        }
+        if (['CONFIRMED', 'PENDING', 'PREPARING', 'READY', 'RIDER_ASSIGNED', 'PICKED_UP', 'OUT_FOR_DELIVERY', 'ON_THE_WAY'].includes(status)) {
+          return true;
+        }
+        if (!isPaid && !order.isCatering) return true;
+        if (order.isCatering && (order.payment_status || '').toUpperCase() === 'PARTIALLY_PAID') return true;
+        return false;
       }
+
+      if (activeTab === 'Delivered' || activeTab === 'Completed') {
+        if (isCancelled) return false;
+        if (order.order_type === 'Dine In') {
+          return isPaid && ['SERVED', 'COMPLETED'].includes(status);
+        }
+        return ['SERVED', 'COMPLETED', 'DELIVERED'].includes(status) && isPaid;
+      }
+
       if (activeTab === 'Cancelled' || activeTab === 'CANCELLED') {
-        return status === 'CANCELLED';
+        return isCancelled;
       }
       
       return status === activeTab.toUpperCase();
@@ -461,10 +590,19 @@ export default function Orders() {
         </View>
 
         <View style={{ flexDirection: 'row', gap: 12, marginBottom: 15, flexWrap: 'wrap' }}>
-          <View style={styles.infoBadge}>
-            <Text style={styles.infoBadgeLabel}>Order ID</Text>
-            <Text style={styles.infoBadgeValue}>{order.id}</Text>
-          </View>
+          {isDineIn ? (
+            <View style={styles.infoBadge}>
+              <Text style={styles.infoBadgeLabel}>Bill No</Text>
+              <Text style={styles.infoBadgeValue}>
+                {order.bill_no ? `#${order.bill_no}` : `#${String(order.dbId || order.id).replace(/\D/g, '')}`}
+              </Text>
+            </View>
+          ) : (
+            <View style={styles.infoBadge}>
+              <Text style={styles.infoBadgeLabel}>Order ID</Text>
+              <Text style={styles.infoBadgeValue}>{order.id}</Text>
+            </View>
+          )}
           <View style={styles.infoBadge}>
             <Text style={styles.infoBadgeLabel}>Type</Text>
             <Text style={styles.infoBadgeValue}>
@@ -599,19 +737,25 @@ export default function Orders() {
       </View>
 
       {/* Filter Tabs */}
-      <View style={styles.filterContainer}>
-        {['All', 'Completed', 'Cancelled'].map(tab => {
-          const isSelected = activeTab === tab || (activeTab === 'Delivered' && tab === 'Completed');
-          return (
-            <TouchableOpacity 
-              key={tab} 
-              style={[styles.filterBtn, isSelected && styles.filterBtnActive]}
-              onPress={() => setActiveTab(tab === 'Completed' ? 'Delivered' : tab)}
-            >
-              <Text style={[styles.filterText, isSelected && styles.filterTextActive]}>{tab}</Text>
-            </TouchableOpacity>
-          )
-        })}
+      <View style={styles.filterWrapper}>
+        <ScrollView 
+          horizontal 
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.filterContainer}
+        >
+          {['All', 'Ongoing', 'Completed', 'Cancelled'].map(tab => {
+            const isSelected = activeTab === tab || (activeTab === 'Delivered' && tab === 'Completed');
+            return (
+              <TouchableOpacity 
+                key={tab} 
+                style={[styles.filterBtn, isSelected && styles.filterBtnActive]}
+                onPress={() => setActiveTab(tab === 'Completed' ? 'Delivered' : tab)}
+              >
+                <Text style={[styles.filterText, isSelected && styles.filterTextActive]}>{tab}</Text>
+              </TouchableOpacity>
+            )
+          })}
+        </ScrollView>
       </View>
 
       {isLoading ? (
@@ -666,14 +810,18 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: 'bold',
   },
-  filterContainer: {
-    flexDirection: 'row',
-    paddingHorizontal: 20,
-    paddingVertical: 15,
+  filterWrapper: {
     backgroundColor: '#fff',
     borderBottomWidth: 1,
     borderBottomColor: '#f0f0f0',
+  },
+  filterContainer: {
+    flexDirection: 'row',
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    backgroundColor: '#fff',
     gap: 10,
+    alignItems: 'center',
   },
   filterBtn: {
     paddingHorizontal: 15,
