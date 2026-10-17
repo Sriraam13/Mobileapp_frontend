@@ -37,6 +37,8 @@ export interface CartItem {
   note?: string;
 }
 
+const normalizeCartKey = (id: string | number) => String(id).trim();
+
 export type OrderType = 'Dine In' | 'Take Away' | 'Delivery';
 
 interface CartState {
@@ -79,45 +81,52 @@ export const useCartStore = create<CartState>()(
   discountCode: null,
 
   addItem: (item) => set((state) => {
-    const existing = state.items[item.id];
+    const normalizedId = normalizeCartKey(item.id);
+    const existing = state.items[normalizedId] || state.items[item.id] || Object.values(state.items).find((entry) => String(entry.id) === normalizedId);
+    const nextQuantity = Math.max(1, Number(item.quantity) || 1);
     return {
       items: {
         ...state.items,
-        [item.id]: {
+        [normalizedId]: {
           ...item,
-          quantity: existing ? existing.quantity + (item.quantity || 1) : (item.quantity || 1)
+          id: normalizedId,
+          quantity: existing ? existing.quantity + nextQuantity : nextQuantity,
         }
       }
     };
   }),
 
   removeItem: (id) => set((state) => {
-    const { [id]: _, ...rest } = state.items;
-    return { items: rest };
+    const normalizedId = normalizeCartKey(id);
+    const { [normalizedId]: _, ...rest } = state.items;
+    const altKeys = Object.fromEntries(Object.entries(state.items).filter(([key]) => key !== normalizedId && String(key) !== normalizedId));
+    return { items: altKeys };
   }),
 
   incrementQuantity: (id) => set((state) => {
-    const existing = state.items[id];
+    const normalizedId = normalizeCartKey(id);
+    const existing = state.items[normalizedId] || state.items[id] || Object.values(state.items).find((entry) => String(entry.id) === normalizedId);
     if (!existing) return state;
     return {
       items: {
         ...state.items,
-        [id]: { ...existing, quantity: existing.quantity + 1 }
+        [normalizeCartKey(existing.id)]: { ...existing, id: normalizeCartKey(existing.id), quantity: existing.quantity + 1 }
       }
     };
   }),
 
   decrementQuantity: (id) => set((state) => {
-    const existing = state.items[id];
+    const normalizedId = normalizeCartKey(id);
+    const existing = state.items[normalizedId] || state.items[id] || Object.values(state.items).find((entry) => String(entry.id) === normalizedId);
     if (!existing) return state;
     if (existing.quantity <= 1) {
-      const { [id]: _, ...rest } = state.items;
+      const { [normalizeCartKey(existing.id)]: _, ...rest } = state.items;
       return { items: rest };
     }
     return {
       items: {
         ...state.items,
-        [id]: { ...existing, quantity: existing.quantity - 1 }
+        [normalizeCartKey(existing.id)]: { ...existing, id: normalizeCartKey(existing.id), quantity: existing.quantity - 1 }
       }
     };
   }),

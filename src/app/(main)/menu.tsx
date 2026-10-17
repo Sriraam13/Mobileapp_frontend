@@ -433,6 +433,13 @@ export default function App() {
             setAllCategories(Array.from(rawCategoryMap.values()));
             setRegions(["All Regions", ...Array.from(validRegions)]);
             setMenuItems(formattedItems);
+
+            // Publish to the shared store so the voice agent can resolve spoken
+            // dish names against the real menu instead of guessing.
+            useRestaurantStore.getState().setMenuItems(formattedItems);
+            useRestaurantStore.getState().setCategories(
+                Array.from(categoryMap.values()).map((c: any) => ({ id: c.id, label: c.label }))
+            );
         } catch (e) {
             console.error("Error fetching menu data", e);
         } finally {

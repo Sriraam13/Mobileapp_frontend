@@ -22,6 +22,7 @@ import { create } from 'zustand';
 import { executeSingleAction, setActiveRouter, UIAction } from '../utils/mobileAgentActionDispatcher';
 import { resolveRoute } from '../utils/agentRegistry';
 import { getMobileAgentContext } from '../utils/agentContext';
+import { buildMenuKeyterms, matchMenuItem, normalizeName } from '../utils/menuMatching';
 import { API_BASE_URL } from '../constants/api';
 import { useAuthStore } from '../store/useAuthStore';
 import { useRestaurantStore } from '../store/useRestaurantStore';
@@ -140,15 +141,48 @@ interface VapiState {
   toggleMute: () => void;
   clearMessages: () => void;
   setupListeners: (routerRef: any) => void;
+  prewarm: () => void;
   notifyRouteChanged: (route: string) => void;
 }
 
 // ─── Backend tool executor (READ-ONLY data fetch) ─────────────────────────────
 
-async function fetchAgentData(toolName: string, args: Record<string, any>): Promise<any> {
+/**
+ * Short-lived response cache + in-flight request dedupe.
+ * Voice turns frequently repeat the same read (e.g. menu_search for the same
+ * dish), and every extra network round-trip is dead air for the caller.
+ */
+const AGENT_TOOL_TIMEOUT_MS = 6000;
+const AGENT_TOOL_CACHE_TTL: Record<string, number> = {
+  menu_search: 60000,
+  catering_get_data: 60000,
+  customer_get_profile: 30000,
+  customer_get_rewards: 30000,
+};
+
+const agentDataCache = new Map<string, { timestamp: number; data?: any; promise?: Promise<any> }>();
+
+export function clearAgentDataCache() {
+  agentDataCache.clear();
+}
+
+// Cached reads are outlet-scoped. If the user switches outlet mid-session the
+// cached menu is no longer valid, so drop it immediately.
+useRestaurantStore.subscribe((state: any, prevState: any) => {
+  if (state?.selectedOutlet?.restaurant_id !== prevState?.selectedOutlet?.restaurant_id) {
+    clearAgentDataCache();
+  }
+});
+
+async function fetchAgentDataNetwork(
+  toolName: string,
+  args: Record<string, any>,
+  restaurantId: any,
+): Promise<any> {
   const auth = useAuthStore.getState();
-  const restaurant = useRestaurantStore.getState();
-  const restaurantId = restaurant.selectedOutlet?.restaurant_id;
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), AGENT_TOOL_TIMEOUT_MS);
 
   try {
     const response = await fetch(`${API_BASE_URL}/api/v1/public/mcp/mobile-agent-tool`, {
@@ -161,6 +195,7 @@ async function fetchAgentData(toolName: string, args: Record<string, any>): Prom
         phone: auth.phone,
         restaurant_id: restaurantId,
       }),
+      signal: controller.signal,
     });
 
     if (!response.ok) {
@@ -171,9 +206,57 @@ async function fetchAgentData(toolName: string, args: Record<string, any>): Prom
 
     return await response.json();
   } catch (e: any) {
+    if (e?.name === 'AbortError') {
+      console.warn(`[VapiStore] Tool timed out ${toolName} after ${AGENT_TOOL_TIMEOUT_MS}ms`);
+      return { error: 'That took too long to load. Please try again.' };
+    }
     console.error(`[VapiStore] Tool network error ${toolName}:`, e);
     return { error: 'Network error. Could not retrieve data.' };
+  } finally {
+    clearTimeout(timeoutId);
   }
+}
+
+async function fetchAgentData(toolName: string, args: Record<string, any>): Promise<any> {
+  const restaurant = useRestaurantStore.getState();
+  const restaurantId = restaurant.selectedOutlet?.restaurant_id;
+
+  const ttl = AGENT_TOOL_CACHE_TTL[toolName] ?? 0;
+  if (ttl <= 0) {
+    return fetchAgentDataNetwork(toolName, args, restaurantId);
+  }
+
+  const cacheKey = `${toolName}|${restaurantId ?? 'none'}|${JSON.stringify(args)}`;
+  const now = Date.now();
+  const existing = agentDataCache.get(cacheKey);
+
+  if (existing) {
+    if (existing.data && now - existing.timestamp < ttl) {
+      console.log(`[VapiStore] Tool cache hit: ${toolName}`);
+      return existing.data;
+    }
+    // Another turn already asked for this - ride along instead of re-fetching.
+    if (existing.promise) {
+      console.log(`[VapiStore] Tool request deduped: ${toolName}`);
+      return existing.promise;
+    }
+  }
+
+  const promise = fetchAgentDataNetwork(toolName, args, restaurantId).then((data) => {
+    // Never cache failures, otherwise one blip poisons the whole call.
+    if (data && !data.error) {
+      agentDataCache.set(cacheKey, { timestamp: Date.now(), data });
+    } else {
+      agentDataCache.delete(cacheKey);
+    }
+    return data;
+  }).catch((err) => {
+    agentDataCache.delete(cacheKey);
+    throw err;
+  });
+
+  agentDataCache.set(cacheKey, { timestamp: now, promise });
+  return promise;
 }
 
 // ─── Vapi Tool Call Handler ────────────────────────────────────────────────────
@@ -389,106 +472,91 @@ async function handleVapiToolCall(tool: any): Promise<{ toolCallId: string; resu
            return { toolCallId, result: JSON.stringify(errRes) };
         }
 
-        console.log(`[VapiStore] menu_search request:`, { query: itemName });
-        const data = await fetchAgentData('menu_search', { query: itemName });
-        console.log(`[VapiStore] menu_search response status: ${data.success ? 'success' : 'error'}`);
-        
-        if (data.error || !data.menu_items || data.menu_items.length === 0) {
-           const errRes = { success: false, code: 'MENU_ITEM_NOT_FOUND', message: `I couldn't find ${itemName} on this outlet's menu.` };
-           console.log(`[VapiStore] final tool result:`, errRes);
-           console.log(`[VapiStore] result sent to Vapi:`, errRes);
-           return { toolCallId, result: JSON.stringify(errRes) };
-        }
+        const normalizeMenuName = (value: unknown) => String(value ?? '').toLowerCase().replace(/\s+/g, ' ').trim();
+        const requestedName = normalizeMenuName(itemName);
 
+        const mapLocal = (item: any) => ({
+          id: item.id,
+          name: item.name,
+          price: Number(item.price ?? 0),
+          category: item.category || 'General',
+          description: item.desc || '',
+          is_available: item.available ?? true,
+          image: item.image || ''
+        });
 
-        const candidates = data.menu_items;
-        const normalizedRequested = itemName.toLowerCase().replace(/\s+/g, ' ').trim();
+        const mapBackend = (item: any) => ({
+          id: item.id,
+          name: item.name,
+          price: Number(item.price ?? item.item_price ?? 0),
+          category: item.category_name || item.category || item.category_id || 'General',
+          description: item.description || item.desc || '',
+          is_available: item.is_available ?? item.available ?? true,
+          image: item.image_url || item.image || ''
+        });
 
-        console.log(`[VapiStore] REQUESTED NORMALIZED NAME: ${normalizedRequested}`);
-        console.log(`[VapiStore] RAW CANDIDATE COUNT: ${candidates.length}`);
-        console.log(`[VapiStore] RAW CANDIDATES:`, candidates.map((c: any) => c.name));
+        const pickMatch = (candidates: any[]) => {
+          if (candidates.length === 0) return null;
+          const exact = candidates.filter((item: any) => normalizeMenuName(item.name) === requestedName);
+          if (exact.length > 0) return exact[0];
+          return candidates.find((item: any) => normalizeMenuName(item.name).includes(requestedName)) || null;
+        };
 
-        const exactMatches = candidates.filter((c: any) => c.name.toLowerCase().replace(/\s+/g, ' ').trim() === normalizedRequested);
-        const partialMatches = candidates.filter((c: any) => c.name.toLowerCase().replace(/\s+/g, ' ').trim() !== normalizedRequested);
+        // FAST PATH: the menu the user is already looking at is in memory.
+        // Resolving locally avoids a network round-trip mid-conversation.
+        const localMenu = Array.isArray(useRestaurantStore.getState().menuItems)
+          ? useRestaurantStore.getState().menuItems
+          : [];
 
-        // Deduplicate identical exact matches based on name and price
-        const deduplicatedExact = [];
-        const seenSignatures = new Set();
-        for (const item of exactMatches) {
-            const sig = `${item.name}|${item.price}`;
-            if (!seenSignatures.has(sig)) {
-                seenSignatures.add(sig);
-                deduplicatedExact.push(item);
-            }
-        }
+        let match = pickMatch(localMenu.map(mapLocal));
 
-        console.log(`[VapiStore] EXACT MATCH COUNT: ${exactMatches.length}`);
-        console.log(`[VapiStore] DEDUPLICATED EXACT MATCH COUNT: ${deduplicatedExact.length}`);
-        console.log(`[VapiStore] EXACT MATCHES:`, exactMatches.map((c: any) => c.name));
-        console.log(`[VapiStore] PARTIAL MATCHES:`, partialMatches.map((c: any) => c.name));
-
-        let trustedMatch = null;
-        
-        if (deduplicatedExact.length === 1) {
-            trustedMatch = deduplicatedExact[0];
-        } else if (deduplicatedExact.length > 1) {
-            const namesWithPrices = deduplicatedExact.map((i: any) => `${i.name} (Rs. ${i.price})`).join(', ');
-            const errRes = { 
-                success: false, 
-                code: 'AMBIGUOUS_MENU_ITEM', 
-                requested_item: itemName,
-                candidates: deduplicatedExact,
-                message: `I found multiple versions of ${itemName}. Please choose one: ${namesWithPrices}`
-            };
-            console.log(`[VapiStore] FINAL RESULT:`, errRes);
-            console.log(`[VapiStore] RESULT SENT TO VAPI:`, errRes);
-            return { toolCallId, result: JSON.stringify(errRes) };
+        if (match) {
+          console.log(`[VapiStore] Resolved "${itemName}" from local menu cache (no network).`);
         } else {
-            const names = candidates.map((i: any) => i.name).join(', ');
-            const errRes = { 
-                success: false, 
-                code: 'AMBIGUOUS_MENU_ITEM', 
-                requested_item: itemName,
-                candidates,
-                message: `I found similar items like ${names}. Please clarify which one you mean.` 
-            };
-            console.log(`[VapiStore] FINAL RESULT:`, errRes);
-            console.log(`[VapiStore] RESULT SENT TO VAPI:`, errRes);
-            return { toolCallId, result: JSON.stringify(errRes) };
+          // SLOW PATH: only hit the backend when the local menu can't answer.
+          const backendData = await fetchAgentData('menu_search', { query: itemName });
+          const backendMenu = Array.isArray(backendData?.menu_items) ? backendData.menu_items : [];
+          match = pickMatch(backendMenu.map(mapBackend));
         }
 
-        console.log(`[VapiStore] SELECTED TRUSTED ITEM:`, trustedMatch.name);
+        if (!match) {
+          const errRes = { success: false, code: 'MENU_ITEM_NOT_FOUND', message: `I couldn't find ${itemName} on this outlet's menu.` };
+          console.log(`[VapiStore] final tool result:`, errRes);
+          return { toolCallId, result: JSON.stringify(errRes) };
+        }
 
-        if (!trustedMatch.is_available) {
-           const errRes = { success: false, code: 'MENU_ITEM_UNAVAILABLE', message: `${trustedMatch.name} is currently unavailable.` };
+        if (match.is_available === false) {
+           const errRes = { success: false, code: 'MENU_ITEM_UNAVAILABLE', message: `${match.name} is currently unavailable.` };
            console.log(`[VapiStore] final tool result:`, errRes);
-           console.log(`[VapiStore] result sent to Vapi:`, errRes);
            return { toolCallId, result: JSON.stringify(errRes) };
         }
 
         const uiAction: UIAction = {
           action: 'add_to_cart',
           quantity: qty,
-          payload: { item: { id: trustedMatch.id, name: trustedMatch.name, price: trustedMatch.price, category: trustedMatch.category_id, desc: trustedMatch.description } },
+          payload: {
+            item: {
+              id: match.id,
+              name: match.name,
+              price: Number(match.price || 0),
+              category: String(match.category || 'General'),
+              image: match.image || '',
+              desc: match.description || '',
+            }
+          },
         };
-        
-        const cartItemsBefore = useCartStore.getState().items;
-        console.log(`[VapiStore] CART BEFORE:`, Object.values(cartItemsBefore).filter((i:any)=>i.quantity>0).map((i:any) => `${i.name} (x${i.quantity})`));
 
         const actionResult = await executeSingleAction(uiAction);
         console.log(`[VapiStore] cart action result:`, actionResult);
 
-        // Verify actual cart changes
         const cartItemsAfter = useCartStore.getState().items;
-        console.log(`[VapiStore] CART AFTER:`, Object.values(cartItemsAfter).filter((i:any)=>i.quantity>0).map((i:any) => `${i.name} (x${i.quantity})`));
+        const itemInCart = Object.values(cartItemsAfter).find((i: any) => String(i.id) === String(match.id) && i.quantity > 0);
 
-        const itemInCart = Object.values(cartItemsAfter).find((i: any) => i.id === trustedMatch.id && i.quantity > 0);
-        
         let finalRes;
         if (itemInCart) {
-            finalRes = { success: true, code: 'ITEM_ADDED', item_name: trustedMatch.name, quantity: qty, message: `Added ${qty} ${trustedMatch.name} to the cart.` };
+            finalRes = { success: true, code: 'ITEM_ADDED', item_name: match.name, quantity: qty, message: `Added ${qty} ${match.name} to the cart.` };
         } else {
-            finalRes = { success: false, code: 'CART_UPDATE_FAILED', message: `Failed to add ${trustedMatch.name} to cart.` };
+            finalRes = { success: false, code: 'CART_UPDATE_FAILED', message: `Failed to add ${match.name} to cart.` };
         }
 
         console.log(`[VapiStore] FINAL RESULT:`, finalRes);
@@ -748,22 +816,33 @@ export const useVapiStore = create<VapiState>((set, get) => ({
       return;
     }
 
+    // Reflect intent immediately so the UI never looks frozen while we set up.
+    set({ isConnecting: true });
+
     if (Platform.OS === 'android') {
       try {
-        const granted = await PermissionsAndroid.request(
-          PermissionsAndroid.PERMISSIONS.RECORD_AUDIO,
-          {
-            title: "Microphone Permission",
-            message: "The Voice Assistant needs access to your microphone.",
-            buttonNeutral: "Ask Me Later",
-            buttonNegative: "Cancel",
-            buttonPositive: "OK"
-          }
+        // check() is a cheap no-UI lookup; only fall back to the (slow) request
+        // dialog when permission has not been granted yet.
+        const alreadyGranted = await PermissionsAndroid.check(
+          PermissionsAndroid.PERMISSIONS.RECORD_AUDIO
         );
-        if (granted !== PermissionsAndroid.RESULTS.GRANTED) {
-          Alert.alert("Permission Denied", "Microphone access is required to use the Voice Assistant.");
-          set({ isConnecting: false });
-          return;
+
+        if (!alreadyGranted) {
+          const granted = await PermissionsAndroid.request(
+            PermissionsAndroid.PERMISSIONS.RECORD_AUDIO,
+            {
+              title: "Microphone Permission",
+              message: "The Voice Assistant needs access to your microphone.",
+              buttonNeutral: "Ask Me Later",
+              buttonNegative: "Cancel",
+              buttonPositive: "OK"
+            }
+          );
+          if (granted !== PermissionsAndroid.RESULTS.GRANTED) {
+            Alert.alert("Permission Denied", "Microphone access is required to use the Voice Assistant.");
+            set({ isConnecting: false });
+            return;
+          }
         }
       } catch (err) {
         console.warn(err);
@@ -781,8 +860,6 @@ export const useVapiStore = create<VapiState>((set, get) => ({
     }
     const { messages } = get();
     const hasHistory = messages.filter((m) => m.isFinal && m.text).length > 0;
-    
-    set({ isConnecting: true });
 
     // Dynamic first message based on auth and restaurant state
     const auth = useAuthStore.getState();
@@ -838,6 +915,26 @@ export const useVapiStore = create<VapiState>((set, get) => ({
     set({ messages: [], partialUserTranscript: '', partialAgentTranscript: '' });
   },
 
+  /**
+   * Loads the native Vapi SDK ahead of time so the first tap doesn't pay for
+   * the module require + client construction. Safe to call repeatedly.
+   */
+  prewarm: () => {
+    if (vapiInstance) return;
+    const warm = () => {
+      try {
+        getVapi();
+      } catch (e) {
+        console.warn('[VapiStore] prewarm skipped:', e);
+      }
+    };
+    if (typeof requestAnimationFrame === 'function') {
+      requestAnimationFrame(warm);
+    } else {
+      setTimeout(warm, 0);
+    }
+  },
+
   notifyRouteChanged: (route: string) => {
     const vapi = getVapi();
     if (vapi && get().isConnected) {
@@ -866,6 +963,14 @@ export const useVapiStore = create<VapiState>((set, get) => ({
 
     vapi.on('call-start', () => {
       set({ isConnected: true, isConnecting: false });
+
+      // Warm the menu cache in the background so the first food request does
+      // not stall on a cold network fetch.
+      const outletId = useRestaurantStore.getState().selectedOutlet?.restaurant_id;
+      const hasLocalMenu = (useRestaurantStore.getState().menuItems || []).length > 0;
+      if (outletId && !hasLocalMenu) {
+        fetchAgentData('menu_search', {}).catch(() => {});
+      }
 
       // Inject previous context if this is a resumed conversation
       const { messages } = get();
@@ -905,41 +1010,47 @@ export const useVapiStore = create<VapiState>((set, get) => ({
       if (toolCalls && toolCalls.length > 0) {
         console.log(`[VapiStore] Processing ${toolCalls.length} tool call(s) from message type "${message.type}"...`);
 
-        const results = [];
-        for (const tool of toolCalls) {
+        const sendToolResult = (result: { toolCallId: string; result: string } | null) => {
+          if (!result || !result.toolCallId) return;
+          try {
+            (vapi as any).send({
+              type: 'add-message',
+              message: {
+                role: 'tool',
+                tool_call_id: result.toolCallId,
+                content: result.result,
+              },
+            });
+          } catch (e) {
+            console.warn('[VapiStore] Result feedback via vapi.send notice:', e);
+          }
+        };
+
+        const pending = toolCalls.filter((tool: any) => {
           const toolCallId = tool.id || tool.toolCallId;
           if (toolCallId && executedToolCallIds.has(toolCallId)) {
             console.log(`[VapiStore] Skipping already executed toolCallId: ${toolCallId}`);
-            continue;
+            return false;
           }
           if (toolCallId) {
             executedToolCallIds.add(toolCallId);
             setTimeout(() => executedToolCallIds.delete(toolCallId), 120000);
           }
+          return true;
+        });
 
-          const res = await handleVapiToolCall(tool);
-          if (res) {
-            results.push(res);
-          }
-        }
-
-        // Return results to Vapi so the assistant knows what happened
-        try {
-          for (const result of results) {
-            if (result && result.toolCallId) {
-              (vapi as any).send({
-                type: 'add-message',
-                message: {
-                  role: 'tool',
-                  tool_call_id: result.toolCallId,
-                  content: result.result,
-                },
-              });
+        // Run tool calls concurrently and stream each result back the moment it
+        // resolves, instead of making the assistant wait for the slowest one.
+        await Promise.all(
+          pending.map(async (tool: any) => {
+            try {
+              const res = await handleVapiToolCall(tool);
+              sendToolResult(res);
+            } catch (e) {
+              console.error('[VapiStore] Tool execution failed:', e);
             }
-          }
-        } catch (e) {
-          console.warn('[VapiStore] Result feedback via vapi.send notice:', e);
-        }
+          })
+        );
       }
 
       // ── Transcript handling: real-time partial + merged final ────────────────

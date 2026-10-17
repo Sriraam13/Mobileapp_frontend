@@ -62,19 +62,20 @@ export default function VoiceAgentModal() {
     computedFabBottom += 60;
   }
 
-  const {
-    setupListeners,
-    startCall,
-    stopCall,
-    isConnected,
-    isConnecting,
-    messages,
-    clearMessages,
-    partialUserTranscript,
-    partialAgentTranscript,
-    isMuted,
-    toggleMute,
-  } = useVapiStore();
+  // Subscribe with granular selectors so a partial transcript token only
+  // re-renders what actually depends on it (not the whole modal + FAB tree).
+  const setupListeners = useVapiStore((s) => s.setupListeners);
+  const startCall = useVapiStore((s) => s.startCall);
+  const stopCall = useVapiStore((s) => s.stopCall);
+  const prewarm = useVapiStore((s) => s.prewarm);
+  const clearMessages = useVapiStore((s) => s.clearMessages);
+  const toggleMute = useVapiStore((s) => s.toggleMute);
+  const isConnected = useVapiStore((s) => s.isConnected);
+  const isConnecting = useVapiStore((s) => s.isConnecting);
+  const isMuted = useVapiStore((s) => s.isMuted);
+  const messages = useVapiStore((s) => s.messages);
+  const partialUserTranscript = useVapiStore((s) => s.partialUserTranscript);
+  const partialAgentTranscript = useVapiStore((s) => s.partialAgentTranscript);
 
   const { isVisible, showAgent, hideAgent } = useVoiceAgentStore();
   const scrollViewRef = useRef<ScrollView>(null);
@@ -82,14 +83,15 @@ export default function VoiceAgentModal() {
   // Pulse animation for speaking indicator
   const [pulseAnim] = useState(() => new Animated.Value(1));
 
+  // Load the native voice SDK ahead of the first tap so opening feels instant.
   useEffect(() => {
-    // We intentionally removed setupListeners from here 
-    // so Vapi is not initialized until the user clicks it
-  }, []);
+    prewarm();
+  }, [prewarm]);
 
   // Start pulse when connected & speaking (agent transcript active)
+  const isAgentSpeaking = isConnected && !!partialAgentTranscript;
   useEffect(() => {
-    if (isConnected && partialAgentTranscript) {
+    if (isAgentSpeaking) {
       Animated.loop(
         Animated.sequence([
           Animated.timing(pulseAnim, { toValue: 1.15, duration: 600, easing: Easing.ease, useNativeDriver: true }),
@@ -100,7 +102,7 @@ export default function VoiceAgentModal() {
       pulseAnim.stopAnimation();
       pulseAnim.setValue(1);
     }
-  }, [isConnected, partialAgentTranscript]);
+  }, [isAgentSpeaking, pulseAnim]);
 
   // Notify Vapi when the user navigates to a new screen
   useEffect(() => {
@@ -112,13 +114,25 @@ export default function VoiceAgentModal() {
     }
   }, [pathname, isConnected]);
 
-  // Auto-scroll when messages update
+  // Auto-scroll when messages update.
+  // Partial transcripts stream in token-by-token, so a timer per token piles up
+  // work on the JS thread. Coalesce into a single frame-aligned scroll.
+  const scrollFrameRef = useRef<number | null>(null);
   useEffect(() => {
-    if (isVisible && scrollViewRef.current) {
-      setTimeout(() => {
-        scrollViewRef.current?.scrollToEnd({ animated: true });
-      }, 100);
+    if (!isVisible) return;
+    if (scrollFrameRef.current !== null) {
+      cancelAnimationFrame(scrollFrameRef.current);
     }
+    scrollFrameRef.current = requestAnimationFrame(() => {
+      scrollFrameRef.current = null;
+      scrollViewRef.current?.scrollToEnd({ animated: false });
+    });
+    return () => {
+      if (scrollFrameRef.current !== null) {
+        cancelAnimationFrame(scrollFrameRef.current);
+        scrollFrameRef.current = null;
+      }
+    };
   }, [messages, partialUserTranscript, partialAgentTranscript, isVisible]);
 
   useEffect(() => {
