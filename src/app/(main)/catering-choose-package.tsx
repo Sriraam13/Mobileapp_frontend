@@ -1,6 +1,6 @@
 import { API_BASE_URL } from '../../constants/api';
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, SafeAreaView, Platform, StatusBar, ActivityIndicator, Alert } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, SafeAreaView, Platform, StatusBar, ActivityIndicator, Alert, Modal } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -15,6 +15,7 @@ interface CateringPackage {
   minimum_order_quantity: number;
   is_available: boolean;
   items_summary: string | null;
+  items?: string[];
 }
 
 export default function ChoosePackage() {
@@ -37,6 +38,78 @@ export default function ChoosePackage() {
   const [loading, setLoading] = useState(true);
   const [selectedPackage, setSelectedPackage] = useState<string | null>(null);
   const [creatingSession, setCreatingSession] = useState(false);
+
+  // Show more / Items modal states
+  const [expandedPackages, setExpandedPackages] = useState<Record<string, boolean>>({});
+  const [modalPackage, setModalPackage] = useState<CateringPackage | null>(null);
+  const [modalCategories, setModalCategories] = useState<{ name: string; items: { id: number; name: string }[] }[]>([]);
+  const [loadingModalItems, setLoadingModalItems] = useState(false);
+  const [packageItemsCache, setPackageItemsCache] = useState<Record<string, { name: string; items: { id: number; name: string }[] }[]>>({});
+
+  const toggleExpand = async (pkg: CateringPackage) => {
+    const nextState = !expandedPackages[pkg.code];
+    setExpandedPackages(prev => ({
+      ...prev,
+      [pkg.code]: nextState
+    }));
+
+    if ((!pkg.items || pkg.items.length === 0) && !packageItemsCache[pkg.code]) {
+      try {
+        const res = await fetch(`${API_BASE_URL}/api/v1/public/catering/packages/${encodeURIComponent(pkg.code)}/items`);
+        if (res.ok) {
+          const data = await res.json();
+          setPackageItemsCache(prev => ({
+            ...prev,
+            [pkg.code]: data.categories || []
+          }));
+        }
+      } catch (err) {
+        console.error('Error fetching package items:', err);
+      }
+    }
+  };
+
+  const openPackageModal = async (pkg: CateringPackage) => {
+    setModalPackage(pkg);
+    if (packageItemsCache[pkg.code]) {
+      setModalCategories(packageItemsCache[pkg.code]);
+      return;
+    }
+
+    setLoadingModalItems(true);
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/v1/public/catering/packages/${encodeURIComponent(pkg.code)}/items`);
+      if (res.ok) {
+        const data = await res.json();
+        const cats = data.categories || [];
+        setModalCategories(cats);
+        setPackageItemsCache(prev => ({
+          ...prev,
+          [pkg.code]: cats
+        }));
+      } else {
+        setModalCategories([]);
+      }
+    } catch (err) {
+      console.error('Error fetching package categories:', err);
+      setModalCategories([]);
+    } finally {
+      setLoadingModalItems(false);
+    }
+  };
+
+  const getPackageItems = (pkg: CateringPackage): string[] => {
+    if (pkg.items && pkg.items.length > 0) {
+      return pkg.items;
+    }
+    if (packageItemsCache[pkg.code] && packageItemsCache[pkg.code].length > 0) {
+      return packageItemsCache[pkg.code].flatMap(cat => cat.items.map(i => i.name));
+    }
+    if (pkg.items_summary) {
+      return pkg.items_summary.split(',').map(s => s.trim().replace(/^&\s*\d+\s*more$/i, '')).filter(Boolean);
+    }
+    return [];
+  };
 
   const filteredPackages = activeTab === 'All'
     ? packages
@@ -235,35 +308,116 @@ export default function ChoosePackage() {
             </View>
           ) : filteredPackages.map((pkg) => {
             const isSelected = selectedPackage === pkg.code;
+            const isExpanded = !!expandedPackages[pkg.code];
+            const allItems = getPackageItems(pkg);
+
             return (
-              <TouchableOpacity 
+              <View 
                 key={pkg.code} 
                 style={[styles.card, isSelected && styles.cardSelected]}
-                onPress={() => setSelectedPackage(isSelected ? null : pkg.code)}
-                activeOpacity={0.8}
               >
-                <View style={styles.cardHeader}>
+                <TouchableOpacity 
+                  style={styles.cardHeader}
+                  activeOpacity={0.8}
+                  onPress={() => setSelectedPackage(isSelected ? null : pkg.code)}
+                >
                   <View style={styles.vegIcon}>
                     <View style={styles.vegDot} />
                   </View>
                   <Text style={styles.pkgTitle}>{pkg.name}</Text>
                   {isSelected && <Ionicons name="checkmark-circle" size={20} color="#ff4500" style={{ marginLeft: 6 }} />}
-                </View>
+                </TouchableOpacity>
                 
-                <Text style={styles.pkgItems}>{pkg.items_summary || 'Variety of items'}</Text>
+                {!isExpanded ? (
+                  <View style={styles.summaryContainer}>
+                    <Text style={styles.pkgItems}>{pkg.items_summary || 'Variety of items'}</Text>
+                    
+                    <View style={styles.actionLinksRow}>
+                      <TouchableOpacity 
+                        style={styles.showMoreBtn}
+                        onPress={() => toggleExpand(pkg)}
+                        activeOpacity={0.7}
+                      >
+                        <Text style={styles.showMoreText}>Show more</Text>
+                        <Ionicons name="chevron-down" size={14} color="#ff4500" style={{ marginLeft: 3 }} />
+                      </TouchableOpacity>
+
+                      <TouchableOpacity 
+                        style={styles.viewAllBtn}
+                        onPress={() => openPackageModal(pkg)}
+                        activeOpacity={0.7}
+                      >
+                        <Ionicons name="eye-outline" size={13} color="#666" style={{ marginRight: 4 }} />
+                        <Text style={styles.viewAllText}>View all items</Text>
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+                ) : (
+                  <View style={styles.expandedContainer}>
+                    <View style={styles.expandedTitleRow}>
+                      <View style={styles.allCountBadge}>
+                        <Ionicons name="restaurant-outline" size={13} color="#ff4500" style={{ marginRight: 4 }} />
+                        <Text style={styles.allCountBadgeText}>
+                          All Items ({allItems.length > 0 ? allItems.length : 'Menu'})
+                        </Text>
+                      </View>
+                      
+                      <TouchableOpacity 
+                        style={styles.showMoreBtn}
+                        onPress={() => toggleExpand(pkg)}
+                        activeOpacity={0.7}
+                      >
+                        <Text style={styles.showMoreText}>Show less</Text>
+                        <Ionicons name="chevron-up" size={14} color="#ff4500" style={{ marginLeft: 3 }} />
+                      </TouchableOpacity>
+                    </View>
+
+                    <View style={styles.itemChipsContainer}>
+                      {allItems.length > 0 ? (
+                        allItems.map((item, idx) => (
+                          <View key={`${item}-${idx}`} style={styles.itemChip}>
+                            <View style={styles.itemChipDot} />
+                            <Text style={styles.itemChipText}>{item}</Text>
+                          </View>
+                        ))
+                      ) : (
+                        <Text style={styles.pkgItems}>{pkg.items_summary || 'No items listed'}</Text>
+                      )}
+                    </View>
+
+                    <TouchableOpacity 
+                      style={styles.viewDetailsModalLink}
+                      onPress={() => openPackageModal(pkg)}
+                      activeOpacity={0.7}
+                    >
+                      <Ionicons name="layers-outline" size={13} color="#ff4500" style={{ marginRight: 5 }} />
+                      <Text style={styles.viewDetailsModalLinkText}>View full category breakdown</Text>
+                      <Ionicons name="arrow-forward" size={11} color="#ff4500" style={{ marginLeft: 3 }} />
+                    </TouchableOpacity>
+                  </View>
+                )}
                 
                 <View style={styles.cardFooter}>
-                  <Text style={styles.priceText}>
-                    Rs. {pkg.price} <Text style={styles.perPerson}>/ person</Text>
-                  </Text>
+                  <TouchableOpacity
+                    activeOpacity={0.8}
+                    onPress={() => setSelectedPackage(isSelected ? null : pkg.code)}
+                  >
+                    <Text style={styles.priceText}>
+                      Rs. {pkg.price} <Text style={styles.perPerson}>/ person</Text>
+                    </Text>
+                  </TouchableOpacity>
                   
-                  <View style={[styles.selectBtn, isSelected && styles.selectBtnActive]}>
+                  <TouchableOpacity 
+                    style={[styles.selectBtn, isSelected && styles.selectBtnActive]}
+                    onPress={() => setSelectedPackage(isSelected ? null : pkg.code)}
+                    activeOpacity={0.8}
+                  >
                     <Text style={[styles.selectBtnText, isSelected && styles.selectBtnTextActive]}>
                       {isSelected ? 'Selected ✓' : 'Select'}
                     </Text>
-                  </View>
+                  </TouchableOpacity>
                 </View>
-              </TouchableOpacity>
+              </View>
             );
           })}
         </ScrollView>
@@ -280,6 +434,104 @@ export default function ChoosePackage() {
           </TouchableOpacity>
         </View>
       )}
+
+      {/* Package Items Detail Modal */}
+      <Modal
+        visible={!!modalPackage}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => setModalPackage(null)}
+      >
+        <View style={styles.modalOverlay}>
+          <TouchableOpacity 
+            style={styles.modalBackdrop} 
+            activeOpacity={1} 
+            onPress={() => setModalPackage(null)} 
+          />
+          <View style={[styles.modalSheet, { paddingBottom: insets.bottom > 0 ? insets.bottom + 15 : 25 }]}>
+            <View style={styles.modalHandle} />
+
+            <View style={styles.modalHeader}>
+              <View style={{ flex: 1 }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                  <View style={styles.vegIcon}>
+                    <View style={styles.vegDot} />
+                  </View>
+                  <Text style={styles.modalTitle}>{modalPackage?.name}</Text>
+                </View>
+                <Text style={styles.modalSubtitle}>
+                  Rs. {modalPackage?.price} / person • Min. {modalPackage?.minimum_order_quantity || 50} guests
+                </Text>
+              </View>
+              <TouchableOpacity 
+                style={styles.modalCloseBtn}
+                onPress={() => setModalPackage(null)}
+              >
+                <Ionicons name="close" size={22} color="#555" />
+              </TouchableOpacity>
+            </View>
+
+            {loadingModalItems ? (
+              <View style={styles.modalLoader}>
+                <ActivityIndicator size="small" color="#ff4500" />
+                <Text style={styles.modalLoaderText}>Loading menu items...</Text>
+              </View>
+            ) : (
+              <ScrollView style={styles.modalScroll} showsVerticalScrollIndicator={false}>
+                {modalCategories.length > 0 ? (
+                  modalCategories.map((cat, idx) => (
+                    <View key={`${cat.name}-${idx}`} style={styles.categorySection}>
+                      <Text style={styles.categoryTitle}>{cat.name}</Text>
+                      <View style={styles.categoryItemsList}>
+                        {cat.items.map((item, itemIdx) => (
+                          <View key={`${item.id || itemIdx}`} style={styles.modalItemRow}>
+                            <Ionicons name="checkmark-circle" size={16} color="#4CAF50" style={{ marginRight: 8 }} />
+                            <Text style={styles.modalItemName}>{item.name}</Text>
+                          </View>
+                        ))}
+                      </View>
+                    </View>
+                  ))
+                ) : (
+                  <View style={styles.categorySection}>
+                    <Text style={styles.categoryTitle}>Included Items</Text>
+                    <View style={styles.categoryItemsList}>
+                      {(modalPackage ? getPackageItems(modalPackage) : []).map((item, idx) => (
+                        <View key={`${item}-${idx}`} style={styles.modalItemRow}>
+                          <Ionicons name="checkmark-circle" size={16} color="#4CAF50" style={{ marginRight: 8 }} />
+                          <Text style={styles.modalItemName}>{item}</Text>
+                        </View>
+                      ))}
+                    </View>
+                  </View>
+                )}
+              </ScrollView>
+            )}
+
+            <View style={styles.modalFooter}>
+              <TouchableOpacity
+                style={[
+                  styles.modalSelectBtn,
+                  selectedPackage === modalPackage?.code && styles.modalSelectBtnActive
+                ]}
+                onPress={() => {
+                  if (modalPackage) {
+                    setSelectedPackage(modalPackage.code);
+                    setModalPackage(null);
+                  }
+                }}
+              >
+                <Text style={[
+                  styles.modalSelectBtnText,
+                  selectedPackage === modalPackage?.code && styles.modalSelectBtnTextActive
+                ]}>
+                  {selectedPackage === modalPackage?.code ? 'Selected Package ✓' : 'Select This Package'}
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -431,7 +683,218 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: '#777',
     lineHeight: 18,
+  },
+  summaryContainer: {
+    marginBottom: 12,
+  },
+  actionLinksRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: 6,
+  },
+  showMoreBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 4,
+    paddingRight: 8,
+  },
+  showMoreText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#ff4500',
+  },
+  viewAllBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 4,
+    paddingHorizontal: 8,
+    backgroundColor: '#f5f5f5',
+    borderRadius: 6,
+  },
+  viewAllText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#555',
+  },
+  expandedContainer: {
+    backgroundColor: '#fff9f5',
+    borderRadius: 10,
+    padding: 12,
+    marginBottom: 14,
+    borderWidth: 1,
+    borderColor: '#ffe6d5',
+  },
+  expandedTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 10,
+  },
+  allCountBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  allCountBadgeText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#ff4500',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  itemChipsContainer: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    marginHorizontal: -3,
+    marginBottom: 8,
+  },
+  itemChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#fff',
+    borderWidth: 1,
+    borderColor: '#ffd5b5',
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    borderRadius: 8,
+    margin: 3,
+  },
+  itemChipDot: {
+    width: 5,
+    height: 5,
+    borderRadius: 3,
+    backgroundColor: '#4CAF50',
+    marginRight: 6,
+  },
+  itemChipText: {
+    fontSize: 12,
+    color: '#333',
+    fontWeight: '500',
+  },
+  viewDetailsModalLink: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: '#ffe6d5',
+    marginTop: 4,
+  },
+  viewDetailsModalLinkText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#ff4500',
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'flex-end',
+  },
+  modalBackdrop: {
+    flex: 1,
+  },
+  modalSheet: {
+    backgroundColor: '#fff',
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    maxHeight: '85%',
+    paddingHorizontal: 20,
+    paddingTop: 12,
+  },
+  modalHandle: {
+    width: 40,
+    height: 5,
+    borderRadius: 3,
+    backgroundColor: '#ddd',
+    alignSelf: 'center',
     marginBottom: 15,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingBottom: 15,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f0f0f0',
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#222',
+  },
+  modalSubtitle: {
+    fontSize: 13,
+    color: '#777',
+    marginTop: 4,
+  },
+  modalCloseBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: '#f5f5f5',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  modalScroll: {
+    maxHeight: 380,
+    marginVertical: 15,
+  },
+  modalLoader: {
+    paddingVertical: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  modalLoaderText: {
+    marginTop: 10,
+    fontSize: 13,
+    color: '#777',
+  },
+  categorySection: {
+    marginBottom: 16,
+  },
+  categoryTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#444',
+    marginBottom: 8,
+    paddingLeft: 4,
+  },
+  categoryItemsList: {
+    backgroundColor: '#fafafa',
+    borderRadius: 12,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: '#eee',
+  },
+  modalItemRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 5,
+  },
+  modalItemName: {
+    fontSize: 13,
+    color: '#333',
+    fontWeight: '500',
+  },
+  modalFooter: {
+    paddingTop: 10,
+  },
+  modalSelectBtn: {
+    backgroundColor: '#ff4500',
+    paddingVertical: 14,
+    borderRadius: 12,
+    alignItems: 'center',
+  },
+  modalSelectBtnActive: {
+    backgroundColor: '#4CAF50',
+  },
+  modalSelectBtnText: {
+    color: '#fff',
+    fontSize: 15,
+    fontWeight: 'bold',
+  },
+  modalSelectBtnTextActive: {
+    color: '#fff',
   },
   cardFooter: {
     flexDirection: 'row',

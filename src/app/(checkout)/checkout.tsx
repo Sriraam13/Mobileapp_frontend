@@ -9,6 +9,8 @@ import { useAuthStore } from '../../store/useAuthStore';
 import { useDineInSessionStore } from '../../store/useDineInSessionStore';
 import { useOrderStore, useLiveOrderStore, useRestaurantStore } from '../../store';
 import { orderApi } from '../../services/apiService';
+import { resolveOutletLocation, getDistanceInKm, calculateDeliveryFee } from '../../utils/deliveryArea';
+import { getFullImageUrl } from '../../constants/api';
 
 export default function CheckoutScreen() {
   const router = useRouter();
@@ -43,11 +45,16 @@ export default function CheckoutScreen() {
   
   const toPay = subtotal + packagingCharges + gst - discountAmount;
   
-  const deliveryFee = orderType === 'Delivery' ? 30 : 0;
-  const finalToPay = toPay + deliveryFee;
-
-  const selectedAddressObj = addresses.find(a => a.id == selectedAddressId);
+  const selectedAddressObj = addresses.find(a => a.id == selectedAddressId) || addresses[0];
   const deliveryAddressType = selectedAddressObj ? selectedAddressObj.type : 'Home';
+
+  const targetOutlet = resolveOutletLocation(selectedOutlet);
+  const distanceKm = (selectedAddressObj?.latitude && selectedAddressObj?.longitude)
+    ? getDistanceInKm(selectedAddressObj.latitude, selectedAddressObj.longitude, targetOutlet)
+    : null;
+
+  const deliveryFee = orderType === 'Delivery' ? calculateDeliveryFee(distanceKm) : 0;
+  const finalToPay = toPay + deliveryFee;
 
   const handleProceed = async () => {
     if (orderType === 'Delivery') {
@@ -182,10 +189,9 @@ export default function CheckoutScreen() {
         {/* Cart Items */}
         {cartItems.map((item) => (
           <View key={item.id} style={styles.itemCard}>
-            <Image source={{ uri: item.image || 'https://via.placeholder.com/150' }} style={styles.itemImg} resizeMode="cover" />
+            <Image source={{ uri: getFullImageUrl(item.image, item.name) }} style={styles.itemImg} resizeMode="cover" />
             <View style={styles.itemInfo}>
               <Text style={styles.itemName}>{item.name}</Text>
-              <Text style={styles.itemSubtitle}>{item.category || 'Special'}</Text>
               {item.note ? (
                 <Text style={styles.itemNote}>&quot;{item.note}&quot;</Text>
               ) : null}
@@ -298,6 +304,24 @@ export default function CheckoutScreen() {
         {/* Bill Details */}
         <View style={styles.billDetailsBox}>
           <Text style={styles.billTitle}>Bill Details</Text>
+
+          {/* Cart items with quantity breakdown */}
+          {cartItems.map((item) => {
+            const itemTotal = (Number(item.price) || 0) * (Number(item.quantity) || 1);
+            return (
+              <View key={item.id} style={styles.billItemRow}>
+                <View style={styles.billItemTitleContainer}>
+                  <Text style={styles.billItemName} numberOfLines={1} ellipsizeMode="tail">
+                    {item.name}
+                  </Text>
+                  <Text style={styles.billItemQty}>x {item.quantity}</Text>
+                </View>
+                <Text style={styles.billItemPrice}>Rs. {itemTotal.toFixed(2)}</Text>
+              </View>
+            );
+          })}
+
+          {cartItems.length > 0 && <View style={styles.billSubDivider} />}
           
           <View style={styles.billRow}>
             <Text style={styles.billLabel}>Item Subtotal</Text>
@@ -467,7 +491,7 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: 'bold',
     color: '#000',
-    marginBottom: 2,
+    marginBottom: 6,
   },
   itemSubtitle: {
     fontSize: 11,
@@ -594,6 +618,41 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     color: '#000',
     marginBottom: 16,
+  },
+  billItemRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  billItemTitleContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+    marginRight: 12,
+  },
+  billItemName: {
+    fontSize: 13,
+    color: '#333',
+    fontWeight: '500',
+    flexShrink: 1,
+  },
+  billItemQty: {
+    fontSize: 12,
+    color: '#666',
+    fontWeight: '600',
+    marginLeft: 6,
+  },
+  billItemPrice: {
+    fontSize: 13,
+    color: '#333',
+    fontWeight: '500',
+  },
+  billSubDivider: {
+    height: 1,
+    backgroundColor: '#eee',
+    marginTop: 4,
+    marginBottom: 12,
   },
   billRow: {
     flexDirection: 'row',

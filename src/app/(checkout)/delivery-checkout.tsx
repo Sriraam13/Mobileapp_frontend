@@ -6,31 +6,40 @@ import { useRouter } from 'expo-router';
 import { useCartStore } from '../../store/useCartStore';
 import { useAddressStore } from '../../store/useAddressStore';
 import { useAuthStore, useRestaurantStore } from '../../store';
-import { getDistanceInKm, checkDeliveryCoverage, DeliveryCoverageResult } from '../../utils/deliveryArea';
+import { getDistanceInKm, checkDeliveryCoverage, DeliveryCoverageResult, resolveOutletLocation, calculateDeliveryFee } from '../../utils/deliveryArea';
 import DeliveryUnavailableModal from '../../components/ui/DeliveryUnavailableModal';
+import { getFullImageUrl } from '../../constants/api';
 
 export default function DeliveryCheckoutScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   
-  const { getSubtotal, getGst, getDiscountAmount } = useCartStore();
+  const { items, getItemCount, getSubtotal, getGst, getDiscountAmount } = useCartStore();
   const { selectedDeliveryAddress, addresses, selectedAddressId } = useAddressStore();
   const { phone } = useAuthStore();
   const { selectedOutlet } = useRestaurantStore();
+
+  const cartItems = Object.values(items).filter(item => item && item.quantity > 0);
+  const itemCount = getItemCount();
   
   const [instruction, setInstruction] = useState('');
   const [selectedTip, setSelectedTip] = useState<number | null>(null);
   const [showCoverageModal, setShowCoverageModal] = useState(false);
   const [coverageResult, setCoverageResult] = useState<DeliveryCoverageResult | null>(null);
   
-  const selectedAddressObj = addresses.find(a => a.id == selectedAddressId);
+  const selectedAddressObj = addresses.find(a => a.id == selectedAddressId) || addresses[0];
   const deliveryAddressType = selectedAddressObj ? selectedAddressObj.type : 'Home';
   
   const subtotal = getSubtotal();
   const gst = getGst();
   const discountAmount = getDiscountAmount();
   const packagingCharges = 0;
-  const deliveryFee = 30;
+
+  const targetOutlet = resolveOutletLocation(selectedOutlet);
+  const distanceKm = (selectedAddressObj?.latitude && selectedAddressObj?.longitude)
+    ? getDistanceInKm(selectedAddressObj.latitude, selectedAddressObj.longitude, targetOutlet)
+    : null;
+  const deliveryFee = calculateDeliveryFee(distanceKm);
   
   const baseTotal = subtotal + packagingCharges + gst - discountAmount + deliveryFee;
   const finalTotal = baseTotal + (selectedTip || 0);
@@ -129,6 +138,94 @@ export default function DeliveryCheckoutScreen() {
           </View>
         </View>
 
+        {/* Ordered Items Summary */}
+        <Text style={styles.sectionTitle}>
+          Items Ordered ({itemCount} {itemCount === 1 ? 'item' : 'items'})
+        </Text>
+        <View style={styles.card}>
+          {cartItems.map((item, index) => {
+            const itemTotal = (item.price || 0) * (item.quantity || 1);
+            return (
+              <View
+                key={item.id}
+                style={[
+                  styles.orderItemRow,
+                  index > 0 && styles.orderItemSeparator,
+                ]}
+              >
+                <Image source={{ uri: getFullImageUrl(item.image, item.name) }} style={styles.orderItemImage} resizeMode="cover" />
+                <View style={styles.orderItemDetails}>
+                  <Text style={styles.orderItemName} numberOfLines={1}>
+                    {item.name}
+                  </Text>
+                  <Text style={styles.orderItemQtyPrice}>
+                    Qty: {item.quantity} × Rs. {item.price}
+                  </Text>
+                </View>
+                <Text style={styles.orderItemPriceTotal}>
+                  Rs. {itemTotal.toFixed(2)}
+                </Text>
+              </View>
+            );
+          })}
+        </View>
+
+        {/* Bill Breakdown */}
+        <Text style={styles.sectionTitle}>Bill Breakdown</Text>
+        <View style={styles.card}>
+          {cartItems.map((item) => {
+            const itemTotal = (Number(item.price) || 0) * (Number(item.quantity) || 1);
+            return (
+              <View key={item.id} style={styles.billSplitRow}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1, marginRight: 12 }}>
+                  <Text style={[styles.billSplitLabel, { color: '#333', fontWeight: '500', flexShrink: 1 }]} numberOfLines={1}>
+                    {item.name}
+                  </Text>
+                  <Text style={[styles.billSplitLabel, { fontWeight: '600', marginLeft: 6 }]}>
+                    x {item.quantity}
+                  </Text>
+                </View>
+                <Text style={styles.billSplitValue}>Rs. {itemTotal.toFixed(2)}</Text>
+              </View>
+            );
+          })}
+          {cartItems.length > 0 && <View style={styles.billSplitDivider} />}
+
+          <View style={styles.billSplitRow}>
+            <Text style={styles.billSplitLabel}>Item Subtotal</Text>
+            <Text style={styles.billSplitValue}>Rs. {subtotal.toFixed(2)}</Text>
+          </View>
+          <View style={styles.billSplitRow}>
+            <Text style={styles.billSplitLabel}>Delivery Fee</Text>
+            <Text style={styles.billSplitValue}>Rs. {deliveryFee.toFixed(2)}</Text>
+          </View>
+          <View style={styles.billSplitRow}>
+            <Text style={styles.billSplitLabel}>Packaging Charges</Text>
+            <Text style={styles.billSplitValue}>Rs. {packagingCharges.toFixed(2)}</Text>
+          </View>
+          <View style={styles.billSplitRow}>
+            <Text style={styles.billSplitLabel}>GST & Restaurant Taxes</Text>
+            <Text style={styles.billSplitValue}>Rs. {gst.toFixed(2)}</Text>
+          </View>
+          {discountAmount > 0 && (
+            <View style={styles.billSplitRow}>
+              <Text style={[styles.billSplitLabel, { color: '#00a01d' }]}>Discount</Text>
+              <Text style={[styles.billSplitValue, { color: '#00a01d' }]}>- Rs. {discountAmount.toFixed(2)}</Text>
+            </View>
+          )}
+          {Boolean(selectedTip) && (
+            <View style={styles.billSplitRow}>
+              <Text style={styles.billSplitLabel}>Rider Tip</Text>
+              <Text style={styles.billSplitValue}>Rs. {selectedTip!.toFixed(2)}</Text>
+            </View>
+          )}
+          <View style={styles.billSplitDivider} />
+          <View style={styles.billSplitRow}>
+            <Text style={styles.billSplitTotalLabel}>To Pay</Text>
+            <Text style={styles.billSplitTotalValue}>Rs. {Math.max(finalTotal, 0).toFixed(2)}</Text>
+          </View>
+        </View>
+
       </ScrollView>
 
       {/* Footer */}
@@ -159,7 +256,14 @@ export default function DeliveryCheckoutScreen() {
               setShowCoverageModal(true);
               return;
             }
-            router.push({ pathname: '/payment', params: { tipAmount: selectedTip || 0, instructions: instruction } });
+            router.push({
+              pathname: '/payment',
+              params: {
+                tipAmount: selectedTip || 0,
+                instructions: instruction,
+                deliveryFee: deliveryFee.toString(),
+              }
+            });
           }}
         >
           <Text style={styles.proceedBtnText}>Continue to Payment</Text>
@@ -391,5 +495,78 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 16,
     fontWeight: 'bold',
-  }
+  },
+  billSplitRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  billSplitLabel: {
+    fontSize: 13,
+    color: '#666',
+  },
+  billSplitValue: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#333',
+  },
+  billSplitDivider: {
+    height: 1,
+    backgroundColor: '#eee',
+    marginVertical: 8,
+  },
+  billSplitTotalLabel: {
+    fontSize: 14,
+    fontWeight: 'bold',
+    color: '#111',
+  },
+  billSplitTotalValue: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#ff3400',
+  },
+  orderItemRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 10,
+  },
+  orderItemSeparator: {
+    borderTopWidth: 1,
+    borderTopColor: '#f2f2f2',
+  },
+  orderItemImage: {
+    width: 44,
+    height: 44,
+    borderRadius: 8,
+    marginRight: 12,
+  },
+  orderItemPlaceholder: {
+    width: 44,
+    height: 44,
+    borderRadius: 8,
+    backgroundColor: '#fff0e6',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 12,
+  },
+  orderItemDetails: {
+    flex: 1,
+    marginRight: 8,
+  },
+  orderItemName: {
+    fontSize: 14,
+    fontWeight: 'bold',
+    color: '#222',
+  },
+  orderItemQtyPrice: {
+    fontSize: 12,
+    color: '#777',
+    marginTop: 2,
+  },
+  orderItemPriceTotal: {
+    fontSize: 14,
+    fontWeight: 'bold',
+    color: '#333',
+  },
 });

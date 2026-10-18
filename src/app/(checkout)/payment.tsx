@@ -19,6 +19,7 @@ import {
   useLiveOrderStore,
   useDineInSessionStore
 } from '../../store';
+import { resolveOutletLocation, getDistanceInKm, calculateDeliveryFee } from '../../utils/deliveryArea';
 
 WebBrowser.maybeCompleteAuthSession();
 
@@ -58,7 +59,7 @@ export default function PaymentScreen() {
   const { setPaymentMethod, setPaymentSuccess, setPaymentFailed } = usePaymentStore();
   const { setLiveOrder } = useLiveOrderStore();
   const { setCurrentOrder, addPastOrder } = useOrderStore();
-  const { selectedDeliveryAddress } = useAddressStore();
+  const { selectedDeliveryAddress, addresses, selectedAddressId } = useAddressStore();
 
   // Delivery temporarily allows Cash (COD) for testing purposes
   const isDigitalOnly = orderType === 'Take Away';
@@ -78,10 +79,19 @@ export default function PaymentScreen() {
   const gst = getGst();
   const serviceCharge = getServiceCharge();
 
+  const passedDeliveryFee = params.deliveryFee ? parseFloat(params.deliveryFee as string) : null;
+  const currentAddressObj = addresses.find(a => a.id == selectedAddressId) || addresses[0];
+  const targetOutletLoc = resolveOutletLocation(selectedOutlet);
+  const currentDistanceKm = (currentAddressObj?.latitude && currentAddressObj?.longitude)
+    ? getDistanceInKm(currentAddressObj.latitude, currentAddressObj.longitude, targetOutletLoc)
+    : null;
+  const deliveryFee = (passedDeliveryFee != null && !isNaN(passedDeliveryFee))
+    ? passedDeliveryFee
+    : (orderType === 'Delivery' ? calculateDeliveryFee(currentDistanceKm) : 0);
+
   let totalVal = getGrandTotal();
   let baseDeliveryTotal = 0;
   if (orderType === 'Delivery') {
-    const deliveryFee = 30;
     const packagingCharges = 0;
     baseDeliveryTotal = subtotal + deliveryFee + packagingCharges + gst - discountAmount;
     totalVal = baseDeliveryTotal + tipAmount;
@@ -143,7 +153,7 @@ export default function PaymentScreen() {
           customer_latitude: selectedAddressObj?.latitude,
           customer_longitude: selectedAddressObj?.longitude,
           delivery_instructions: (params.instructions as string) || selectedAddressObj?.delivery_instructions || null,
-          delivery_fee: orderType === 'Delivery' ? 30 : 0,
+          delivery_fee: orderType === 'Delivery' ? deliveryFee : 0,
           packaging_fee: 0,
           tip_amount: tipAmount,
           payment_method: selectedMethod,
@@ -424,7 +434,7 @@ export default function PaymentScreen() {
             customer_latitude: selectedAddressObj?.latitude,
             customer_longitude: selectedAddressObj?.longitude,
             delivery_instructions: (params.instructions as string) || selectedAddressObj?.delivery_instructions || null,
-            delivery_fee: orderType === 'Delivery' ? 30 : 0,
+            delivery_fee: orderType === 'Delivery' ? deliveryFee : 0,
             packaging_fee: 0,
             tip_amount: tipAmount,
             payment_method: selectedMethod || 'Cash',
@@ -564,6 +574,12 @@ export default function PaymentScreen() {
                 : <Text style={(styles as any).delHeaderAddressText}>Flat 402, Green Glen Layout, Bellandur, Bengaluru • ETA: 35 mins</Text>
               }
             </Text>
+            <View style={styles.delFeeRow}>
+              <Ionicons name="bicycle" size={14} color="#ff3400" />
+              <Text style={styles.delFeeText}>
+                Delivery Fee: ₹{deliveryFee.toFixed(0)}
+              </Text>
+            </View>
           </View>
 
           {/* To Pay */}
@@ -1168,6 +1184,20 @@ const styles = StyleSheet.create({
   delInfoAddress: {
     fontSize: 12,
     color: '#888',
+  },
+  delFeeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 8,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: '#f2f2f2',
+    gap: 6,
+  },
+  delFeeText: {
+    fontSize: 12,
+    color: '#666',
+    flex: 1,
   },
   delToPayBlock: {
     flexDirection: 'row',

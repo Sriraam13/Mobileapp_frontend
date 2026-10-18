@@ -264,6 +264,17 @@ export default function Home() {
     else if (activeTab === 'Dine-in' && orderType !== 'Dine In') setOrderType('Dine In');
     else if (activeTab === 'Delivery' && orderType !== 'Delivery') setOrderType('Delivery');
   }, [activeTab]);
+
+  // Sync orderType to activeTab when changed externally (e.g. voice agent)
+  useEffect(() => {
+    if (orderType === 'Take Away' && activeTab !== 'Takeaway') {
+      setActiveTab('Takeaway');
+    } else if (orderType === 'Dine In' && activeTab !== 'Dine-in') {
+      setActiveTab('Dine-in');
+    } else if (orderType === 'Delivery' && activeTab !== 'Delivery') {
+      setActiveTab('Delivery');
+    }
+  }, [orderType]);
   const [popularDishes, setPopularDishes] = useState<any[]>([]);
   const [categories, setCategories] = useState<any[]>([]);
   const [selectedBranchName, setSelectedBranchName] = useState('Koramangala, Bangalore');

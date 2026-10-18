@@ -20,6 +20,7 @@ import { useCartStore } from '../store/useCartStore';
 import { useLiveOrderStore } from '../store/useLiveOrderStore';
 import { useRestaurantStore } from '../store/useRestaurantStore';
 import { useVoiceAgentStore } from '../store/useVoiceAgentStore';
+import { useAddressStore } from '../store/useAddressStore';
 import { SUPPORTED_ACTIONS, resolveRoute } from './agentRegistry';
 
 // ─── Active Router Reference ──────────────────────────────────────────────────
@@ -160,21 +161,54 @@ export async function executeSingleAction(act: UIAction): Promise<ActionResult> 
       // ── Order Type ───────────────────────────────────────────────────────────
 
       case 'set_order_type':
-      case 'select_order_type': {
-        if (!act.order_type) return { success: false, action, message: 'No order type specified.' };
+      case 'select_order_type':
+      case 'switch_order_type':
+      case 'switch_mode':
+      case 'set_order_mode':
+      case 'switch_to_takeaway':
+      case 'switch_to_dine_in':
+      case 'switch_to_delivery': {
+        const raw = (
+          act.order_type ||
+          (act as any).mode ||
+          (act as any).order_mode ||
+          (act as any).type ||
+          (action === 'switch_to_takeaway' ? 'Take Away' : '') ||
+          (action === 'switch_to_dine_in' ? 'Dine In' : '') ||
+          (action === 'switch_to_delivery' ? 'Delivery' : '') ||
+          ''
+        ).trim();
 
-        const normalized = act.order_type.toLowerCase().replace(/[^a-z]/g, '');
+        if (!raw) return { success: false, action, message: 'No order type specified.' };
+
+        const normalized = raw.toLowerCase().replace(/[^a-z]/g, '');
         let mapped: 'Take Away' | 'Dine In' | 'Delivery' | null = null;
 
-        if (normalized === 'takeaway' || normalized === 'takeout') mapped = 'Take Away';
-        else if (normalized === 'dinein' || normalized === 'dine') mapped = 'Dine In';
-        else if (normalized === 'delivery' || normalized === 'deliver') mapped = 'Delivery';
+        if (
+          normalized.includes('takeaway') ||
+          normalized.includes('takeout') ||
+          normalized.includes('parcel') ||
+          normalized.includes('pickup')
+        ) {
+          mapped = 'Take Away';
+        } else if (
+          normalized.includes('dine') ||
+          normalized.includes('table') ||
+          normalized.includes('eatin')
+        ) {
+          mapped = 'Dine In';
+        } else if (
+          normalized.includes('deliver') ||
+          normalized.includes('home')
+        ) {
+          mapped = 'Delivery';
+        }
 
         if (!mapped) {
-          return { success: false, action, message: `Unknown order type: "${act.order_type}". Valid types: Dine In, Take Away, Delivery.` };
+          return { success: false, action, message: `Unknown order type: "${raw}". Valid types: Dine In, Take Away, Delivery.` };
         }
         useCartStore.getState().setOrderType(mapped);
-        return { success: true, action, message: `Order type set to ${mapped}`, data: { orderType: mapped } };
+        return { success: true, action, message: `Order type successfully set to ${mapped}`, data: { orderType: mapped } };
       }
 
       // ── Cart: Add ────────────────────────────────────────────────────────────
@@ -218,13 +252,29 @@ export async function executeSingleAction(act: UIAction): Promise<ActionResult> 
       // ── Cart: Remove ─────────────────────────────────────────────────────────
 
       case 'remove_from_cart': {
-        const itemId = act.menu_item_id || act.payload?.item_id;
-        if (!itemId) return { success: false, action, message: 'No item ID to remove.' };
-
+        let itemId = act.menu_item_id || act.payload?.item_id;
         const cart = useCartStore.getState().items;
+        const targetName = (act as any).item_name || act.payload?.item_name || act.payload?.name;
+        if (!itemId && targetName) {
+          const normTarget = String(targetName).toLowerCase().trim();
+          const match = Object.values(cart).find(i => {
+            const iName = i.name.toLowerCase().trim();
+            return iName.includes(normTarget) || normTarget.includes(iName);
+          });
+          if (match) itemId = match.id;
+        }
+        if (!itemId) {
+          const lastItem = Object.values(cart).pop();
+          if (lastItem) {
+            useCartStore.getState().removeItem(lastItem.id);
+            return { success: true, action, message: `Removed ${lastItem.name} from cart.`, data: { item_id: lastItem.id } };
+          }
+          return { success: false, action, message: 'No item in cart to remove.' };
+        }
+
         const existing = cart[itemId] || cart[String(itemId)] || cart[Number(itemId)];
         if (!existing) {
-          return { success: false, action, message: `Item ${itemId} is not in cart.` };
+          return { success: false, action, message: `Item is not in cart.` };
         }
         useCartStore.getState().removeItem(existing.id);
         return { success: true, action, message: `Removed ${existing.name} from cart.`, data: { item_id: itemId } };
@@ -371,6 +421,57 @@ export async function executeSingleAction(act: UIAction): Promise<ActionResult> 
       case 'open_add_address': {
         navigateScreen('/(address)/add-address');
         return { success: true, action, message: 'Opened Add Address screen.' };
+      }
+
+      case 'select_address': {
+        const query = String((act as any).address || (act as any).type || (act as any).address_id || '').toLowerCase().trim();
+        const addressStore = useAddressStore.getState();
+        const addresses = addressStore.addresses;
+        let matched = addresses.find(a => String(a.id) === query);
+        if (!matched && query) {
+          matched = addresses.find(a => 
+            a.type?.toLowerCase().includes(query) || 
+            a.address?.toLowerCase().includes(query) || 
+            a.full_address?.toLowerCase().includes(query)
+          );
+        }
+        if (!matched && addresses.length > 0) {
+          matched = addresses[0];
+        }
+
+        if (matched) {
+          addressStore.setSelectedDeliveryAddress(matched.address || matched.full_address, Number(matched.id));
+          return {
+            success: true,
+            action,
+            message: `Selected address: ${matched.type} (${matched.address || matched.full_address}).`,
+            data: matched,
+          };
+        }
+        navigateScreen('/(address)/my-addresses');
+        return { success: false, action, message: 'Opened addresses screen.' };
+      }
+
+      // ── Shortcuts ─────────────────────────────────────────────────────────────
+
+      case 'open_profile': {
+        navigateScreen('/profile');
+        return { success: true, action, message: 'Opened Profile.' };
+      }
+
+      case 'open_rewards': {
+        navigateScreen('/rewards');
+        return { success: true, action, message: 'Opened Rewards & Loyalty Points.' };
+      }
+
+      case 'open_orders': {
+        navigateScreen('/(order)/orders');
+        return { success: true, action, message: 'Opened Orders.' };
+      }
+
+      case 'open_menu': {
+        navigateScreen('/menu', act.payload?.params || {});
+        return { success: true, action, message: 'Opened Menu.' };
       }
 
       // ── Catering ─────────────────────────────────────────────────────────────

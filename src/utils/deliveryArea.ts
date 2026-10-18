@@ -36,8 +36,8 @@ export const ALL_BRANCHES: OutletLocation[] = [
   KNOWN_OUTLET_LOCATIONS[25],
 ];
 
-// MANDATORY 5 KM RADIUS FOR RESTAURANT 1 & 2
-export const DELIVERY_RADIUS_KM = 5;
+// Delivery radius expanded to support delivery beyond 5 km with incremental fee
+export const DELIVERY_RADIUS_KM = 20;
 
 export function resolveOutletLocation(outlet?: any): OutletLocation {
   if (outlet) {
@@ -182,4 +182,22 @@ export function checkDeliveryCoverage(
     title: isEligible ? 'Within Delivery Range' : 'Restaurant Not Nearby',
     message,
   };
+}
+
+export const DELIVERY_FEE_RATE_TEXT = '₹100 flat for first 5 km + ₹20/km thereafter';
+
+/**
+ * Calculates delivery fee based on distance:
+ * - ₹100 flat for the first 5 km (or base flat rate if distance <= 5 km)
+ * - ₹20/km thereon for each additional km beyond 5 km
+ */
+export function calculateDeliveryFee(distanceKm?: number | null): number {
+  if (distanceKm == null || isNaN(distanceKm) || distanceKm <= 0) {
+    return 100;
+  }
+  if (distanceKm <= 5) {
+    return 100;
+  }
+  const extraKm = distanceKm - 5;
+  return Math.round(100 + extraKm * 20);
 }
