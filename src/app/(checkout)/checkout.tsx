@@ -11,6 +11,8 @@ import { useOrderStore, useLiveOrderStore, useRestaurantStore } from '../../stor
 import { orderApi } from '../../services/apiService';
 import { resolveOutletLocation, getDistanceInKm, calculateDeliveryFee } from '../../utils/deliveryArea';
 import { getFullImageUrl } from '../../constants/api';
+import SelectTableModal from '../../components/ui/SelectTableModal';
+import DineInConflictModal from '../../components/ui/DineInConflictModal';
 
 export default function CheckoutScreen() {
   const router = useRouter();
@@ -97,6 +99,9 @@ export default function CheckoutScreen() {
     }
   };
 
+  const [isSelectTableModalVisible, setIsSelectTableModalVisible] = useState(false);
+  const [isDineInConflictVisible, setIsDineInConflictVisible] = useState(false);
+
   const handleDecrement = (itemId: string | number) => {
     decrementQuantity(itemId as any);
     if (cartItems.length <= 1) {
@@ -158,6 +163,15 @@ export default function CheckoutScreen() {
 
   const handleProceed = async () => {
     if (orderType === 'Delivery') {
+      const activeRounds = (dineInSession.orderRounds || []).filter(
+        (r: any) => (r.status || '').toUpperCase() !== 'CANCELLED'
+      );
+      const hasActiveDineIn = dineInSession.isActive && dineInSession.paymentStatus !== 'Paid' && (activeRounds.length > 0 || (dineInSession.totalAmount > 0 && !dineInSession.activeOrderId));
+      if (hasActiveDineIn) {
+        setIsDineInConflictVisible(true);
+        return;
+      }
+
       if (!selectedDeliveryAddress) {
         router.push('/add-address');
         return;
@@ -189,9 +203,16 @@ export default function CheckoutScreen() {
         const activeTable = dineInSession.tableNumber || tableNumber;
         if (!activeTable) {
           setSubmitting(false);
-          Alert.alert('No Table Selected', 'Please scan your table QR or enter a table number before placing a Dine-In order.');
+          setIsSelectTableModalVisible(true);
           return;
         }
+
+        const canReuseSession =
+          dineInSession.isActive &&
+          Boolean(dineInSession.sessionDbId || dineInSession.sessionUid) &&
+          (dineInSession.orderRounds || []).some(
+            (r: any) => (r.status || '').toUpperCase() !== 'CANCELLED'
+          );
 
         const res = await orderApi.createOrder({
           restaurant_id: restaurantId,
@@ -207,11 +228,11 @@ export default function CheckoutScreen() {
           table_number: activeTable,
           payment_method: 'Pay Later',
           phone: phone || '',
-          session_id: dineInSession.sessionDbId || undefined,
-          session_uid: dineInSession.sessionUid || undefined,
+          session_id: canReuseSession ? (dineInSession.sessionDbId || undefined) : undefined,
+          session_uid: canReuseSession ? (dineInSession.sessionUid || undefined) : undefined,
         });
 
-        if (dineInSession.isActive && (dineInSession.sessionDbId || dineInSession.sessionUid || dineInSession.activeDbOrderId)) {
+        if (canReuseSession) {
           dineInSession.appendOrderRound(
             res.orderId,
             res.dbOrderId,
@@ -526,6 +547,26 @@ export default function CheckoutScreen() {
         </View>
       )}
       {renderConfirmModal()}
+
+      {/* Select Table First Modal */}
+      <SelectTableModal
+        visible={isSelectTableModalVisible}
+        onClose={() => setIsSelectTableModalVisible(false)}
+        tableNumber={tableNumber || dineInSession.tableNumber}
+        onSelectTable={() => {
+          setIsSelectTableModalVisible(false);
+          router.push({
+            pathname: '/(main)/home',
+            params: { openScanner: 'true', orderType: 'Dine In' }
+          });
+        }}
+      />
+
+      {/* Active Dine-In Conflict Modal */}
+      <DineInConflictModal
+        visible={isDineInConflictVisible}
+        onClose={() => setIsDineInConflictVisible(false)}
+      />
     </SafeAreaView>
   );
 }

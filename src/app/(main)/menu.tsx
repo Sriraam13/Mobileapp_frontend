@@ -4,10 +4,12 @@ import { Ionicons } from '@expo/vector-icons';
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useVoiceAgentStore, useAuthStore, useOrderStore, useCartStore, useLiveOrderStore, useDineInSessionStore, useRestaurantStore } from '../../store';
-import { menuApi, orderApi } from '../../services/apiService';
+import { menuApi, orderApi, tableApi } from '../../services/apiService';
 import { getFullImageUrl } from '../../constants/api';
 import DineInActiveBanner from '../../components/DineInActiveBanner';
 import ViewCartButton from '../../components/layout/ViewCartButton';
+import SelectTableModal from '../../components/ui/SelectTableModal';
+import DineInConflictModal from '../../components/ui/DineInConflictModal';
 
 interface MenuItemCardProps {
   item: any;
@@ -152,6 +154,12 @@ export default function App() {
   const [priceSort, setPriceSort] = useState("Default");
   const [isLoading, setIsLoading] = useState(true);
 
+  // ── Table validation & Order-Type Conflict Modals ──
+  const [isSelectTableModalVisible, setIsSelectTableModalVisible] = useState(false);
+  const [isInvalidTable, setIsInvalidTable] = useState(false);
+  const [isDineInConflictVisible, setIsDineInConflictVisible] = useState(false);
+  const isValidatingTableRef = useRef(false);
+
   const categoryScrollRef = useRef<ScrollView>(null);
   const flatListRef = useRef<FlatList>(null);
   const tabPositions = useRef<Record<string, { x: number; width: number }>>({});
@@ -176,6 +184,20 @@ export default function App() {
     }
    
   }, [params.orderType, params.tableNumber, params.search, params.categoryName, params.categoryId, setOrderType, setTableNumber]);
+
+  // Check if active dine-in session conflicts with delivery mode
+  useEffect(() => {
+    const isDeliveryMode = orderType === 'Delivery' || params.orderType === 'Delivery';
+    const activeRounds = (dineInSession.orderRounds || []).filter(
+      (r: any) => (r.status || '').toUpperCase() !== 'CANCELLED'
+    );
+    const hasActiveDineIn = dineInSession.isActive && dineInSession.paymentStatus !== 'Paid' && (activeRounds.length > 0 || (dineInSession.totalAmount > 0 && !dineInSession.activeOrderId));
+
+    if (isDeliveryMode && hasActiveDineIn) {
+      setIsDineInConflictVisible(true);
+      setOrderType('Dine In');
+    }
+  }, [orderType, params.orderType, dineInSession.isActive, dineInSession.paymentStatus, dineInSession.orderRounds]);
 
   // Automatically scroll horizontal category tabs to bring the active category into view
   useEffect(() => {
@@ -459,7 +481,36 @@ export default function App() {
     setRefreshing(false);
   };
 
-  const handleIncrement = useCallback((id: any, itemObj?: any) => {
+  const handleIncrement = useCallback(async (id: any, itemObj?: any) => {
+    // ── Table validation for Dine In ──
+    if (orderType === 'Dine In') {
+      const activeTable = String(tableNumber || dineInSession.tableNumber || '').trim();
+      if (!activeTable) {
+        setIsInvalidTable(false);
+        setIsSelectTableModalVisible(true);
+        return;
+      }
+
+      if (isValidatingTableRef.current) return;
+      isValidatingTableRef.current = true;
+
+      try {
+        const restId = selectedOutlet?.restaurant_id ? Number(selectedOutlet.restaurant_id) : 1;
+        const verifyRes = await tableApi.verifyTable(activeTable, restId);
+        if (!verifyRes.valid || (verifyRes.table && verifyRes.table.is_active === false)) {
+          useCartStore.getState().clearTableNumber();
+          setIsInvalidTable(true);
+          setIsSelectTableModalVisible(true);
+          isValidatingTableRef.current = false;
+          return;
+        }
+      } catch (e) {
+        // network issue - if activeTable exists, proceed safely
+      } finally {
+        isValidatingTableRef.current = false;
+      }
+    }
+
     const existing = cart[id] || cart[String(id)] || cart[Number(id)];
     if (existing) {
       incrementQuantity(existing.id);
@@ -471,7 +522,7 @@ export default function App() {
         addItem({ id: item.id, name: item.name, price: item.price, image: item.image, category: item.category, desc: item.desc, quantity: 1 });
       }
     }
-  }, [cart, selectedItem, menuItems, incrementQuantity, addItem]);
+  }, [cart, selectedItem, menuItems, incrementQuantity, addItem, orderType, tableNumber, dineInSession.tableNumber, selectedOutlet]);
 
   const handleDecrement = useCallback((id: any) => {
     const existing = cart[id] || cart[String(id)] || cart[Number(id)];
@@ -980,10 +1031,30 @@ export default function App() {
             >
               <Text style={[styles.filterOptionText, priceSort === "High to Low" && styles.filterOptionTextActive]}>High to Low</Text>
             </TouchableOpacity>
-            
           </TouchableOpacity>
         </TouchableOpacity>
       </Modal>
+
+      {/* Select Table First Modal */}
+      <SelectTableModal
+        visible={isSelectTableModalVisible}
+        onClose={() => setIsSelectTableModalVisible(false)}
+        isInvalidTable={isInvalidTable}
+        tableNumber={tableNumber || dineInSession.tableNumber}
+        onSelectTable={() => {
+          setIsSelectTableModalVisible(false);
+          router.push({
+            pathname: '/(main)/home',
+            params: { openScanner: 'true', orderType: 'Dine In' }
+          });
+        }}
+      />
+
+      {/* Active Dine-In Conflict Modal */}
+      <DineInConflictModal
+        visible={isDineInConflictVisible}
+        onClose={() => setIsDineInConflictVisible(false)}
+      />
     </SafeAreaView>
   );
 }

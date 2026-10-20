@@ -225,33 +225,63 @@ export const useDineInSessionStore = create<DineInSessionState>()(
 
       syncSessionDetails: (sessionData) =>
         set((state) => {
-          const items = sessionData.allItems || sessionData.orders.flatMap((o) => o.items || []);
           const activeRounds = (sessionData.orders || []).filter(
             (o) => (o.status || '').toUpperCase() !== 'CANCELLED'
           );
           const allCancelled = (sessionData.orders || []).length > 0 && activeRounds.length === 0;
           const isSessionActive = sessionData.paymentStatus !== 'Paid' && !allCancelled && (sessionData.status || '').toUpperCase() !== 'CANCELLED';
-          const latestOrder = activeRounds.length > 0
-            ? activeRounds[activeRounds.length - 1]
-            : (sessionData.orders && sessionData.orders.length > 0 ? sessionData.orders[sessionData.orders.length - 1] : null);
+
+          if (!isSessionActive) {
+            return {
+              isActive: false,
+              tableNumber: null,
+              tableId: null,
+              sessionDbId: null,
+              sessionUid: null,
+              sessionId: null,
+              totalAmount: 0,
+              unpaidTotal: 0,
+              paymentStatus: sessionData.paymentStatus || 'Paid',
+              orderRounds: [],
+              orderedItems: [],
+              activeOrderId: null,
+              activeDbOrderId: null,
+              batches: [],
+            };
+          }
+
+          const rawItems = sessionData.allItems && sessionData.allItems.length > 0
+            ? sessionData.allItems
+            : activeRounds.flatMap((o) => (o.items || []).filter((it: any) => (it.status || '').toUpperCase() !== 'CANCELLED'));
+          const latestOrder = activeRounds.length > 0 ? activeRounds[activeRounds.length - 1] : null;
 
           return {
-            isActive: isSessionActive,
+            isActive: true,
             tableNumber: sessionData.tableNumber || state.tableNumber,
+            tableId: sessionData.tableNumber || state.tableId,
             sessionDbId: sessionData.sessionId,
             sessionUid: sessionData.sessionUid,
             sessionId: sessionData.sessionUid,
-            totalAmount: isSessionActive ? sessionData.totalAmount : 0,
-            unpaidTotal: sessionData.paymentStatus === 'Paid' || allCancelled ? 0 : sessionData.totalAmount,
+            totalAmount: sessionData.totalAmount || 0,
+            unpaidTotal: sessionData.paymentStatus === 'Paid' ? 0 : (sessionData.totalAmount || 0),
             paymentStatus: sessionData.paymentStatus,
-            orderRounds: sessionData.orders,
-            orderedItems: items.length > 0 ? items : state.orderedItems,
+            orderRounds: activeRounds,
+            orderedItems: rawItems.length > 0 ? rawItems : state.orderedItems,
             activeOrderId: latestOrder ? latestOrder.orderId : state.activeOrderId,
             activeDbOrderId: latestOrder ? latestOrder.id : state.activeDbOrderId,
           };
         }),
 
-      completeDineInSession: () =>
+      completeDineInSession: () => {
+        try {
+          AsyncStorage.removeItem('dineInTable').catch(() => {});
+          if (Platform.OS === 'web' && typeof window !== 'undefined' && typeof localStorage !== 'undefined') {
+            localStorage.removeItem('dineInTable');
+          }
+          delete (globalThis as any).dineInTable;
+        } catch (e) {
+          // ignore cleanup errors
+        }
         set({
           isActive: false,
           tableNumber: null,
@@ -267,7 +297,8 @@ export const useDineInSessionStore = create<DineInSessionState>()(
           paymentStatus: 'Paid',
           batches: [],
           orderRounds: [],
-        }),
+        });
+      },
 
       // Backward-compatible methods
       startSession: (tableId, sessionId) =>

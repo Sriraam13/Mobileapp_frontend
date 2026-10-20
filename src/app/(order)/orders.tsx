@@ -183,7 +183,7 @@ export default function Orders() {
         const groupMap = new Map<string, any>();
 
         for (const ord of orderList) {
-          if (ord.isCatering || ord.order_type !== 'Dine In') {
+          if (ord.isCatering || ord.order_type !== 'Dine In' || (ord.status || '').toUpperCase() === 'CANCELLED') {
             consolidated.push(ord);
             continue;
           }
@@ -275,6 +275,7 @@ export default function Orders() {
         // Collect all indices of orders that belong to this active session
         const matchingIndices: number[] = [];
         formattedOrders.forEach((o: any, idx: number) => {
+          if ((o.status || '').toUpperCase() === 'CANCELLED') return;
           const isSameSession = Boolean(dineInSession.sessionDbId && o.dine_in_session_id && Number(o.dine_in_session_id) === Number(dineInSession.sessionDbId));
           const isSameOrder = o.id === dineInSession.activeOrderId || String(o.dbId) === String(dineInSession.activeDbOrderId);
           const isRoundOrder = (dineInSession.orderRounds || []).some((r: any) => String(r.id) === String(o.dbId) || String(r.orderId) === String(o.id));

@@ -15,10 +15,12 @@ import { useDineInSessionStore } from '../../store/useDineInSessionStore';
 import BottomNavBar from '../../components/layout/BottomNavBar';
 import ViewCartButton from '../../components/layout/ViewCartButton';
 import DineInActiveBanner from '../../components/DineInActiveBanner';
+import SelectTableModal from '../../components/ui/SelectTableModal';
+import DineInConflictModal from '../../components/ui/DineInConflictModal';
 
 export default function Home() {
   const router = useRouter();
-  const params = useLocalSearchParams<{ autoPromptQR?: string }>();
+  const params = useLocalSearchParams<{ autoPromptQR?: string; openScanner?: string }>();
   const phone = useAuthStore(s => s.phone);
   const selectedOutlet = useRestaurantStore(s => s.selectedOutlet);
   const dineInSession = useDineInSessionStore();
@@ -183,7 +185,19 @@ export default function Home() {
     }
   };
 
+  const [isSelectTableModalVisible, setIsSelectTableModalVisible] = useState(false);
+  const [isInvalidTable, setIsInvalidTable] = useState(false);
+  const [isDineInConflictVisible, setIsDineInConflictVisible] = useState(false);
+
   const handleIncrement = (itemId: any, itemObj?: any) => {
+    if (activeTab === 'Dine-in' || orderType === 'Dine In') {
+      const activeTable = String(tableNumber || dineInSession.tableNumber || '').trim();
+      if (!activeTable) {
+        setIsInvalidTable(false);
+        setIsSelectTableModalVisible(true);
+        return;
+      }
+    }
     const existing = cart[itemId] || cart[String(itemId)] || cart[Number(itemId)];
     if (existing) {
       incrementQuantity(existing.id);
@@ -405,7 +419,9 @@ export default function Home() {
   };
 
   useEffect(() => {
-    if (params?.autoPromptQR === 'true') {
+    if (params?.openScanner === 'true') {
+      handleDineInPress();
+    } else if (params?.autoPromptQR === 'true') {
       const timer = setTimeout(() => {
         showPopup(
           "Scan Table QR Code",
@@ -939,6 +955,14 @@ export default function Home() {
           <TouchableOpacity
             style={[styles.tabBtn, activeTab === 'Delivery' && styles.activeTabBtn]}
             onPress={() => {
+              const activeRounds = (dineInSession.orderRounds || []).filter(
+                (r: any) => (r.status || '').toUpperCase() !== 'CANCELLED'
+              );
+              const hasActiveDineIn = dineInSession.isActive && dineInSession.paymentStatus !== 'Paid' && (activeRounds.length > 0 || (dineInSession.totalAmount > 0 && !dineInSession.activeOrderId));
+              if (hasActiveDineIn) {
+                setIsDineInConflictVisible(true);
+                return;
+              }
               setActiveTab('Delivery');
               router.push('/(address)/add-address');
             }}
@@ -1104,12 +1128,13 @@ export default function Home() {
                   <TouchableOpacity
                     style={styles.addBtn}
                     onPress={() => {
-                      if (activeTab === 'Dine-in' && !tableNumber) {
-                        showPopup("Scan QR Code", "Please scan the QR code on your table to view menu and order.", "info", undefined, [
-                          { text: "Scan QR", onPress: handleDineInPress },
-                          { text: "Search Menu", onPress: () => router.push('/menu') }
-                        ]);
-                        return;
+                      if (activeTab === 'Dine-in' || orderType === 'Dine In') {
+                        const activeTable = String(tableNumber || dineInSession.tableNumber || '').trim();
+                        if (!activeTable) {
+                          setIsInvalidTable(false);
+                          setIsSelectTableModalVisible(true);
+                          return;
+                        }
                       }
                       const cartItem = {
                         id: dish.id,
@@ -1632,6 +1657,24 @@ export default function Home() {
           </TouchableOpacity>
         </TouchableOpacity>
       </Modal>
+
+      {/* Select Table First Modal */}
+      <SelectTableModal
+        visible={isSelectTableModalVisible}
+        onClose={() => setIsSelectTableModalVisible(false)}
+        isInvalidTable={isInvalidTable}
+        tableNumber={tableNumber || dineInSession.tableNumber}
+        onSelectTable={() => {
+          setIsSelectTableModalVisible(false);
+          handleDineInPress();
+        }}
+      />
+
+      {/* Active Dine-In Conflict Modal */}
+      <DineInConflictModal
+        visible={isDineInConflictVisible}
+        onClose={() => setIsDineInConflictVisible(false)}
+      />
     </SafeAreaView>
   );
 }

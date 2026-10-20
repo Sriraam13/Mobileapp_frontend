@@ -62,9 +62,6 @@ export default function VoiceAgentModal() {
   ];
   const hasBottomNav = !pathname || BOTTOM_NAV_SCREENS.some((s) => pathname.includes(s));
 
-  const CART_BAR_SCREENS = ['home', 'for-you', 'menu'];
-  const hasViewCartBar = CART_BAR_SCREENS.some((s) => pathname?.includes(s)) && cartItemCount > 0;
-
   const isCheckoutScreen = [
     'checkout',
     'payment',
@@ -74,21 +71,27 @@ export default function VoiceAgentModal() {
     'catering-razorpay-checkout',
   ].some((s) => pathname?.includes(s));
 
+  const isHomeScreen = !pathname || pathname === '/' || pathname === '/(main)' || pathname.includes('home');
   const isForYouScreen = pathname?.includes('for-you');
   const isMenuScreen = pathname?.includes('menu');
   const isOrdersScreen = ['orders', 'order-details'].some((s) => pathname?.includes(s));
   const isRewardsScreen = pathname?.includes('rewards');
+  const hasViewCartBar = (isHomeScreen || isForYouScreen || isMenuScreen) && cartItemCount > 0;
 
-  // Compute adaptive bottom clearance so FAB never collides with BottomNav, ViewCartButton, or sticky footers
+  // Compute adaptive bottom clearance so FAB sits right above ViewCartButton, BottomNav, or sticky footers
   const baseBottom = Math.max(insets.bottom, Platform.OS === 'android' ? 24 : 16);
   let computedFabBottom = baseBottom + 20;
 
   if (hasViewCartBar && hasBottomNav) {
     // Both BottomNavBar (~70px) and ViewCartButton (~48px) are present (e.g. on For You or Home)
-    computedFabBottom = baseBottom + 138;
+    // ViewCartButton sits at baseBottom + 76, height ~48px (top is at baseBottom + 124).
+    // Sits right above ViewCartButton with a 12px margin.
+    computedFabBottom = baseBottom + 136;
   } else if (hasViewCartBar) {
     // Only ViewCartButton without BottomNav (e.g. Menu)
-    computedFabBottom = baseBottom + 78;
+    // ViewCartButton sits at insets.bottom + 24, height ~48px (top is at baseBottom + 72).
+    // Sits right above ViewCartButton with a 12px margin.
+    computedFabBottom = baseBottom + 84;
   } else if (hasBottomNav) {
     // BottomNav present without ViewCartButton
     computedFabBottom = baseBottom + 84;
@@ -104,7 +107,7 @@ export default function VoiceAgentModal() {
         screenKey: 'for-you',
         badgeLabel: 'For You • AI Curated',
         badgeIcon: 'sparkles' as const,
-        fabTitle: "Chef's Picks",
+        fabTitle: "Agent's Picks",
         fabSubtitle: '✨ For You',
         fabCompact: false,
         suggestions: [
@@ -120,7 +123,7 @@ export default function VoiceAgentModal() {
         screenKey: 'checkout',
         badgeLabel: 'Cart & Bill Assistance',
         badgeIcon: 'cart' as const,
-        fabTitle: 'Chef Help',
+        fabTitle: 'Agent Help',
         fabSubtitle: 'Bill & Order',
         fabCompact: true,
         suggestions: [
@@ -136,7 +139,7 @@ export default function VoiceAgentModal() {
         screenKey: 'menu',
         badgeLabel: 'Menu & Specials',
         badgeIcon: 'restaurant' as const,
-        fabTitle: 'Talk to Chef',
+        fabTitle: 'Talk to Agent',
         fabSubtitle: 'Ask about dishes',
         fabCompact: false,
         suggestions: [
@@ -168,7 +171,7 @@ export default function VoiceAgentModal() {
         screenKey: 'rewards',
         badgeLabel: 'Rewards & Offers',
         badgeIcon: 'gift' as const,
-        fabTitle: 'Chef Rewards',
+        fabTitle: 'Agent Rewards',
         fabSubtitle: 'Points & deals',
         fabCompact: false,
         suggestions: [
@@ -181,9 +184,9 @@ export default function VoiceAgentModal() {
     }
     return {
       screenKey: 'home',
-      badgeLabel: 'Udipi Kitchen Assistant',
+      badgeLabel: 'Udipi Dining Assistant',
       badgeIcon: 'restaurant' as const,
-      fabTitle: 'Talk to Chef',
+      fabTitle: 'Talk to Agent',
       fabSubtitle: 'Tap to speak',
       fabCompact: false,
       suggestions: [
@@ -193,7 +196,7 @@ export default function VoiceAgentModal() {
         'Track my current order',
       ],
     };
-  }, [isForYouScreen, isCheckoutScreen, isMenuScreen, isOrdersScreen, isRewardsScreen]);
+  }, [pathname]);
 
   // Subscribe with granular selectors
   const setupListeners = useVapiStore((s) => s.setupListeners);
@@ -357,7 +360,7 @@ export default function VoiceAgentModal() {
           >
             <View style={[styles.fabAvatarBg, routeContext.fabCompact && styles.fabAvatarBgCompact, isDragging && { marginRight: 0 }]}>
               <Image
-                source={require('../../assets/images/chef_mascot.png')}
+                source={require('../../assets/images/agent_waiter.png')}
                 style={routeContext.fabCompact ? styles.fabChefMascotCompact : styles.fabChefMascot}
                 resizeMode="cover"
               />
@@ -423,7 +426,7 @@ export default function VoiceAgentModal() {
             <View style={styles.avatarContainer}>
               <Animated.View style={[styles.pulseRing, { transform: [{ scale: pulseAnim }] }]} />
               <Image
-                source={require('../../assets/images/chef_mascot.png')}
+                source={require('../../assets/images/agent_waiter.png')}
                 style={styles.chefAvatar}
                 resizeMode="contain"
               />
@@ -478,7 +481,7 @@ export default function VoiceAgentModal() {
                       {msg.role !== 'user' && (
                         <View style={styles.smallAvatar}>
                           <Image
-                            source={require('../../assets/images/chef_mascot.png')}
+                            source={require('../../assets/images/agent_waiter.png')}
                             style={styles.tinyChef}
                           />
                         </View>
@@ -511,7 +514,7 @@ export default function VoiceAgentModal() {
                     <View style={[styles.messageWrapper, styles.messageWrapperAgent]}>
                       <View style={styles.smallAvatar}>
                         <Image
-                          source={require('../../assets/images/chef_mascot.png')}
+                          source={require('../../assets/images/agent_waiter.png')}
                           style={styles.tinyChef}
                         />
                       </View>
@@ -647,14 +650,12 @@ const styles = StyleSheet.create({
     marginRight: 0,
   },
   fabChefMascot: {
-    width: 34,
-    height: 34,
-    marginTop: 4,
+    width: 36,
+    height: 36,
   },
   fabChefMascotCompact: {
-    width: 40,
-    height: 40,
-    marginTop: 4,
+    width: 44,
+    height: 44,
   },
   fabCompactLiveDot: {
     position: 'absolute',

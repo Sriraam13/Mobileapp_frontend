@@ -5,10 +5,11 @@ import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 
 import { getFullImageUrl } from '../../constants/api';
-import { useAuthStore, useRestaurantStore, useFavoritesStore, useCartStore } from '../../store';
+import { useAuthStore, useRestaurantStore, useFavoritesStore, useCartStore, useDineInSessionStore } from '../../store';
 import { customerApi } from '../../services/apiService';
 import BottomNavBar from '../../components/layout/BottomNavBar';
 import ViewCartButton from '../../components/layout/ViewCartButton';
+import SelectTableModal from '../../components/ui/SelectTableModal';
 
 interface RecommendationItem {
   id: number;
@@ -50,10 +51,14 @@ export default function ForYou() {
   const incrementQuantity = useCartStore(s => s.incrementQuantity);
   const decrementQuantity = useCartStore(s => s.decrementQuantity);
   const cart = useCartStore(s => s.items);
+  const orderType = useCartStore(s => s.orderType);
+  const tableNumber = useCartStore(s => s.tableNumber);
+  const dineInSession = useDineInSessionStore();
   const cartItemCount = useCartStore((state) => Object.keys(state.items).length);
 
   const [data, setData] = useState<RecommendationsData | null>(null);
   const [loading, setLoading] = useState(true);
+  const [isSelectTableModalVisible, setIsSelectTableModalVisible] = useState(false);
 
   useEffect(() => {
     const loadForYouData = async () => {
@@ -114,6 +119,14 @@ export default function ForYou() {
   };
 
   const handleAddToCart = (item: RecommendationItem) => {
+    if (orderType === 'Dine In') {
+      const activeTable = String(tableNumber || dineInSession.tableNumber || '').trim();
+      if (!activeTable) {
+        setIsSelectTableModalVisible(true);
+        return;
+      }
+    }
+
     if (item.is_available === false) {
       Alert.alert('Unavailable', `${item.name} is not available right now.`);
       return;
@@ -130,6 +143,14 @@ export default function ForYou() {
   };
 
   const handleComboAddToCart = (combo: any) => {
+    if (orderType === 'Dine In') {
+      const activeTable = String(tableNumber || dineInSession.tableNumber || '').trim();
+      if (!activeTable) {
+        setIsSelectTableModalVisible(true);
+        return;
+      }
+    }
+
     addItem({
       id: combo.id || combo.menu_item_id,
       name: combo.name,
@@ -360,6 +381,20 @@ export default function ForYou() {
 
       {/* Bottom Navigation */}
       <BottomNavBar activeTab="home" />
+
+      {/* Select Table First Modal */}
+      <SelectTableModal
+        visible={isSelectTableModalVisible}
+        onClose={() => setIsSelectTableModalVisible(false)}
+        tableNumber={tableNumber || dineInSession.tableNumber}
+        onSelectTable={() => {
+          setIsSelectTableModalVisible(false);
+          router.push({
+            pathname: '/(main)/home',
+            params: { openScanner: 'true', orderType: 'Dine In' }
+          });
+        }}
+      />
     </SafeAreaView>
   );
 }
