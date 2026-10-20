@@ -40,13 +40,6 @@ import { setActiveRouter } from '../utils/mobileAgentActionDispatcher';
 
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 
-const SUGGESTIONS = [
-  'Show me today\'s menu',
-  'Add 2 Masala Dosa to my cart',
-  'Show my reward points',
-  'Track my current order',
-];
-
 export default function VoiceAgentModal() {
   const router = useRouter();
   const pathname = usePathname();
@@ -54,16 +47,155 @@ export default function VoiceAgentModal() {
   const cartItemCount = useCartStore((state) => (state.items ? Object.keys(state.items).length : 0));
   const isDineInActive = useDineInSessionStore((state) => state.isActive && !!state.activeOrderId);
 
-  // Position cleanly above BottomNav, ViewCartButton, and DineIn banner without collisions
-  const hasBottomNav = !pathname || pathname.includes('home') || pathname.includes('orders') || pathname.includes('profile') || pathname.includes('search');
-  const baseBottom = Math.max(insets.bottom, Platform.OS === 'android' ? 40 : 30);
-  let computedFabBottom = baseBottom + (hasBottomNav ? 90 : 40);
-  if (cartItemCount > 0) {
-    computedFabBottom += 60;
+  // ── Screen & Navigation Reflexive Detection ─────────────────────────────────
+  const BOTTOM_NAV_SCREENS = [
+    'home',
+    'for-you',
+    'orders',
+    'order-details',
+    'profile',
+    'rewards',
+    'my-addresses',
+    'add-address',
+    'payment-methods',
+    'search',
+  ];
+  const hasBottomNav = !pathname || BOTTOM_NAV_SCREENS.some((s) => pathname.includes(s));
+
+  const CART_BAR_SCREENS = ['home', 'for-you', 'menu'];
+  const hasViewCartBar = CART_BAR_SCREENS.some((s) => pathname?.includes(s)) && cartItemCount > 0;
+
+  const isCheckoutScreen = [
+    'checkout',
+    'payment',
+    'delivery-checkout',
+    'catering-advance-payment',
+    'catering-balance-payment',
+    'catering-razorpay-checkout',
+  ].some((s) => pathname?.includes(s));
+
+  const isForYouScreen = pathname?.includes('for-you');
+  const isMenuScreen = pathname?.includes('menu');
+  const isOrdersScreen = ['orders', 'order-details'].some((s) => pathname?.includes(s));
+  const isRewardsScreen = pathname?.includes('rewards');
+
+  // Compute adaptive bottom clearance so FAB never collides with BottomNav, ViewCartButton, or sticky footers
+  const baseBottom = Math.max(insets.bottom, Platform.OS === 'android' ? 24 : 16);
+  let computedFabBottom = baseBottom + 20;
+
+  if (hasViewCartBar && hasBottomNav) {
+    // Both BottomNavBar (~70px) and ViewCartButton (~48px) are present (e.g. on For You or Home)
+    computedFabBottom = baseBottom + 138;
+  } else if (hasViewCartBar) {
+    // Only ViewCartButton without BottomNav (e.g. Menu)
+    computedFabBottom = baseBottom + 78;
+  } else if (hasBottomNav) {
+    // BottomNav present without ViewCartButton
+    computedFabBottom = baseBottom + 84;
+  } else if (isCheckoutScreen) {
+    // Checkout screens with sticky footer
+    computedFabBottom = baseBottom + 78;
   }
 
-  // Subscribe with granular selectors so a partial transcript token only
-  // re-renders what actually depends on it (not the whole modal + FAB tree).
+  // ── Reflexive Content Mapping ──────────────────────────────────────────────
+  const routeContext = React.useMemo(() => {
+    if (isForYouScreen) {
+      return {
+        screenKey: 'for-you',
+        badgeLabel: 'For You • AI Curated',
+        badgeIcon: 'sparkles' as const,
+        fabTitle: "Chef's Picks",
+        fabSubtitle: '✨ For You',
+        fabCompact: false,
+        suggestions: [
+          'What dishes are recommended for me?',
+          'Tell me about today\'s personalized combos',
+          'Why was Curd Vadai recommended for me?',
+          'Add recommended items to my cart',
+        ],
+      };
+    }
+    if (isCheckoutScreen) {
+      return {
+        screenKey: 'checkout',
+        badgeLabel: 'Cart & Bill Assistance',
+        badgeIcon: 'cart' as const,
+        fabTitle: 'Chef Help',
+        fabSubtitle: 'Bill & Order',
+        fabCompact: true,
+        suggestions: [
+          'What is my final total bill amount?',
+          'Can you apply the best discount code?',
+          'Switch order to Pay Later Dine-In',
+          'Review items currently in my cart',
+        ],
+      };
+    }
+    if (isMenuScreen) {
+      return {
+        screenKey: 'menu',
+        badgeLabel: 'Menu & Specials',
+        badgeIcon: 'restaurant' as const,
+        fabTitle: 'Talk to Chef',
+        fabSubtitle: 'Ask about dishes',
+        fabCompact: false,
+        suggestions: [
+          'What are today\'s South Indian specials?',
+          'Show pure vegetarian breakfast options',
+          'Add 2 Masala Dosas to my cart',
+          'Do you have authentic filter coffee?',
+        ],
+      };
+    }
+    if (isOrdersScreen) {
+      return {
+        screenKey: 'orders',
+        badgeLabel: 'Live Order Tracker',
+        badgeIcon: 'time' as const,
+        fabTitle: 'Order Help',
+        fabSubtitle: 'Track order',
+        fabCompact: false,
+        suggestions: [
+          'Where is my active order right now?',
+          'What is my estimated delivery time?',
+          'Reorder my previous meal',
+          'Help me contact restaurant support',
+        ],
+      };
+    }
+    if (isRewardsScreen) {
+      return {
+        screenKey: 'rewards',
+        badgeLabel: 'Rewards & Offers',
+        badgeIcon: 'gift' as const,
+        fabTitle: 'Chef Rewards',
+        fabSubtitle: 'Points & deals',
+        fabCompact: false,
+        suggestions: [
+          'How many reward points do I have?',
+          'How can I redeem my loyalty points?',
+          'Show available discount vouchers',
+          'How do I earn more Udipi points?',
+        ],
+      };
+    }
+    return {
+      screenKey: 'home',
+      badgeLabel: 'Udipi Kitchen Assistant',
+      badgeIcon: 'restaurant' as const,
+      fabTitle: 'Talk to Chef',
+      fabSubtitle: 'Tap to speak',
+      fabCompact: false,
+      suggestions: [
+        'What should I eat today?',
+        'Show me today\'s special menu',
+        'Add Masala Dosa to my cart',
+        'Track my current order',
+      ],
+    };
+  }, [isForYouScreen, isCheckoutScreen, isMenuScreen, isOrdersScreen, isRewardsScreen]);
+
+  // Subscribe with granular selectors
   const setupListeners = useVapiStore((s) => s.setupListeners);
   const startCall = useVapiStore((s) => s.startCall);
   const stopCall = useVapiStore((s) => s.stopCall);
@@ -76,6 +208,7 @@ export default function VoiceAgentModal() {
   const messages = useVapiStore((s) => s.messages);
   const partialUserTranscript = useVapiStore((s) => s.partialUserTranscript);
   const partialAgentTranscript = useVapiStore((s) => s.partialAgentTranscript);
+  const sendTextMessage = useVapiStore((s) => s.sendTextMessage);
 
   const { isVisible, showAgent, hideAgent } = useVoiceAgentStore();
   const scrollViewRef = useRef<ScrollView>(null);
@@ -83,12 +216,12 @@ export default function VoiceAgentModal() {
   // Pulse animation for speaking indicator
   const [pulseAnim] = useState(() => new Animated.Value(1));
 
-  // Load the native voice SDK ahead of the first tap so opening feels instant.
+  // Load native voice SDK ahead of the first tap
   useEffect(() => {
     prewarm();
   }, [prewarm]);
 
-  // Start pulse when connected & speaking (agent transcript active)
+  // Start pulse when connected & speaking
   const isAgentSpeaking = isConnected && !!partialAgentTranscript;
   useEffect(() => {
     if (isAgentSpeaking) {
@@ -104,7 +237,7 @@ export default function VoiceAgentModal() {
     }
   }, [isAgentSpeaking, pulseAnim]);
 
-  // Notify Vapi when the user navigates to a new screen
+  // Notify Vapi when route changes
   useEffect(() => {
     if (isConnected && pathname) {
       const vapiStore = useVapiStore.getState();
@@ -114,9 +247,7 @@ export default function VoiceAgentModal() {
     }
   }, [pathname, isConnected]);
 
-  // Auto-scroll when messages update.
-  // Partial transcripts stream in token-by-token, so a timer per token piles up
-  // work on the JS thread. Coalesce into a single frame-aligned scroll.
+  // Frame-aligned auto-scroll
   const scrollFrameRef = useRef<number | null>(null);
   useEffect(() => {
     if (!isVisible) return;
@@ -142,22 +273,35 @@ export default function VoiceAgentModal() {
   const openModal = () => {
     setActiveRouter(router);
     showAgent();
-    // Auto-start the Vapi call when the modal opens
+    // Auto-start Vapi call when modal opens
     if (!isConnected && !isConnecting) {
       setupListeners(router);
       startCall();
+    }
+    if (pathname && isConnected) {
+      useVapiStore.getState().notifyRouteChanged(pathname);
     }
   };
 
   const closeModal = () => {
     hideAgent();
-    // Do NOT stopCall() here, so the agent stays active in the background!
   };
 
   const endCall = () => {
     stopCall();
     clearMessages();
     hideAgent();
+  };
+
+  const handleSuggestionPress = (sug: string) => {
+    setActiveRouter(router);
+    if (!isConnected && !isConnecting) {
+      setupListeners(router);
+      startCall();
+    }
+    if (sendTextMessage) {
+      sendTextMessage(sug);
+    }
   };
 
   const [pan] = useState(() => new Animated.ValueXY());
@@ -172,18 +316,19 @@ export default function VoiceAgentModal() {
         pan.extractOffset();
         setIsDragging(true);
       },
-      onPanResponderMove: Animated.event(
-        [null, { dx: pan.x, dy: pan.y }],
-        { useNativeDriver: false }
-      ),
+      onPanResponderMove: Animated.event([null, { dx: pan.x, dy: pan.y }], { useNativeDriver: false }),
       onPanResponderRelease: () => {
         pan.flattenOffset();
         setIsDragging(false);
-      }
+      },
     })
   );
 
-  const isHiddenScreen = !pathname || pathname === '/' || pathname === '/index' || pathname === '/login' || pathname === '/signup';
+  const isHiddenScreen =
+    !pathname ||
+    pathname === '/' ||
+    pathname === '/index' ||
+    ['/login', '/signup', '/verify-otp', 'catering-order-success'].some((r) => pathname.includes(r));
 
   if (isHiddenScreen && !isVisible) {
     return null;
@@ -197,65 +342,80 @@ export default function VoiceAgentModal() {
           {...panResponder.panHandlers}
           style={[
             styles.fabPill,
+            routeContext.fabCompact ? styles.fabCompact : null,
             { bottom: computedFabBottom },
             isConnected ? styles.fabActive : null,
             { transform: pan.getTranslateTransform() },
-            isDragging ? { borderRadius: 30, paddingHorizontal: 8 } : null
+            isDragging ? { borderRadius: 30, paddingHorizontal: 8 } : null,
           ]}
         >
           <TouchableOpacity
             onPress={openModal}
             activeOpacity={0.8}
-            style={{ flexDirection: 'row', alignItems: 'center' }}
+            style={styles.fabTouchable}
             disabled={isDragging}
           >
-            <View style={[styles.fabAvatarBg, isDragging && { marginRight: 0 }]}>
+            <View style={[styles.fabAvatarBg, routeContext.fabCompact && styles.fabAvatarBgCompact, isDragging && { marginRight: 0 }]}>
               <Image
                 source={require('../../assets/images/chef_mascot.png')}
-                style={styles.fabChefMascot}
+                style={routeContext.fabCompact ? styles.fabChefMascotCompact : styles.fabChefMascot}
                 resizeMode="cover"
               />
+              {isConnected && routeContext.fabCompact && <View style={styles.fabCompactLiveDot} />}
             </View>
-            {!isDragging && (
+
+            {!isDragging && !routeContext.fabCompact && (
               <View style={styles.fabTextWrapper}>
-                <Text style={styles.fabPillTitle}>Talk to Chef</Text>
+                <View style={styles.fabTitleRow}>
+                  <Text style={styles.fabPillTitle}>{routeContext.fabTitle}</Text>
+                  {isForYouScreen && (
+                    <View style={styles.fabAiMiniBadge}>
+                      <Ionicons name="sparkles" size={9} color="#ff4500" />
+                    </View>
+                  )}
+                </View>
                 <View style={styles.fabPillSubtitleRow}>
-                  <Ionicons name="mic" size={12} color="#666" />
-                  <Text style={styles.fabPillSubtitle}>
-                    {isConnected ? 'Live' : 'Tap to speak'}
+                  <Ionicons
+                    name={isConnected ? 'radio' : isForYouScreen ? 'sparkles-outline' : 'mic'}
+                    size={11}
+                    color={isConnected ? '#0BA01E' : '#ff4500'}
+                  />
+                  <Text style={[styles.fabPillSubtitle, isConnected && styles.fabPillSubtitleLive]}>
+                    {isConnected ? 'Live' : routeContext.fabSubtitle}
                   </Text>
                 </View>
               </View>
             )}
-            {isConnected && !isDragging && <View style={styles.fabLiveDot} />}
+
+            {isConnected && !isDragging && !routeContext.fabCompact && <View style={styles.fabLiveDot} />}
           </TouchableOpacity>
         </Animated.View>
       )}
 
       {/* Rich UI Modal */}
-      <Modal
-        animationType="slide"
-        transparent={true}
-        visible={isVisible}
-        onRequestClose={closeModal}
-      >
+      <Modal animationType="slide" transparent={true} visible={isVisible} onRequestClose={closeModal}>
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
-
             {/* Header */}
             <View style={styles.header}>
-              <View>
-                <Text style={styles.headerTitle}>Data Udipi Assistant</Text>
-                <Text style={styles.headerSubtitle}>
+              <View style={styles.headerLeft}>
+                <View style={styles.headerTitleRow}>
+                  <Text style={styles.headerTitle}>Data Udipi Assistant</Text>
+                  <View style={styles.contextBadge}>
+                    <Ionicons name={routeContext.badgeIcon} size={11} color="#ff4500" />
+                    <Text style={styles.contextBadgeText}>{routeContext.badgeLabel}</Text>
+                  </View>
+                </View>
+                <Text style={[styles.headerSubtitle, isConnected && styles.headerSubtitleLive]}>
                   {isConnecting
-                    ? 'Connecting...'
+                    ? 'Connecting to Chef...'
                     : isConnected
-                    ? '● Live'
-                    : 'Tap below to speak'}
+                    ? '● Live Voice Session'
+                    : 'Tap suggestion or start speaking below'}
                 </Text>
               </View>
               <TouchableOpacity onPress={closeModal} style={styles.closeButton}>
-                <Ionicons name="close" size={24} color="#333" />
+                <Ionicons name="close" size={22} color="#333" />
               </TouchableOpacity>
             </View>
 
@@ -268,11 +428,7 @@ export default function VoiceAgentModal() {
                 resizeMode="contain"
               />
               <View style={[styles.statusBadge, isConnected ? styles.statusBadgeActive : null]}>
-                <FontAwesome5
-                  name={isConnected ? 'microphone' : 'user-tie'}
-                  size={11}
-                  color="white"
-                />
+                <FontAwesome5 name={isConnected ? 'microphone' : 'user-tie'} size={11} color="white" />
               </View>
             </View>
 
@@ -287,15 +443,24 @@ export default function VoiceAgentModal() {
                 /* Empty State */
                 <View style={styles.emptyState}>
                   <Text style={styles.greetingTitle}>
-                    {isConnecting ? 'Connecting…' : isConnected ? 'Listening…' : 'Hi! I\'m your Voice Agent.'}
+                    {isConnecting ? 'Connecting…' : isConnected ? 'Listening to you…' : "Hi! I'm your Udipi Chef."}
                   </Text>
                   <Text style={styles.greetingSubtitle}>How can I help you today?</Text>
                   <View style={styles.suggestionsContainer}>
-                    {SUGGESTIONS.map((sug, idx) => (
-                      <View key={idx} style={styles.suggestionPill}>
-                        <FontAwesome5 name="lightbulb" size={13} color="#ff4500" style={{ marginRight: 8 }} />
+                    <Text style={styles.suggestionsHeader}>Quick Suggestions</Text>
+                    {routeContext.suggestions.map((sug, idx) => (
+                      <TouchableOpacity
+                        key={idx}
+                        style={styles.suggestionPill}
+                        onPress={() => handleSuggestionPress(sug)}
+                        activeOpacity={0.75}
+                      >
+                        <View style={styles.suggestionIconBg}>
+                          <FontAwesome5 name="lightbulb" size={11} color="#ff4500" />
+                        </View>
                         <Text style={styles.suggestionText}>{sug}</Text>
-                      </View>
+                        <Ionicons name="arrow-forward" size={13} color="#bbb" style={{ marginLeft: 'auto' }} />
+                      </TouchableOpacity>
                     ))}
                   </View>
                 </View>
@@ -426,48 +591,101 @@ export default function VoiceAgentModal() {
 const styles = StyleSheet.create({
   fabPill: {
     position: 'absolute',
-    right: 20,
+    right: 16,
     backgroundColor: '#ffffff',
     borderRadius: 30,
-    paddingVertical: 8,
+    paddingVertical: 7,
     paddingHorizontal: 12,
     flexDirection: 'row',
     alignItems: 'center',
     elevation: 8,
-    shadowColor: '#000',
+    shadowColor: '#ff4500',
     shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.15,
-    shadowRadius: 4.65,
+    shadowOpacity: 0.14,
+    shadowRadius: 6,
+    borderWidth: 1,
+    borderColor: '#ffeedd',
     zIndex: 9999,
   },
+  fabCompact: {
+    paddingHorizontal: 0,
+    paddingVertical: 0,
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    justifyContent: 'center',
+    alignItems: 'center',
+    elevation: 6,
+    shadowOpacity: 0.12,
+  },
   fabActive: {
-    backgroundColor: '#ffe8e8',
+    backgroundColor: '#fff5f0',
     borderColor: '#ff4500',
-    borderWidth: 1.5,
+    borderWidth: 1.8,
+  },
+  fabTouchable: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   fabAvatarBg: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: '#f0f0f0',
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: '#fff5ee',
     alignItems: 'center',
     justifyContent: 'center',
     overflow: 'hidden',
-    marginRight: 10,
+    marginRight: 8,
+    borderWidth: 1,
+    borderColor: '#ffd8be',
+  },
+  fabAvatarBgCompact: {
+    width: 46,
+    height: 46,
+    borderRadius: 23,
+    marginRight: 0,
   },
   fabChefMascot: {
-    width: 36,
-    height: 36,
-    marginTop: 6,
+    width: 34,
+    height: 34,
+    marginTop: 4,
+  },
+  fabChefMascotCompact: {
+    width: 40,
+    height: 40,
+    marginTop: 4,
+  },
+  fabCompactLiveDot: {
+    position: 'absolute',
+    top: 2,
+    right: 2,
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: '#0BA01E',
+    borderWidth: 1.5,
+    borderColor: '#ffffff',
   },
   fabTextWrapper: {
     justifyContent: 'center',
-    paddingRight: 8,
+    paddingRight: 6,
+  },
+  fabTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
   },
   fabPillTitle: {
-    fontSize: 14,
-    fontWeight: 'bold',
-    color: '#333',
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#1c1c1e',
+  },
+  fabAiMiniBadge: {
+    backgroundColor: '#fff3e0',
+    paddingHorizontal: 4,
+    paddingVertical: 1,
+    borderRadius: 6,
+    marginLeft: 4,
   },
   fabPillSubtitleRow: {
     flexDirection: 'row',
@@ -477,26 +695,31 @@ const styles = StyleSheet.create({
   fabPillSubtitle: {
     fontSize: 11,
     color: '#666',
-    marginLeft: 4,
+    marginLeft: 3,
+    fontWeight: '500',
+  },
+  fabPillSubtitleLive: {
+    color: '#0BA01E',
+    fontWeight: '700',
   },
   fabLiveDot: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-    backgroundColor: '#dc143c',
-    marginLeft: 6,
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#0BA01E',
+    marginLeft: 4,
   },
   modalOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.45)',
+    backgroundColor: 'rgba(0,0,0,0.5)',
     justifyContent: 'flex-end',
   },
   modalContent: {
-    backgroundColor: '#f8f9fa',
+    backgroundColor: '#fafafa',
     borderTopLeftRadius: 28,
     borderTopRightRadius: 28,
     height: SCREEN_HEIGHT * 0.88,
-    paddingTop: 20,
+    paddingTop: 18,
     display: 'flex',
     flexDirection: 'column',
   },
@@ -505,57 +728,89 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     paddingHorizontal: 20,
-    marginBottom: 4,
+    paddingBottom: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f0f0f0',
+  },
+  headerLeft: {
+    flex: 1,
+    marginRight: 10,
+  },
+  headerTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginBottom: 3,
   },
   headerTitle: {
     fontSize: 17,
+    fontWeight: 'bold',
+    color: '#1c1c1e',
+  },
+  contextBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#fff3e0',
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#ffe0b2',
+    gap: 4,
+  },
+  contextBadgeText: {
+    fontSize: 11,
     fontWeight: '700',
-    color: '#111',
+    color: '#ff4500',
   },
   headerSubtitle: {
-    fontSize: 13,
-    color: '#dc143c',
+    fontSize: 12,
+    color: '#8e8e93',
     fontWeight: '500',
-    marginTop: 2,
+  },
+  headerSubtitleLive: {
+    color: '#0BA01E',
+    fontWeight: '600',
   },
   closeButton: {
     padding: 6,
     borderRadius: 20,
-    backgroundColor: '#efefef',
+    backgroundColor: '#f0f0f0',
   },
   avatarContainer: {
     alignItems: 'center',
     justifyContent: 'center',
     marginTop: 14,
-    marginBottom: 14,
+    marginBottom: 10,
     position: 'relative',
   },
   pulseRing: {
     position: 'absolute',
-    width: 160,
-    height: 160,
-    borderRadius: 80,
+    width: 150,
+    height: 150,
+    borderRadius: 75,
     backgroundColor: 'rgba(255, 69, 0, 0.08)',
   },
   chefAvatar: {
-    width: 130,
-    height: 130,
+    width: 120,
+    height: 120,
     zIndex: 2,
   },
   statusBadge: {
     backgroundColor: '#aaa',
-    width: 28,
-    height: 28,
-    borderRadius: 14,
+    width: 26,
+    height: 26,
+    borderRadius: 13,
     alignItems: 'center',
     justifyContent: 'center',
-    marginTop: -14,
+    marginTop: -12,
     zIndex: 3,
     borderWidth: 2,
     borderColor: '#fff',
   },
   statusBadgeActive: {
-    backgroundColor: '#dc143c',
+    backgroundColor: '#0BA01E',
   },
   chatBody: {
     flex: 1,
@@ -563,44 +818,66 @@ const styles = StyleSheet.create({
   },
   emptyState: {
     alignItems: 'center',
-    marginTop: 10,
+    marginTop: 6,
   },
   greetingTitle: {
-    fontSize: 17,
-    fontWeight: '700',
-    color: '#111',
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#1c1c1e',
     marginBottom: 4,
     textAlign: 'center',
   },
   greetingSubtitle: {
-    fontSize: 15,
-    color: '#555',
-    marginBottom: 24,
+    fontSize: 14,
+    color: '#666',
+    marginBottom: 20,
     textAlign: 'center',
   },
   suggestionsContainer: {
     width: '100%',
     alignItems: 'center',
   },
+  suggestionsHeader: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#8e8e93',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+    marginBottom: 10,
+    alignSelf: 'flex-start',
+    marginLeft: '3%',
+  },
   suggestionPill: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#fff',
-    paddingHorizontal: 16,
-    paddingVertical: 13,
-    borderRadius: 24,
+    backgroundColor: '#ffffff',
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    borderRadius: 18,
     marginBottom: 10,
-    width: '92%',
+    width: '96%',
+    borderWidth: 1,
+    borderColor: '#f0e8e2',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.08,
-    shadowRadius: 2,
+    shadowOpacity: 0.05,
+    shadowRadius: 3,
     elevation: 2,
   },
+  suggestionIconBg: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: '#fff3e0',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 10,
+  },
   suggestionText: {
-    fontSize: 14,
-    color: '#333',
-    fontWeight: '500',
+    fontSize: 13.5,
+    color: '#1c1c1e',
+    fontWeight: '600',
+    flex: 1,
   },
   messageList: {
     paddingTop: 8,

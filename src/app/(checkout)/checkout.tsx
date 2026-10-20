@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Image, Platform, StatusBar, Alert, ActivityIndicator } from 'react-native';
+import React, { useState, useEffect } from 'react';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Image, Platform, StatusBar, Alert, ActivityIndicator, Modal } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
@@ -25,6 +25,8 @@ export default function CheckoutScreen() {
     tableNumber,
     incrementQuantity,
     decrementQuantity,
+    removeItem,
+    clearCart,
     discountCode
   } = useCartStore();
 
@@ -55,6 +57,104 @@ export default function CheckoutScreen() {
 
   const deliveryFee = orderType === 'Delivery' ? calculateDeliveryFee(distanceKm) : 0;
   const finalToPay = toPay + deliveryFee;
+
+  const navigateBackOrHome = () => {
+    try {
+      if (router.canGoBack()) {
+        router.back();
+      } else {
+        router.replace('/(main)/home');
+      }
+    } catch {
+      router.replace('/(main)/home');
+    }
+  };
+
+  const [confirmModal, setConfirmModal] = useState<{
+    visible: boolean;
+    type: 'clear_all' | 'remove_item';
+    itemId?: string | number;
+    itemName?: string;
+  }>({
+    visible: false,
+    type: 'clear_all',
+  });
+
+  const handleConfirmAction = () => {
+    const isClearingAll = confirmModal.type === 'clear_all';
+    const targetId = confirmModal.itemId;
+
+    setConfirmModal({ visible: false, type: 'clear_all' });
+
+    if (isClearingAll) {
+      clearCart();
+      navigateBackOrHome();
+    } else if (targetId) {
+      removeItem(targetId);
+      if (cartItems.length <= 1) {
+        navigateBackOrHome();
+      }
+    }
+  };
+
+  const handleDecrement = (itemId: string | number) => {
+    decrementQuantity(itemId as any);
+    if (cartItems.length <= 1) {
+      const existing = cartItems.find(i => String(i.id) === String(itemId));
+      if (existing && existing.quantity <= 1) {
+        navigateBackOrHome();
+      }
+    }
+  };
+
+  const renderConfirmModal = () => (
+    <Modal
+      visible={confirmModal.visible}
+      transparent
+      animationType="fade"
+      onRequestClose={() => setConfirmModal(prev => ({ ...prev, visible: false }))}
+    >
+      <View style={styles.modalOverlay}>
+        <View style={styles.modalCard}>
+          <View style={styles.modalIconBg}>
+            <Ionicons
+              name={confirmModal.type === 'clear_all' ? 'trash-outline' : 'close-circle-outline'}
+              size={34}
+              color="#ff3400"
+            />
+          </View>
+          <Text style={styles.modalTitle}>
+            {confirmModal.type === 'clear_all' ? 'Cancel Cart?' : 'Remove Item?'}
+          </Text>
+          <Text style={styles.modalMessage}>
+            {confirmModal.type === 'clear_all'
+              ? 'Are you sure you want to cancel and clear all items from your cart? You will return to the menu.'
+              : `Are you sure you want to remove "${confirmModal.itemName}" from your cart?`}
+          </Text>
+          <View style={styles.modalBtnRow}>
+            <TouchableOpacity
+              style={styles.modalSecondaryBtn}
+              onPress={() => setConfirmModal(prev => ({ ...prev, visible: false }))}
+              activeOpacity={0.7}
+            >
+              <Text style={styles.modalSecondaryBtnText}>
+                {confirmModal.type === 'clear_all' ? 'Keep Cart' : 'Cancel'}
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.modalPrimaryBtn}
+              onPress={handleConfirmAction}
+              activeOpacity={0.8}
+            >
+              <Text style={styles.modalPrimaryBtnText}>
+                {confirmModal.type === 'clear_all' ? 'Yes, Cancel' : 'Remove'}
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </View>
+    </Modal>
+  );
 
   const handleProceed = async () => {
     if (orderType === 'Delivery') {
@@ -178,39 +278,77 @@ export default function CheckoutScreen() {
 
       {/* Header */}
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.canGoBack() ? router.back() : router.replace('/home')} style={styles.backBtn}>
-          <Ionicons name="chevron-back" size={24} color="#000" />
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>Your Cart ({itemCount} Items)</Text>
+        <View style={styles.headerLeft}>
+          <TouchableOpacity onPress={navigateBackOrHome} style={styles.backBtn}>
+            <Ionicons name="chevron-back" size={24} color="#000" />
+          </TouchableOpacity>
+          <Text style={styles.headerTitle}>Your Cart ({itemCount} Items)</Text>
+        </View>
+        {cartItems.length > 0 && (
+          <TouchableOpacity 
+            style={styles.cancelAllBtn} 
+            onPress={() => setConfirmModal({ visible: true, type: 'clear_all' })}
+            activeOpacity={0.7}
+          >
+            <Ionicons name="trash-outline" size={15} color="#ff3400" style={{ marginRight: 4 }} />
+            <Text style={styles.cancelAllText}>Cancel Cart</Text>
+          </TouchableOpacity>
+        )}
       </View>
 
-      <ScrollView style={styles.container} contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-        
-        {/* Cart Items */}
-        {cartItems.map((item) => (
-          <View key={item.id} style={styles.itemCard}>
-            <Image source={{ uri: getFullImageUrl(item.image, item.name) }} style={styles.itemImg} resizeMode="cover" />
-            <View style={styles.itemInfo}>
-              <Text style={styles.itemName}>{item.name}</Text>
-              {item.note ? (
-                <Text style={styles.itemNote}>&quot;{item.note}&quot;</Text>
-              ) : null}
-              <View style={styles.itemBottomRow}>
-                <Text style={styles.itemPrice}>Rs. {item.price}</Text>
-                
-                <View style={styles.stepper}>
-                  <TouchableOpacity style={styles.stepBtnMinus} onPress={() => decrementQuantity(item.id as any)}>
-                    <Ionicons name="remove" size={16} color="#ff3400" />
-                  </TouchableOpacity>
-                  <Text style={styles.stepVal}>{item.quantity}</Text>
-                  <TouchableOpacity style={styles.stepBtnPlus} onPress={() => incrementQuantity(item.id as any)}>
-                    <Ionicons name="add" size={16} color="#ff3400" />
-                  </TouchableOpacity>
+      {cartItems.length === 0 ? (
+        <View style={styles.emptyContainer}>
+          <View style={styles.emptyIconCircle}>
+            <Ionicons name="cart-outline" size={48} color="#ff3400" />
+          </View>
+          <Text style={styles.emptyTitle}>Your Cart is Empty</Text>
+          <Text style={styles.emptySubtitle}>Looks like you haven't added anything to your cart yet.</Text>
+          <TouchableOpacity 
+            style={styles.browseMenuBtn}
+            onPress={() => router.replace('/(main)/home')}
+            activeOpacity={0.8}
+          >
+            <Text style={styles.browseMenuBtnText}>Browse Menu</Text>
+          </TouchableOpacity>
+        </View>
+      ) : (
+        <ScrollView style={styles.container} contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+          
+          {/* Cart Items */}
+          {cartItems.map((item) => (
+            <View key={item.id} style={styles.itemCard}>
+              {/* Cancel individual item using wrong symbol in corner */}
+              <TouchableOpacity 
+                style={styles.cancelItemBtn} 
+                onPress={() => setConfirmModal({ visible: true, type: 'remove_item', itemId: item.id, itemName: item.name })}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                activeOpacity={0.7}
+              >
+                <Ionicons name="close" size={13} color="#ffffff" />
+              </TouchableOpacity>
+
+              <Image source={{ uri: getFullImageUrl(item.image, item.name) }} style={styles.itemImg} resizeMode="cover" />
+              <View style={styles.itemInfo}>
+                <Text style={styles.itemName} numberOfLines={1}>{item.name}</Text>
+                {item.note ? (
+                  <Text style={styles.itemNote}>&quot;{item.note}&quot;</Text>
+                ) : null}
+                <View style={styles.itemBottomRow}>
+                  <Text style={styles.itemPrice}>Rs. {item.price}</Text>
+                  
+                  <View style={styles.stepper}>
+                    <TouchableOpacity style={styles.stepBtnMinus} onPress={() => handleDecrement(item.id)}>
+                      <Ionicons name="remove" size={16} color="#ff3400" />
+                    </TouchableOpacity>
+                    <Text style={styles.stepVal}>{item.quantity}</Text>
+                    <TouchableOpacity style={styles.stepBtnPlus} onPress={() => incrementQuantity(item.id as any)}>
+                      <Ionicons name="add" size={16} color="#ff3400" />
+                    </TouchableOpacity>
+                  </View>
                 </View>
               </View>
             </View>
-          </View>
-        ))}
+          ))}
 
         {/* Discount Banner (Hidden for Take Away) */}
         {orderType !== 'Take Away' && discountAmount > 0 && (
@@ -359,31 +497,35 @@ export default function CheckoutScreen() {
             <Text style={styles.toPayValue}>Rs. {Math.max(finalToPay, 0).toFixed(2)}</Text>
           </View>
         </View>
-      </ScrollView>
+        </ScrollView>
+      )}
 
       {/* Footer */}
-      <View style={[styles.footer, { paddingBottom: Math.max(insets.bottom, 16) }]}>
-        <TouchableOpacity 
-          style={[styles.proceedBtn, submitting && styles.proceedBtnDisabled]}
-          onPress={handleProceed}
-          disabled={submitting}
-          activeOpacity={0.85}
-        >
-          {submitting ? (
-            <ActivityIndicator color="#fff" size="small" />
-          ) : (
-            <Text style={styles.proceedBtnText}>
-              {orderType === 'Dine In'
-                ? dineInSession.isActive
-                  ? `Add to Table Order (#${dineInSession.activeOrderId})`
-                  : dineInPayLater
-                  ? 'Place Dine-In Order (Pay Later)'
-                  : 'Proceed to Payment'
-                : 'Proceed to Checkout'}
-            </Text>
-          )}
-        </TouchableOpacity>
-      </View>
+      {cartItems.length > 0 && (
+        <View style={[styles.footer, { paddingBottom: Math.max(insets.bottom, 16) }]}>
+          <TouchableOpacity 
+            style={[styles.proceedBtn, submitting && styles.proceedBtnDisabled]}
+            onPress={handleProceed}
+            disabled={submitting}
+            activeOpacity={0.85}
+          >
+            {submitting ? (
+              <ActivityIndicator color="#fff" size="small" />
+            ) : (
+              <Text style={styles.proceedBtnText}>
+                {orderType === 'Dine In'
+                  ? dineInSession.isActive
+                    ? `Add to Table Order (#${dineInSession.activeOrderId})`
+                    : dineInPayLater
+                    ? 'Place Dine-In Order (Pay Later)'
+                    : 'Proceed to Payment'
+                  : 'Proceed to Checkout'}
+              </Text>
+            )}
+          </TouchableOpacity>
+        </View>
+      )}
+      {renderConfirmModal()}
     </SafeAreaView>
   );
 }
@@ -445,9 +587,32 @@ const styles = StyleSheet.create({
   header: {
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'space-between',
     paddingHorizontal: 16,
-    paddingVertical: 16,
+    paddingVertical: 14,
     backgroundColor: '#fff',
+    borderBottomWidth: 1,
+    borderBottomColor: '#f2f2f2',
+  },
+  headerLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+  cancelAllBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#fff5f0',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: '#ffdcd1',
+  },
+  cancelAllText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#ff3400',
   },
   backBtn: {
     padding: 4,
@@ -463,7 +628,7 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     padding: 16,
-    paddingBottom: 40,
+    paddingBottom: 110,
   },
   itemCard: {
     flexDirection: 'row',
@@ -471,11 +636,113 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     padding: 12,
     marginBottom: 16,
+    borderWidth: 1,
+    borderColor: '#eee',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.05,
     shadowRadius: 4,
     elevation: 2,
+    position: 'relative',
+  },
+  cancelItemBtn: {
+    position: 'absolute',
+    top: -9,
+    right: -9,
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: '#000000',
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 20,
+    elevation: 5,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 3,
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.65)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 24,
+  },
+  modalCard: {
+    backgroundColor: '#fff',
+    borderRadius: 24,
+    width: '90%',
+    maxWidth: 330,
+    padding: 24,
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.15,
+    shadowRadius: 20,
+    elevation: 8,
+  },
+  modalIconBg: {
+    width: 68,
+    height: 68,
+    borderRadius: 34,
+    backgroundColor: '#fff1ee',
+    borderWidth: 1.5,
+    borderColor: '#fed7aa',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#111',
+    textAlign: 'center',
+    marginBottom: 8,
+  },
+  modalMessage: {
+    fontSize: 14,
+    color: '#666',
+    textAlign: 'center',
+    lineHeight: 20,
+    marginBottom: 22,
+    paddingHorizontal: 8,
+  },
+  modalBtnRow: {
+    flexDirection: 'row',
+    gap: 12,
+    width: '100%',
+  },
+  modalSecondaryBtn: {
+    flex: 1,
+    height: 46,
+    borderRadius: 23,
+    backgroundColor: '#f2f2f2',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  modalSecondaryBtnText: {
+    color: '#444',
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  modalPrimaryBtn: {
+    flex: 1,
+    height: 46,
+    borderRadius: 23,
+    backgroundColor: '#ff3400',
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#ff3400',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.25,
+    shadowRadius: 6,
+    elevation: 4,
+  },
+  modalPrimaryBtnText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: 'bold',
   },
   itemImg: {
     width: 70,
@@ -492,6 +759,7 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     color: '#000',
     marginBottom: 6,
+    paddingRight: 24,
   },
   itemSubtitle: {
     fontSize: 11,
@@ -765,5 +1033,52 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: '#777',
     marginTop: 2,
+  },
+  emptyContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 32,
+  },
+  emptyIconCircle: {
+    width: 96,
+    height: 96,
+    borderRadius: 48,
+    backgroundColor: '#fff1ee',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 20,
+    borderWidth: 2,
+    borderColor: '#fed7aa',
+  },
+  emptyTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#111',
+    marginBottom: 8,
+    textAlign: 'center',
+  },
+  emptySubtitle: {
+    fontSize: 14,
+    color: '#777',
+    textAlign: 'center',
+    lineHeight: 20,
+    marginBottom: 28,
+  },
+  browseMenuBtn: {
+    backgroundColor: '#00a023',
+    paddingVertical: 14,
+    paddingHorizontal: 32,
+    borderRadius: 24,
+    elevation: 3,
+    shadowColor: '#00a023',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.25,
+    shadowRadius: 6,
+  },
+  browseMenuBtnText: {
+    color: '#fff',
+    fontSize: 15,
+    fontWeight: 'bold',
   },
 });

@@ -144,6 +144,7 @@ interface VapiState {
   setupListeners: (routerRef: any) => void;
   prewarm: () => void;
   notifyRouteChanged: (route: string) => void;
+  sendTextMessage: (text: string) => void;
 }
 
 // ─── Backend tool executor (READ-ONLY data fetch) ─────────────────────────────
@@ -1218,6 +1219,32 @@ export const useVapiStore = create<VapiState>((set, get) => ({
         });
       } catch (e) {
         console.warn('[VapiStore] Failed to notify route change:', e);
+      }
+    }
+  },
+
+  sendTextMessage: (text: string) => {
+    if (!text || !text.trim()) return;
+    const trimmed = text.trim();
+    const vapi = getVapi();
+
+    // Optimistically add user message to transcript
+    set((state) => ({
+      messages: [...state.messages, { role: 'user', text: trimmed, isFinal: true }],
+      partialUserTranscript: '',
+    }));
+
+    if (vapi && get().isConnected) {
+      try {
+        (vapi as any).send({
+          type: 'add-message',
+          message: {
+            role: 'user',
+            content: trimmed,
+          },
+        });
+      } catch (e) {
+        console.warn('[VapiStore] Failed to send user message to vapi:', e);
       }
     }
   },

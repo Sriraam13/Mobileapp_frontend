@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, SafeAreaView, Platform, StatusBar, Modal, KeyboardAvoidingView } from 'react-native';
+import React, { useState, useEffect, useRef } from 'react';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, SafeAreaView, Platform, StatusBar, Modal, KeyboardAvoidingView, ActivityIndicator } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -7,6 +7,8 @@ import * as Location from 'expo-location';
 
 import { useCateringSessionStore } from '../../store/useCateringSessionStore';
 import { useRestaurantStore } from '../../store/useRestaurantStore';
+import { useAddressStore } from '../../store/useAddressStore';
+import { API_BASE_URL } from '../../constants/api';
 
 export default function CateringEventDetails() {
   const router = useRouter();
@@ -37,10 +39,16 @@ export default function CateringEventDetails() {
     }
   }, [selectedOutlet, restaurantId, setRestaurant]);
 
-  
+  const GOOGLE_MAPS_KEY = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY || '';
+  const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   // Google Places Autocomplete state
   const [addressPredictions, setAddressPredictions] = useState<any[]>([]);
   const [showPredictions, setShowPredictions] = useState(false);
+  const [isSearchingAddress, setIsSearchingAddress] = useState(false);
+  const [isDetectingLocation, setIsDetectingLocation] = useState(false);
+  const [isAddressValidated, setIsAddressValidated] = useState(false);
+  const { addresses: savedAddresses } = useAddressStore();
 
   // Modals state
   const [showDatePicker, setShowDatePicker] = useState(false);
@@ -60,26 +68,172 @@ export default function CateringEventDetails() {
     setAlertConfig({ visible: true, title, message });
   };
 
-  const fetchAddressPredictions = async (text: string) => {
+  const fetchAddressPredictions = (text: string) => {
     setEventDetails({ address: text });
-    if (text.length > 2) {
-      try {
-        const apiKey = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY;
-        if (!apiKey) return;
-        const response = await fetch(`https://maps.googleapis.com/maps/api/place/autocomplete/json?input=${encodeURIComponent(text)}&key=${apiKey}`);
-        const data = await response.json();
-        if (data.status === 'OK') {
-          setAddressPredictions(data.predictions);
-          setShowPredictions(true);
-        } else {
-          setAddressPredictions([]);
-        }
-      } catch (error) {
-        console.error("Error fetching address predictions:", error);
-      }
-    } else {
+    setIsAddressValidated(false);
+
+    if (debounceTimerRef.current) {
+      clearTimeout(debounceTimerRef.current);
+    }
+
+    if (!text || text.trim().length <= 2) {
       setAddressPredictions([]);
       setShowPredictions(false);
+      setIsSearchingAddress(false);
+      return;
+    }
+
+    setIsSearchingAddress(true);
+    debounceTimerRef.current = setTimeout(async () => {
+      try {
+        let results: any[] = [];
+        const encodedText = encodeURIComponent(text.trim());
+
+        // 1. If on native, try direct Google Places API
+        if (Platform.OS !== 'web') {
+          try {
+            const directUrl = `https://maps.googleapis.com/maps/api/place/autocomplete/json?input=${encodedText}&key=${GOOGLE_MAPS_KEY}&components=country:in`;
+            const resp = await fetch(directUrl);
+            const data = await resp.json();
+            if (data.status === 'OK' && data.predictions) {
+              results = data.predictions;
+            }
+          } catch (e) {
+            console.log("Direct GMaps fetch failed, falling back to proxy:", e);
+          }
+        }
+
+        // 2. If results empty (e.g. Web CORS or network issue), use backend proxy
+        if (results.length === 0) {
+          try {
+            const proxyUrl = `${API_BASE_URL}/api/v1/public/maps/autocomplete?input=${encodedText}`;
+            const resp = await fetch(proxyUrl);
+            const data = await resp.json();
+            if (data.status === 'OK' && data.predictions) {
+              results = data.predictions;
+            }
+          } catch (e) {
+            console.log("Backend proxy maps fetch failed:", e);
+          }
+        }
+
+        // 3. Fallback to Expo geocoding if both are unavailable
+        if (results.length === 0) {
+          try {
+            const geocoded = await Location.geocodeAsync(text.trim() + ', Tamil Nadu, India');
+            if (geocoded && geocoded.length > 0) {
+              results = geocoded.slice(0, 5).map((item, idx) => ({
+                place_id: `expo_geo_${idx}_${item.latitude}_${item.longitude}`,
+                description: `${text.trim()} (${item.latitude.toFixed(4)}, ${item.longitude.toFixed(4)})`,
+                structured_formatting: {
+                  main_text: text.trim(),
+                  secondary_text: `Lat: ${item.latitude.toFixed(4)}, Lng: ${item.longitude.toFixed(4)}`
+                }
+              }));
+            }
+          } catch {
+            // silent fallback
+          }
+        }
+
+        const formattedList = results.map(item => ({
+          place_id: item.place_id || Math.random().toString(),
+          description: item.description || '',
+          main_text: item.structured_formatting?.main_text || item.description || '',
+          secondary_text: item.structured_formatting?.secondary_text || ''
+        }));
+
+        setAddressPredictions(formattedList);
+        setShowPredictions(formattedList.length > 0);
+      } catch (error) {
+        console.error("Error fetching address predictions:", error);
+        setAddressPredictions([]);
+        setShowPredictions(false);
+      } finally {
+        setIsSearchingAddress(false);
+      }
+    }, 280);
+  };
+
+  const handleSelectPrediction = (prediction: { place_id: string; description: string }) => {
+    setEventDetails({ address: prediction.description });
+    setIsAddressValidated(true);
+    setShowPredictions(false);
+    setAddressPredictions([]);
+  };
+
+  const handleDetectLocation = async () => {
+    setIsDetectingLocation(true);
+    try {
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== 'granted') {
+        showAlert('Permission Denied', 'Please enable location permissions in device settings to detect your address.');
+        return;
+      }
+
+      const location = await Location.getCurrentPositionAsync({
+        accuracy: Location.Accuracy.Balanced,
+      });
+
+      const { latitude, longitude } = location.coords;
+      let resolvedAddress = '';
+
+      // Try direct Google Maps geocoding if native
+      if (Platform.OS !== 'web') {
+        try {
+          const resp = await fetch(
+            `https://maps.googleapis.com/maps/api/geocode/json?latlng=${latitude},${longitude}&key=${GOOGLE_MAPS_KEY}`
+          );
+          const data = await resp.json();
+          if (data.status === 'OK' && data.results && data.results.length > 0) {
+            resolvedAddress = data.results[0].formatted_address;
+          }
+        } catch {
+          // fallback
+        }
+      }
+
+      // Try backend proxy if direct failed or on Web
+      if (!resolvedAddress) {
+        try {
+          const resp = await fetch(
+            `${API_BASE_URL}/api/v1/public/maps/geocode?address=${latitude},${longitude}`
+          );
+          const data = await resp.json();
+          if (data.status === 'OK' && data.results && data.results.length > 0) {
+            resolvedAddress = data.results[0].formatted_address;
+          }
+        } catch {
+          // fallback
+        }
+      }
+
+      // Fallback to Expo reverseGeocodeAsync
+      if (!resolvedAddress) {
+        try {
+          const rev = await Location.reverseGeocodeAsync({ latitude, longitude });
+          if (rev && rev.length > 0) {
+            const r = rev[0];
+            const parts = [r.name, r.street, r.subregion, r.city, r.postalCode].filter(Boolean);
+            resolvedAddress = parts.join(', ');
+          }
+        } catch {
+          // fallback
+        }
+      }
+
+      if (resolvedAddress) {
+        setEventDetails({ address: resolvedAddress });
+        setIsAddressValidated(true);
+        setShowPredictions(false);
+      } else {
+        showAlert('Location Detected', `Detected coordinates: ${latitude.toFixed(4)}, ${longitude.toFixed(4)}. Please enter your street address.`);
+      }
+    } catch (e: any) {
+      console.error('Error detecting location:', e);
+      showAlert('Location Error', 'Unable to fetch your current location. Please type your address manually.');
+    } finally {
+      setIsDetectingLocation(false);
     }
   };
 
@@ -102,23 +256,8 @@ export default function CateringEventDetails() {
       return;
     }
 
-    try {
-      const apiKey = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY;
-      if (!apiKey) {
-        // If API key is missing, we bypass strict validation to prevent blocking the user
-        console.warn("No Google Maps API key found, bypassing geocoding validation.");
-      } else {
-        const response = await fetch(`https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(address)}&key=${apiKey}`);
-        const data = await response.json();
-        
-        if (data.status !== 'OK' || !data.results || data.results.length === 0) {
-          showAlert('Invalid Address', 'The delivery address is incorrect. Please select a valid address from the dropdown or check your spelling.');
-          return;
-        }
-      }
-    } catch (e) {
-      console.error("Geocoding error:", e);
-      showAlert('Invalid Address', 'There was an issue validating the address. Please try again.');
+    if (!isAddressValidated && address.trim().length < 5) {
+      showAlert('Invalid Address', 'Please enter a more complete delivery address or select a suggestion from the dropdown.');
       return;
     }
 
@@ -459,32 +598,134 @@ export default function CateringEventDetails() {
 
         {/* Delivery Address */}
         <View style={styles.inputGroup}>
-          <Text style={styles.label}>Delivery Address <Text style={styles.asterisk}>*</Text></Text>
-          <TextInput 
-            style={[styles.input, styles.textArea, showPredictions && addressPredictions.length > 0 && {borderBottomLeftRadius: 0, borderBottomRightRadius: 0}]} 
-            value={address}
-            onChangeText={fetchAddressPredictions}
-            placeholder="Enter full address"
-            placeholderTextColor="#999"
-            multiline
-            numberOfLines={3}
-            textAlignVertical="top"
-          />
-          {showPredictions && addressPredictions.length > 0 && (
-            <View style={styles.predictionsContainer}>
-              {addressPredictions.map((prediction, index) => (
+          <View style={styles.addressLabelRow}>
+            <Text style={styles.label}>
+              Delivery Address <Text style={styles.asterisk}>*</Text>
+            </Text>
+            <TouchableOpacity 
+              style={styles.detectLocationBtn} 
+              onPress={handleDetectLocation}
+              disabled={isDetectingLocation}
+              activeOpacity={0.7}
+            >
+              {isDetectingLocation ? (
+                <ActivityIndicator size="small" color="#ff4500" style={{ marginRight: 4 }} />
+              ) : (
+                <Ionicons name="navigate-circle-outline" size={15} color="#ff4500" style={{ marginRight: 4 }} />
+              )}
+              <Text style={styles.detectLocationText}>
+                {isDetectingLocation ? 'Locating...' : 'Use Current Location'}
+              </Text>
+            </TouchableOpacity>
+          </View>
+
+          {/* Quick-select Saved Addresses if any */}
+          {savedAddresses && savedAddresses.length > 0 && (
+            <View style={styles.savedAddressesContainer}>
+              <Text style={styles.savedAddressesHeader}>Saved Addresses</Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.savedChipsScroll}>
+                {savedAddresses.map((addr) => {
+                  const full = addr.full_address || addr.address;
+                  const isSelected = address === full;
+                  return (
+                    <TouchableOpacity
+                      key={addr.id}
+                      style={[styles.savedChip, isSelected && styles.savedChipActive]}
+                      onPress={() => {
+                        setEventDetails({ address: full });
+                        setIsAddressValidated(true);
+                        setShowPredictions(false);
+                      }}
+                      activeOpacity={0.7}
+                    >
+                      <Ionicons
+                        name={addr.type?.toLowerCase() === 'work' ? 'briefcase-outline' : 'home-outline'}
+                        size={12}
+                        color={isSelected ? '#fff' : '#ff4500'}
+                        style={{ marginRight: 4 }}
+                      />
+                      <Text
+                        style={[styles.savedChipText, isSelected && styles.savedChipTextActive]}
+                        numberOfLines={1}
+                      >
+                        {addr.type || 'Address'}: {addr.flat_house_no ? `${addr.flat_house_no}, ` : ''}{addr.landmark || addr.city || ''}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </ScrollView>
+            </View>
+          )}
+
+          <View style={[
+            styles.addressInputWrapper,
+            showPredictions && addressPredictions.length > 0 && styles.addressInputWrapperActive
+          ]}>
+            <Ionicons name="location-sharp" size={18} color="#ff4500" style={styles.addressPinIcon} />
+            <TextInput 
+              style={styles.addressTextInput} 
+              value={address}
+              onChangeText={fetchAddressPredictions}
+              placeholder="Search delivery address or area"
+              placeholderTextColor="#999"
+              multiline
+              numberOfLines={2}
+              textAlignVertical="center"
+            />
+            <View style={styles.addressActionIcons}>
+              {isSearchingAddress && (
+                <ActivityIndicator size="small" color="#ff4500" style={{ marginRight: 6 }} />
+              )}
+              {address.trim().length > 0 && (
                 <TouchableOpacity 
-                  key={prediction.place_id} 
-                  style={[styles.predictionItem, index === addressPredictions.length - 1 && {borderBottomWidth: 0}]}
                   onPress={() => {
-                    setEventDetails({ address: prediction.description });
+                    setEventDetails({ address: '' });
+                    setIsAddressValidated(false);
+                    setAddressPredictions([]);
                     setShowPredictions(false);
                   }}
+                  hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
                 >
-                  <MaterialCommunityIcons name="map-marker" size={16} color="#666" style={{marginRight: 8}} />
-                  <Text style={styles.predictionText}>{prediction.description}</Text>
+                  <Ionicons name="close-circle" size={18} color="#aaa" />
                 </TouchableOpacity>
-              ))}
+              )}
+            </View>
+          </View>
+
+          {showPredictions && addressPredictions.length > 0 && (
+            <View style={styles.predictionsContainer}>
+              <View style={styles.predictionsHeader}>
+                <Text style={styles.predictionsHeaderTitle}>SUGGESTIONS FROM GOOGLE MAPS</Text>
+                <Text style={styles.poweredByGoogle}>Google</Text>
+              </View>
+              <ScrollView 
+                style={{ maxHeight: 220 }}
+                keyboardShouldPersistTaps="handled"
+                nestedScrollEnabled
+              >
+                {addressPredictions.map((prediction, index) => {
+                  const mainText = prediction.main_text || prediction.description;
+                  const secondaryText = prediction.secondary_text || '';
+                  return (
+                    <TouchableOpacity 
+                      key={prediction.place_id || index} 
+                      style={[styles.predictionItem, index === addressPredictions.length - 1 && {borderBottomWidth: 0}]}
+                      onPress={() => handleSelectPrediction(prediction)}
+                      activeOpacity={0.7}
+                    >
+                      <View style={styles.markerCircle}>
+                        <Ionicons name="location-sharp" size={13} color="#ff4500" />
+                      </View>
+                      <View style={styles.predictionTextContainer}>
+                        <Text style={styles.predictionMainText} numberOfLines={1}>{mainText}</Text>
+                        {secondaryText ? (
+                          <Text style={styles.predictionSubText} numberOfLines={1}>{secondaryText}</Text>
+                        ) : null}
+                      </View>
+                    </TouchableOpacity>
+                  );
+                })}
+              </ScrollView>
             </View>
           )}
         </View>
@@ -629,31 +870,162 @@ const styles = StyleSheet.create({
   segmentTextActive: {
     color: '#fff',
   },
+  addressLabelRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  detectLocationBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#fff4f0',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#ffcbbb',
+  },
+  detectLocationText: {
+    fontSize: 11,
+    color: '#ff4500',
+    fontWeight: '700',
+  },
+  savedAddressesContainer: {
+    marginBottom: 10,
+  },
+  savedAddressesHeader: {
+    fontSize: 10,
+    color: '#888',
+    fontWeight: 'bold',
+    marginBottom: 6,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  savedChipsScroll: {
+    gap: 8,
+    paddingBottom: 2,
+  },
+  savedChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#f8f8f8',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#eee',
+    maxWidth: 220,
+  },
+  savedChipActive: {
+    backgroundColor: '#ff4500',
+    borderColor: '#ff4500',
+  },
+  savedChipText: {
+    fontSize: 11,
+    color: '#444',
+    fontWeight: '500',
+  },
+  savedChipTextActive: {
+    color: '#fff',
+    fontWeight: 'bold',
+  },
+  addressInputWrapper: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#eee',
+    borderRadius: 8,
+    backgroundColor: '#fff',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    minHeight: 52,
+  },
+  addressInputWrapperActive: {
+    borderBottomLeftRadius: 0,
+    borderBottomRightRadius: 0,
+    borderColor: '#ff4500',
+  },
+  addressPinIcon: {
+    marginRight: 8,
+  },
+  addressTextInput: {
+    flex: 1,
+    fontSize: 13,
+    color: '#333',
+    padding: 0,
+    margin: 0,
+    minHeight: 38,
+  },
+  addressActionIcons: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginLeft: 6,
+  },
   predictionsContainer: {
     backgroundColor: '#fff',
     borderWidth: 1,
     borderTopWidth: 0,
-    borderColor: '#eee',
+    borderColor: '#ff4500',
     borderBottomLeftRadius: 8,
     borderBottomRightRadius: 8,
-    elevation: 2,
+    elevation: 4,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    maxHeight: 200,
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.12,
+    shadowRadius: 5,
+    maxHeight: 250,
+  },
+  predictionsHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    backgroundColor: '#fff8f5',
+    borderBottomWidth: 1,
+    borderBottomColor: '#fdeee8',
+  },
+  predictionsHeaderTitle: {
+    fontSize: 9,
+    fontWeight: 'bold',
+    color: '#ff4500',
+    letterSpacing: 0.5,
+  },
+  poweredByGoogle: {
+    fontSize: 9,
+    fontWeight: '600',
+    color: '#999',
   },
   predictionItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    padding: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
     borderBottomWidth: 1,
-    borderBottomColor: '#f0f0f0',
+    borderBottomColor: '#f5f5f5',
   },
-  predictionText: {
-    fontSize: 13,
-    color: '#333',
+  markerCircle: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: '#fff2ec',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 10,
+  },
+  predictionTextContainer: {
     flex: 1,
+  },
+  predictionMainText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#111',
+    marginBottom: 2,
+  },
+  predictionSubText: {
+    fontSize: 11,
+    color: '#777',
   },
   bottomContainer: {
     position: 'absolute',
