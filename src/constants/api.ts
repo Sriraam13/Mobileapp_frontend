@@ -15,7 +15,7 @@ const getApiUrl = () => {
     }
   }
 
-  return 'http://10.40.173.246:8001';
+  return 'https://dev-api.dataudipi.com';
 };
 
 export const API_BASE_URL = getApiUrl();

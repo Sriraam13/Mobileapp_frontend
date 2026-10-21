@@ -9,7 +9,8 @@ export default defineConfig({
   fullyParallel: false,
   reporter: [['list'], ['html', { open: 'never' }]],
   use: {
-    baseURL: process.env.API_BASE_URL || 'http://127.0.0.1:8001',
+    baseURL: process.env.API_BASE_URL || 'https://dev-api.dataudipi.com',
+    ignoreHTTPSErrors: true,
     extraHTTPHeaders: {
       'Accept': 'application/json',
       'Content-Type': 'application/json',
