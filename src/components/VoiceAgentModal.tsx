@@ -40,6 +40,9 @@ import { setActiveRouter } from '../utils/mobileAgentActionDispatcher';
 
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 
+// Decorative waveform bar heights shown on either side of the mascot
+const WAVE_BARS = [10, 18, 28, 16, 34, 22, 12, 26, 14];
+
 export default function VoiceAgentModal() {
   const router = useRouter();
   const pathname = usePathname();
@@ -226,6 +229,8 @@ export default function VoiceAgentModal() {
 
   // Start pulse when connected & speaking
   const isAgentSpeaking = isConnected && !!partialAgentTranscript;
+  // Sheet opens at ~half height and rises once the conversation starts
+  const hasConversation = messages.length > 0 || !!partialAgentTranscript || !!partialUserTranscript;
   useEffect(() => {
     if (isAgentSpeaking) {
       Animated.loop(
@@ -398,44 +403,46 @@ export default function VoiceAgentModal() {
       {/* Rich UI Modal */}
       <Modal animationType="slide" transparent={true} visible={isVisible} onRequestClose={closeModal}>
         <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
+          <View style={[styles.wfSheet, { height: SCREEN_HEIGHT * (hasConversation ? 0.88 : 0.55) }]}>
+            {/* Drag handle */}
+            <View style={styles.wfHandle} />
+
             {/* Header */}
-            <View style={styles.header}>
-              <View style={styles.headerLeft}>
-                <View style={styles.headerTitleRow}>
-                  <Text style={styles.headerTitle}>Data Udipi Assistant</Text>
-                  <View style={styles.contextBadge}>
-                    <Ionicons name={routeContext.badgeIcon} size={11} color="#ff4500" />
-                    <Text style={styles.contextBadgeText}>{routeContext.badgeLabel}</Text>
-                  </View>
-                </View>
-                <Text style={[styles.headerSubtitle, isConnected && styles.headerSubtitleLive]}>
-                  {isConnecting
-                    ? 'Connecting to Chef...'
-                    : isConnected
-                    ? '● Live Voice Session'
-                    : 'Tap suggestion or start speaking below'}
-                </Text>
-              </View>
-              <TouchableOpacity onPress={closeModal} style={styles.closeButton}>
-                <Ionicons name="close" size={22} color="#333" />
+            <View style={styles.wfHeader}>
+              <Text style={styles.wfTitle}>Talk To Your Agent</Text>
+              <TouchableOpacity onPress={closeModal} style={styles.wfClose} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+                <Ionicons name="close" size={20} color="#222" />
               </TouchableOpacity>
             </View>
 
-            {/* Avatar Section */}
-            <View style={styles.avatarContainer}>
-              <Animated.View style={[styles.pulseRing, { transform: [{ scale: pulseAnim }] }]} />
-              <Image
-                source={require('../../assets/images/agent_waiter.png')}
-                style={styles.chefAvatar}
-                resizeMode="contain"
-              />
-              <View style={[styles.statusBadge, isConnected ? styles.statusBadgeActive : null]}>
-                <FontAwesome5 name={isConnected ? 'microphone' : 'user-tie'} size={11} color="white" />
+            {/* Mascot + waveform */}
+            <View style={styles.wfMascotRow}>
+              <View style={styles.wfWave}>
+                {WAVE_BARS.map((h, i) => (
+                  <Animated.View
+                    key={`l${i}`}
+                    style={[styles.wfWaveBar, { height: h, transform: [{ scaleY: isAgentSpeaking ? pulseAnim : 1 }] }]}
+                  />
+                ))}
+              </View>
+              <View style={styles.wfMascotWrap}>
+                <Image
+                  source={require('../../assets/images/chef_mascot.png')}
+                  style={styles.wfMascot}
+                  resizeMode="contain"
+                />
+              </View>
+              <View style={styles.wfWave}>
+                {WAVE_BARS.map((h, i) => (
+                  <Animated.View
+                    key={`r${i}`}
+                    style={[styles.wfWaveBar, { height: h, transform: [{ scaleY: isAgentSpeaking ? pulseAnim : 1 }] }]}
+                  />
+                ))}
               </View>
             </View>
 
-            {/* Chat Body */}
+            {/* Body */}
             <ScrollView
               ref={scrollViewRef}
               style={styles.chatBody}
@@ -443,32 +450,26 @@ export default function VoiceAgentModal() {
               showsVerticalScrollIndicator={false}
             >
               {messages.length === 0 && !partialAgentTranscript && !partialUserTranscript ? (
-                /* Empty State */
-                <View style={styles.emptyState}>
-                  <Text style={styles.greetingTitle}>
-                    {isConnecting ? 'Connecting…' : isConnected ? 'Listening to you…' : "Hi! I'm your Udipi Chef."}
+                <View style={styles.wfEmpty}>
+                  <Text style={styles.wfGreeting}>
+                    {isConnecting ? 'Connecting to your agent...' : "Hi! I'm your Voice Agent."}
                   </Text>
-                  <Text style={styles.greetingSubtitle}>How can I help you today?</Text>
-                  <View style={styles.suggestionsContainer}>
-                    <Text style={styles.suggestionsHeader}>Quick Suggestions</Text>
+                  <Text style={styles.wfGreeting}>How can I help you today?</Text>
+                  <View style={styles.wfSuggestions}>
                     {routeContext.suggestions.map((sug, idx) => (
                       <TouchableOpacity
                         key={idx}
-                        style={styles.suggestionPill}
+                        style={styles.wfPill}
                         onPress={() => handleSuggestionPress(sug)}
                         activeOpacity={0.75}
                       >
-                        <View style={styles.suggestionIconBg}>
-                          <FontAwesome5 name="lightbulb" size={11} color="#ff4500" />
-                        </View>
-                        <Text style={styles.suggestionText}>{sug}</Text>
-                        <Ionicons name="arrow-forward" size={13} color="#bbb" style={{ marginLeft: 'auto' }} />
+                        <Ionicons name="mic" size={14} color="#FF3400" style={{ marginRight: 8 }} />
+                        <Text style={styles.wfPillText} numberOfLines={1}>{sug}</Text>
                       </TouchableOpacity>
                     ))}
                   </View>
                 </View>
               ) : (
-                /* Message List */
                 <View style={styles.messageList}>
                   {messages.map((msg, idx) => (
                     <View
@@ -480,10 +481,7 @@ export default function VoiceAgentModal() {
                     >
                       {msg.role !== 'user' && (
                         <View style={styles.smallAvatar}>
-                          <Image
-                            source={require('../../assets/images/agent_waiter.png')}
-                            style={styles.tinyChef}
-                          />
+                          <Image source={require('../../assets/images/agent_waiter.png')} style={styles.tinyChef} />
                         </View>
                       )}
                       <View
@@ -502,21 +500,17 @@ export default function VoiceAgentModal() {
                         </Text>
                       </View>
                       {msg.role === 'user' && (
-                        <View style={styles.smallAvatarUser}>
-                          <FontAwesome5 name="user" size={14} color="white" />
+                        <View style={styles.wfUserAvatar}>
+                          <Ionicons name="person" size={20} color="#fff" />
                         </View>
                       )}
                     </View>
                   ))}
 
-                  {/* Partial Agent Bubble — shown in real-time, no lag */}
                   {partialAgentTranscript ? (
                     <View style={[styles.messageWrapper, styles.messageWrapperAgent]}>
                       <View style={styles.smallAvatar}>
-                        <Image
-                          source={require('../../assets/images/agent_waiter.png')}
-                          style={styles.tinyChef}
-                        />
+                        <Image source={require('../../assets/images/agent_waiter.png')} style={styles.tinyChef} />
                       </View>
                       <View style={[styles.messageBubble, styles.messageBubbleAgent]}>
                         <Text style={[styles.messageText, styles.messageTextAgent, { opacity: 0.75 }]}>
@@ -526,7 +520,6 @@ export default function VoiceAgentModal() {
                     </View>
                   ) : null}
 
-                  {/* Partial User Bubble — shown while user is speaking */}
                   {partialUserTranscript ? (
                     <View style={[styles.messageWrapper, styles.messageWrapperUser]}>
                       <View style={[styles.messageBubble, styles.messageBubbleUser]}>
@@ -534,8 +527,8 @@ export default function VoiceAgentModal() {
                           {partialUserTranscript}
                         </Text>
                       </View>
-                      <View style={styles.smallAvatarUser}>
-                        <FontAwesome5 name="user" size={14} color="white" />
+                      <View style={styles.wfUserAvatar}>
+                        <Ionicons name="person" size={20} color="#fff" />
                       </View>
                     </View>
                   ) : null}
@@ -543,47 +536,42 @@ export default function VoiceAgentModal() {
               )}
             </ScrollView>
 
-            {/* Footer Controls */}
-            <View style={styles.footer}>
+            {/* Footer: Tap to speak pill */}
+            <View style={styles.wfFooter}>
               {!isConnected ? (
                 <TouchableOpacity
-                  style={[styles.startButton, isConnecting && styles.startButtonConnecting]}
+                  style={[styles.wfSpeakPill, isConnecting && { opacity: 0.6 }]}
                   onPress={startCall}
                   disabled={isConnecting}
                   activeOpacity={0.85}
                 >
-                  <Ionicons name="mic" size={22} color="white" style={{ marginRight: 10 }} />
-                  <Text style={styles.startButtonText}>
-                    {isConnecting ? 'Connecting…' : 'Start Speaking'}
+                  <Text style={styles.wfSpeakText}>
+                    {isConnecting ? 'Connecting...' : 'Tap To Speak Or Just Hey....'}
                   </Text>
+                  <View style={styles.wfSpeakIcon}>
+                    <Ionicons name="mic" size={16} color="#FF3400" />
+                  </View>
                 </TouchableOpacity>
               ) : (
-                <View style={styles.activeControlsContainer}>
-                  {/* Mute / Unmute */}
+                <View style={styles.wfLiveRow}>
                   <TouchableOpacity
-                    style={[styles.muteButton, isMuted ? styles.muteButtonActive : null]}
+                    style={[styles.wfSpeakPill, { flex: 1 }]}
                     onPress={toggleMute}
-                    activeOpacity={0.8}
+                    activeOpacity={0.85}
                   >
-                    <Ionicons
-                      name={isMuted ? 'mic-off' : 'mic'}
-                      size={22}
-                      color={isMuted ? 'white' : '#333'}
-                    />
-                    <Text style={[styles.muteLabel, isMuted && { color: 'white' }]}>
-                      {isMuted ? 'Unmute' : 'Mute'}
+                    <Text style={styles.wfSpeakText}>
+                      {isMuted ? 'Muted — tap to unmute' : 'Listening... Just say Hey'}
                     </Text>
+                    <View style={styles.wfSpeakIcon}>
+                      <Ionicons name={isMuted ? 'mic-off' : 'mic'} size={16} color="#FF3400" />
+                    </View>
                   </TouchableOpacity>
-
-                  {/* Stop Agent */}
-                  <TouchableOpacity style={styles.stopButton} onPress={endCall} activeOpacity={0.85}>
-                    <Ionicons name="stop-circle" size={22} color="white" style={{ marginRight: 8 }} />
-                    <Text style={styles.stopButtonText}>Stop Agent</Text>
+                  <TouchableOpacity style={styles.wfStopBtn} onPress={endCall} activeOpacity={0.85}>
+                    <Ionicons name="stop" size={18} color="#fff" />
                   </TouchableOpacity>
                 </View>
               )}
             </View>
-
           </View>
         </View>
       </Modal>
@@ -592,6 +580,56 @@ export default function VoiceAgentModal() {
 }
 
 const styles = StyleSheet.create({
+  wfSheet: {
+    backgroundColor: '#FFFFFF',
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    paddingTop: 8,
+    overflow: 'hidden',
+  },
+  wfHandle: { alignSelf: 'center', width: 34, height: 4, borderRadius: 2, backgroundColor: '#D1D5DB', marginBottom: 10 },
+  wfHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, marginBottom: 6 },
+  wfTitle: { fontSize: 14, fontWeight: '700', color: '#111' },
+  wfClose: { padding: 4 },
+  wfMascotRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginTop: 4 },
+  wfWave: { flexDirection: 'row', alignItems: 'center', gap: 4, flex: 1, justifyContent: 'center' },
+  wfWaveBar: { width: 3, borderRadius: 2, backgroundColor: '#D9DCE1' },
+  wfMascotWrap: { width: 170, height: 170, alignItems: 'center', justifyContent: 'center' },
+  wfMascot: { width: 170, height: 170 },
+  wfMicBadge: {
+    position: 'absolute', bottom: 2, alignSelf: 'center', width: 28, height: 28, borderRadius: 14,
+    backgroundColor: '#FF3400', alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: '#fff',
+  },
+  wfMicBadgeLive: { backgroundColor: '#FF3400' },
+  wfVegLabel: {
+    alignSelf: 'center', marginTop: -6, backgroundColor: '#0A7A2F', paddingHorizontal: 18, paddingVertical: 4,
+    borderRadius: 6, marginBottom: 14,
+  },
+  wfVegLabelText: { color: '#fff', fontSize: 12, fontWeight: '700' },
+  wfEmpty: { alignItems: 'center' },
+  wfGreeting: { fontSize: 14, fontWeight: '700', color: '#111', textAlign: 'center' },
+  wfSuggestions: { width: '100%', alignItems: 'flex-start', marginTop: 18, gap: 10 },
+  wfPill: {
+    flexDirection: 'row', alignItems: 'center', backgroundColor: '#fff', paddingHorizontal: 14, paddingVertical: 9,
+    borderRadius: 20, maxWidth: '100%', shadowColor: '#000', shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.08, shadowRadius: 4, elevation: 2, borderWidth: 1, borderColor: '#F1F1F1',
+  },
+  wfPillText: { fontSize: 13, color: '#111', fontWeight: '500', flexShrink: 1 },
+  wfUserAvatar: {
+    width: 38, height: 38, borderRadius: 10, backgroundColor: '#FF3400', alignItems: 'center',
+    justifyContent: 'center', marginLeft: 8,
+  },
+  wfFooter: { paddingHorizontal: 20, paddingTop: 12, paddingBottom: 24, backgroundColor: '#EEF0F5' },
+  wfLiveRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  wfSpeakPill: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: '#fff',
+    borderRadius: 20, borderWidth: 1, borderColor: '#FF6A4D', paddingHorizontal: 14, paddingVertical: 10,
+  },
+  wfSpeakText: { fontSize: 13, color: '#222', fontWeight: '500' },
+  wfSpeakIcon: {
+    width: 28, height: 28, borderRadius: 14, backgroundColor: '#FFE9E3', alignItems: 'center', justifyContent: 'center',
+  },
+  wfStopBtn: { width: 40, height: 40, borderRadius: 20, backgroundColor: '#dc143c', alignItems: 'center', justifyContent: 'center' },
   fabPill: {
     position: 'absolute',
     right: 16,

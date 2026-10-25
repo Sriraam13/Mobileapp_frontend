@@ -5,8 +5,19 @@
 
 import { Platform } from 'react-native';
 
+export const BrandColors = {
+  primary: '#FF3400',
+  secondary: '#00A01D',
+  primaryOrange: '#FF3400',
+  primaryGreen: '#00A01D',
+  orange: '#FF3400',
+  green: '#00A01D',
+} as const;
+
 export const Colors = {
   light: {
+    primary: BrandColors.primary,
+    secondary: BrandColors.secondary,
     text: '#000000',
     background: '#ffffff',
     backgroundElement: '#F0F0F3',
@@ -14,6 +25,8 @@ export const Colors = {
     textSecondary: '#60646C',
   },
   dark: {
+    primary: BrandColors.primary,
+    secondary: BrandColors.secondary,
     text: '#ffffff',
     background: '#000000',
     backgroundElement: '#212225',

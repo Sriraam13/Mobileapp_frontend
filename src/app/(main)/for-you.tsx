@@ -5,6 +5,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 
 import { getFullImageUrl } from '../../constants/api';
+import { BrandColors } from '../../constants/theme';
 import { useAuthStore, useRestaurantStore, useFavoritesStore, useCartStore, useDineInSessionStore } from '../../store';
 import { customerApi } from '../../services/apiService';
 import BottomNavBar from '../../components/layout/BottomNavBar';
@@ -196,15 +197,17 @@ export default function ForYou() {
               activeOpacity={0.7}
               onPress={() => decrementQuantity(item.menu_item_id)}
             >
-              <Ionicons name="remove" size={14} color="#ff4500" />
+              <View style={styles.minusIconBar} />
             </TouchableOpacity>
-            <Text style={styles.stepVal}>{cart[item.menu_item_id].quantity}</Text>
+            <View style={styles.stepValContainer}>
+              <Text style={styles.stepVal}>{cart[item.menu_item_id].quantity}</Text>
+            </View>
             <TouchableOpacity
               style={styles.stepBtnPlus}
               activeOpacity={0.7}
               onPress={() => incrementQuantity(item.menu_item_id)}
             >
-              <Ionicons name="add" size={14} color="#fff" />
+              <Ionicons name="add" size={16} color="#fff" />
             </TouchableOpacity>
           </View>
         ) : (
@@ -618,32 +621,49 @@ const styles = StyleSheet.create({
   stepper: {
     flexDirection: 'row',
     alignItems: 'center',
+    backgroundColor: '#FFFFFF',
+    borderRadius: 8,
     borderWidth: 1,
-    borderColor: '#ff4500',
-    borderRadius: 16,
-    overflow: 'hidden',
-    height: 30,
+    borderColor: '#EFEFEF',
+    padding: 2,
+    gap: 4,
   },
   stepBtnMinus: {
-    width: 28,
-    height: '100%',
+    width: 26,
+    height: 26,
+    borderRadius: 6,
+    backgroundColor: '#F3F4F6',
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#fff',
   },
-  stepBtnPlus: {
-    width: 28,
-    height: '100%',
+  minusIconBar: {
+    width: 10,
+    height: 3,
+    backgroundColor: BrandColors.primary,
+    borderRadius: 2,
+  },
+  stepValContainer: {
+    minWidth: 26,
+    height: 26,
+    paddingHorizontal: 4,
+    borderRadius: 6,
+    backgroundColor: '#F3F4F6',
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#ff4500',
   },
   stepVal: {
-    minWidth: 22,
-    textAlign: 'center',
     fontSize: 13,
     fontWeight: '700',
-    color: '#1c1c1e',
+    color: '#000000',
+    textAlign: 'center',
+  },
+  stepBtnPlus: {
+    width: 26,
+    height: 26,
+    borderRadius: 6,
+    backgroundColor: BrandColors.primary,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   floatingCartContainer: {
     position: 'absolute',

@@ -2,7 +2,8 @@ import React from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Platform } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
+import { useRouter, usePathname } from 'expo-router';
+import { BrandColors } from '../../constants/theme';
 
 export type BottomNavTab = 'home' | 'search' | 'orders' | 'profile';
 
@@ -15,79 +16,120 @@ export default function BottomNavBar({ activeTab, onSearchPress }: BottomNavBarP
   const router = useRouter();
   const insets = useSafeAreaInsets();
 
-  // Ensure plenty of space so the icons sit completely above any device navigation bar (3-button or gesture bar)
-  const bottomPadding = Math.max(insets.bottom, Platform.OS === 'android' ? 24 : 12) + 8;
+  const bottomPadding = Math.max(insets.bottom, Platform.OS === 'android' ? 16 : 10) + 6;
+
+  const pathname = usePathname();
+
+  const isCurrent = (target: string) => {
+    if (!pathname) return false;
+    return pathname === target || pathname.endsWith(target);
+  };
+
+  const handleHome = () => {
+    if (!isCurrent('/home')) {
+      router.replace('/home');
+    }
+  };
 
   const handleSearch = () => {
     if (onSearchPress) {
       onSearchPress();
-    } else {
+    } else if (!isCurrent('/menu')) {
       router.replace('/menu' as any);
     }
   };
 
+  const handleOrders = () => {
+    if (!isCurrent('/orders')) {
+      router.replace('/orders' as any);
+    }
+  };
+
+  const handleProfile = () => {
+    if (!isCurrent('/profile')) {
+      router.replace('/profile');
+    }
+  };
+
+  const getTabColor = (tab: BottomNavTab) =>
+    activeTab === tab ? '#FF3400' : '#6B7280';
+
   return (
     <View style={[styles.bottomNav, { paddingBottom: bottomPadding }]}>
+      {/* Home */}
       <TouchableOpacity
         style={styles.navItem}
-        onPress={() => activeTab !== 'home' && router.replace('/home')}
+        onPress={handleHome}
         activeOpacity={0.7}
       >
-        <Ionicons
-          name={activeTab === 'home' ? 'home' : 'home-outline'}
-          size={24}
-          color={activeTab === 'home' ? '#ff4500' : '#888'}
-        />
+        <View style={styles.iconBox}>
+          <Ionicons
+            name="home-outline"
+            size={22}
+            color={getTabColor('home')}
+          />
+        </View>
         <Text style={[styles.navText, activeTab === 'home' && styles.navTextActive]}>
           Home
         </Text>
       </TouchableOpacity>
 
+      {/* Search */}
       <TouchableOpacity
         style={styles.navItem}
         onPress={handleSearch}
         activeOpacity={0.7}
       >
-        <Ionicons
-          name={activeTab === 'search' ? 'search' : 'search-outline'}
-          size={24}
-          color={activeTab === 'search' ? '#ff4500' : '#888'}
-        />
+        <View style={styles.iconBox}>
+          <Ionicons
+            name="search-outline"
+            size={22}
+            color={getTabColor('search')}
+          />
+        </View>
         <Text style={[styles.navText, activeTab === 'search' && styles.navTextActive]}>
           Search
         </Text>
       </TouchableOpacity>
 
+      {/* Orders */}
       <TouchableOpacity
         style={styles.navItem}
-        onPress={() => activeTab !== 'orders' && router.replace('/orders' as any)}
+        onPress={handleOrders}
         activeOpacity={0.7}
       >
-        <Ionicons
-          name={activeTab === 'orders' ? 'receipt' : 'receipt-outline'}
-          size={24}
-          color={activeTab === 'orders' ? '#ff4500' : '#888'}
-        />
+        <View style={styles.iconBox}>
+          <Ionicons
+            name="receipt-outline"
+            size={22}
+            color={getTabColor('orders')}
+          />
+          <Text style={[styles.dollarBadge, { color: getTabColor('orders') }]}>
+            $
+          </Text>
+        </View>
         <Text style={[styles.navText, activeTab === 'orders' && styles.navTextActive]}>
           Orders
         </Text>
       </TouchableOpacity>
 
+      {/* Profile */}
       <TouchableOpacity
         style={styles.navItem}
-        onPress={() => activeTab !== 'profile' && router.replace('/profile')}
+        onPress={handleProfile}
         activeOpacity={0.7}
       >
-        <Ionicons
-          name={activeTab === 'profile' ? 'person' : 'person-outline'}
-          size={24}
-          color={activeTab === 'profile' ? '#ff4500' : '#888'}
-        />
+        <View style={styles.iconBox}>
+          <Ionicons
+            name="person-outline"
+            size={22}
+            color={getTabColor('profile')}
+          />
+        </View>
         <Text style={[styles.navText, activeTab === 'profile' && styles.navTextActive]}>
           Profile
         </Text>
       </TouchableOpacity>
-
     </View>
   );
 }
@@ -98,31 +140,47 @@ const styles = StyleSheet.create({
     bottom: 0,
     left: 0,
     right: 0,
-    backgroundColor: '#fff',
+    backgroundColor: '#FFFFFF',
     flexDirection: 'row',
     justifyContent: 'space-around',
-    paddingTop: 10,
+    paddingTop: 8,
     borderTopWidth: 1,
-    borderTopColor: '#f0f0f0',
-    elevation: 10,
+    borderTopColor: '#F3F4F6',
+    elevation: 8,
     shadowColor: '#000',
-    shadowOpacity: 0.08,
-    shadowOffset: { width: 0, height: -3 },
-    shadowRadius: 6,
+    shadowOpacity: 0.05,
+    shadowOffset: { width: 0, height: -2 },
+    shadowRadius: 5,
+    zIndex: 100,
   },
   navItem: {
     alignItems: 'center',
     justifyContent: 'center',
-    minWidth: 60,
+    minWidth: 64,
+  },
+  iconBox: {
+    width: 22,
+    height: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  dollarBadge: {
+    position: 'absolute',
+    fontSize: 9,
+    fontWeight: '800',
+    top: 5.5,
   },
   navText: {
+    fontFamily: Platform.select({ ios: 'Poppins', android: 'Poppins' }),
     fontSize: 11,
-    marginTop: 4,
-    color: '#888',
-    fontWeight: '500',
+    lineHeight: 16,
+    fontWeight: '600',
+    marginTop: 2,
+    color: '#6B7280',
+    textAlign: 'center',
   },
   navTextActive: {
-    color: '#ff4500',
-    fontWeight: '700',
+    color: '#FF3400',
+    fontWeight: '600',
   },
 });

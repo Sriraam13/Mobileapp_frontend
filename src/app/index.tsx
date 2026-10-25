@@ -257,6 +257,7 @@ const styles = StyleSheet.create({
   topBannerImage: {
     width: Math.min(width * 0.68, 240),
     height: isSmallDevice ? 56 : 68,
+    marginLeft: 18,
   },
   middleSection: {
     flex: 1,

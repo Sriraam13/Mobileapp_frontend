@@ -6,6 +6,7 @@ import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useVoiceAgentStore, useAuthStore, useOrderStore, useCartStore, useLiveOrderStore, useDineInSessionStore, useRestaurantStore } from '../../store';
 import { menuApi, orderApi, tableApi } from '../../services/apiService';
 import { getFullImageUrl } from '../../constants/api';
+import { BrandColors } from '../../constants/theme';
 import DineInActiveBanner from '../../components/DineInActiveBanner';
 import ViewCartButton from '../../components/layout/ViewCartButton';
 import SelectTableModal from '../../components/ui/SelectTableModal';
@@ -32,28 +33,82 @@ const itemStyles = StyleSheet.create({
     height: 120,
     width: '100%',
     backgroundColor: '#e0e0e0',
+    position: 'relative',
   },
   itemImage: {
     width: '100%',
     height: '100%',
   },
-  cardContent: { padding: 12 },
-  cardHeaderRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 4 },
-  itemName: { fontSize: 12, fontWeight: 'bold', color: '#000', flex: 1, marginRight: 4 },
-  availBadge: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#00a01d', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 10 },
+  cardContent: { padding: 12, flex: 1, justifyContent: 'space-between' },
+  itemName: { fontSize: 14, fontWeight: 'bold', color: '#000', lineHeight: 19, marginBottom: 2 },
+  itemDesc: { fontSize: 11, color: '#777', lineHeight: 15, marginBottom: 8 },
+  availBadge: {
+    position: 'absolute',
+    top: 8,
+    right: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#00a01d',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 10,
+  },
   unavailBadge: { backgroundColor: '#ff0000' },
   availDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: '#fff', marginRight: 4 },
   unavailDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: '#fff', marginRight: 4 },
   availText: { fontSize: 10, fontWeight: '500', color: '#fff' },
   unavailText: { color: '#fff' },
-  cardFooter: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  cardFooter: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 4 },
   price: { fontSize: 10, color: '#777' },
   priceVal: { fontSize: 12, fontWeight: 'bold', color: '#000' },
-  stepper: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#f9f9f9', borderRadius: 4, borderWidth: 1, borderColor: '#f4f4f4', padding: 2 },
-  stepBtnMinus: { backgroundColor: '#f2f2f2', padding: 2, borderRadius: 2 },
-  stepBtnPlus: { backgroundColor: '#ff3400', padding: 2, borderRadius: 2 },
+  stepper: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FFFFFF',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#EFEFEF',
+    padding: 2,
+    gap: 4,
+  },
+  stepBtnMinus: {
+    width: 26,
+    height: 26,
+    borderRadius: 6,
+    backgroundColor: '#F3F4F6',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  minusIconBar: {
+    width: 10,
+    height: 3,
+    backgroundColor: BrandColors.primary,
+    borderRadius: 2,
+  },
+  stepValContainer: {
+    minWidth: 26,
+    height: 26,
+    borderRadius: 6,
+    backgroundColor: '#F3F4F6',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 4,
+  },
+  stepVal: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#000000',
+    textAlign: 'center',
+  },
+  stepBtnPlus: {
+    width: 26,
+    height: 26,
+    borderRadius: 6,
+    backgroundColor: BrandColors.primary,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
   stepBtnDisabled: { opacity: 0.5 },
-  stepVal: { fontSize: 12, color: '#000', width: 24, textAlign: 'center' },
 });
 
 const MenuItemCard = React.memo(function MenuItemCard({
@@ -67,33 +122,42 @@ const MenuItemCard = React.memo(function MenuItemCard({
     <TouchableOpacity activeOpacity={0.9} onPress={() => onSelect(item)} style={itemStyles.card}>
       <View style={itemStyles.imagePlaceholder}>
         <Image source={{ uri: item.image }} style={itemStyles.itemImage} resizeMode="cover" />
+        <View style={[itemStyles.availBadge, !item.available && itemStyles.unavailBadge]}>
+          <View style={[itemStyles.availDot, !item.available && itemStyles.unavailDot]} />
+          <Text style={[itemStyles.availText, !item.available && itemStyles.unavailText]}>
+            {item.available ? 'Available' : 'Not Available'}
+          </Text>
+        </View>
       </View>
       <View style={itemStyles.cardContent}>
-        <View style={itemStyles.cardHeaderRow}>
-          <Text style={itemStyles.itemName} numberOfLines={1}>{item.name}</Text>
-          <View style={[itemStyles.availBadge, !item.available && itemStyles.unavailBadge]}>
-            <View style={[itemStyles.availDot, !item.available && itemStyles.unavailDot]} />
-            <Text style={[itemStyles.availText, !item.available && itemStyles.unavailText]}>
-              {item.available ? 'Available' : 'Not Available'}
+        <View>
+          <Text style={itemStyles.itemName}>{item.name}</Text>
+          {item.desc ? (
+            <Text style={itemStyles.itemDesc} numberOfLines={2}>
+              {item.desc}
             </Text>
-          </View>
+          ) : null}
         </View>
         
         <View style={itemStyles.cardFooter}>
           <Text style={itemStyles.price}>Rs. <Text style={itemStyles.priceVal}>{item.price}</Text></Text>
           <View style={itemStyles.stepper}>
             <TouchableOpacity 
-              style={[itemStyles.stepBtnMinus, (!item.available || count === 0) && itemStyles.stepBtnDisabled]}
+              style={[itemStyles.stepBtnMinus, !item.available && itemStyles.stepBtnDisabled]}
               onPress={() => onDecrement(item.id)}
               disabled={!item.available || count === 0}
+              activeOpacity={0.7}
             >
-              <Ionicons name="remove" size={16} color={(!item.available || count === 0) ? "#ccc" : "#f87171"} />
+              <View style={itemStyles.minusIconBar} />
             </TouchableOpacity>
-            <Text style={itemStyles.stepVal}>{count}</Text>
+            <View style={itemStyles.stepValContainer}>
+              <Text style={itemStyles.stepVal}>{count}</Text>
+            </View>
             <TouchableOpacity 
               style={[itemStyles.stepBtnPlus, !item.available && itemStyles.stepBtnDisabled]}
               onPress={() => onIncrement(item.id, item)}
               disabled={!item.available}
+              activeOpacity={0.7}
             >
               <Ionicons name="add" size={16} color="#fff" />
             </TouchableOpacity>
@@ -463,7 +527,12 @@ export default function App() {
                 Array.from(categoryMap.values()).map((c: any) => ({ id: c.id, label: c.label }))
             );
         } catch (e) {
-            console.error("Error fetching menu data", e);
+            const msg = String((e as any)?.message || e);
+            if (/cancel|abort/i.test(msg)) {
+                console.warn("Menu fetch cancelled", msg);
+            } else {
+                console.error("Error fetching menu data", e);
+            }
         } finally {
           setIsLoading(false);
       }
@@ -598,7 +667,10 @@ export default function App() {
       
       // Search match
       if (searchQuery.trim() !== "") {
-        if (!item.name.toLowerCase().includes(searchQuery.toLowerCase())) return false;
+        const query = searchQuery.toLowerCase();
+        const matchesName = item.name.toLowerCase().includes(query);
+        const matchesDesc = item.desc ? item.desc.toLowerCase().includes(query) : false;
+        if (!matchesName && !matchesDesc) return false;
       }
       
       // Availability Filter
@@ -817,11 +889,13 @@ export default function App() {
                       </View>
                       <View style={styles.cartItemRight}>
                         <View style={styles.stepper}>
-                          <TouchableOpacity style={styles.stepBtnMinus} onPress={() => decrementQuantity(item.id as any)}>
-                            <Ionicons name="remove" size={16} color="#f87171" />
+                          <TouchableOpacity style={styles.stepBtnMinus} onPress={() => decrementQuantity(item.id as any)} activeOpacity={0.7}>
+                            <View style={styles.minusIconBar} />
                           </TouchableOpacity>
-                          <Text style={styles.stepVal}>{item.quantity}</Text>
-                          <TouchableOpacity style={styles.stepBtnPlus} onPress={() => incrementQuantity(item.id as any)}>
+                          <View style={styles.stepValContainer}>
+                            <Text style={styles.stepVal}>{item.quantity}</Text>
+                          </View>
+                          <TouchableOpacity style={styles.stepBtnPlus} onPress={() => incrementQuantity(item.id as any)} activeOpacity={0.7}>
                             <Ionicons name="add" size={16} color="#fff" />
                           </TouchableOpacity>
                         </View>
@@ -939,14 +1013,16 @@ export default function App() {
                       <View style={[styles.itemModalFooter, { paddingBottom: Math.max(insets.bottom, 16) }]}>
                         <View style={styles.modalStepper}>
                           <TouchableOpacity 
-                            style={[styles.modalStepBtnMinus, (!isAvail || itemQty === 0) && styles.stepBtnDisabled]}
+                            style={[styles.modalStepBtnMinus, !isAvail && styles.stepBtnDisabled]}
                             onPress={() => handleDecrement(selectedItem.id)}
                             disabled={!isAvail || itemQty === 0}
                             activeOpacity={0.7}
                           >
-                            <Ionicons name="remove" size={20} color={(!isAvail || itemQty === 0) ? "#ccc" : "#f87171"} />
+                            <View style={styles.modalMinusIconBar} />
                           </TouchableOpacity>
-                          <Text style={styles.modalStepVal}>{itemQty}</Text>
+                          <View style={styles.modalStepValContainer}>
+                            <Text style={styles.modalStepVal}>{itemQty}</Text>
+                          </View>
                           <TouchableOpacity 
                             style={[styles.modalStepBtnPlus, !isAvail && styles.stepBtnDisabled]}
                             onPress={() => handleIncrement(selectedItem.id, selectedItem)}
@@ -1201,11 +1277,54 @@ const styles = StyleSheet.create({
   cardFooter: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   price: { fontSize: 10, color: '#777' },
   priceVal: { fontSize: 12, fontWeight: 'bold', color: '#000' },
-  stepper: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#f9f9f9', borderRadius: 4, borderWidth: 1, borderColor: '#f4f4f4', padding: 2 },
-  stepBtnMinus: { backgroundColor: '#f2f2f2', padding: 2, borderRadius: 2 },
-  stepBtnPlus: { backgroundColor: '#ff3400', padding: 2, borderRadius: 2 },
+  stepper: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FFFFFF',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#EFEFEF',
+    padding: 2,
+    gap: 4,
+  },
+  stepBtnMinus: {
+    width: 26,
+    height: 26,
+    borderRadius: 6,
+    backgroundColor: '#F3F4F6',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  minusIconBar: {
+    width: 10,
+    height: 3,
+    backgroundColor: BrandColors.primary,
+    borderRadius: 2,
+  },
+  stepValContainer: {
+    minWidth: 26,
+    height: 26,
+    borderRadius: 6,
+    backgroundColor: '#F3F4F6',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 4,
+  },
+  stepVal: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#000000',
+    textAlign: 'center',
+  },
+  stepBtnPlus: {
+    width: 26,
+    height: 26,
+    borderRadius: 6,
+    backgroundColor: BrandColors.primary,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
   stepBtnDisabled: { opacity: 0.5 },
-  stepVal: { fontSize: 12, color: '#000', width: 24, textAlign: 'center' },
   emptyContainer: { alignItems: 'center', justifyContent: 'center', paddingTop: 64 },
   emptyText: { color: '#777', fontSize: 14, marginTop: 12 },
   floatingContainer: {
@@ -1531,28 +1650,49 @@ const styles = StyleSheet.create({
   modalStepper: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#f9f9f9',
-    borderRadius: 8,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 10,
     borderWidth: 1,
-    borderColor: '#f4f4f4',
-    padding: 4,
+    borderColor: '#EFEFEF',
+    padding: 3,
+    gap: 6,
   },
   modalStepBtnMinus: {
-    backgroundColor: '#f2f2f2',
-    padding: 8,
-    borderRadius: 6,
+    width: 36,
+    height: 36,
+    borderRadius: 8,
+    backgroundColor: '#F3F4F6',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
-  modalStepBtnPlus: {
-    backgroundColor: '#ff3400',
-    padding: 8,
-    borderRadius: 6,
+  modalMinusIconBar: {
+    width: 14,
+    height: 3.5,
+    backgroundColor: BrandColors.primary,
+    borderRadius: 2,
+  },
+  modalStepValContainer: {
+    minWidth: 36,
+    height: 36,
+    borderRadius: 8,
+    backgroundColor: '#F3F4F6',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 6,
   },
   modalStepVal: {
     fontSize: 16,
-    fontWeight: 'bold',
-    color: '#000',
-    width: 32,
+    fontWeight: '700',
+    color: '#000000',
     textAlign: 'center',
+  },
+  modalStepBtnPlus: {
+    width: 36,
+    height: 36,
+    borderRadius: 8,
+    backgroundColor: BrandColors.primary,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   popoverOverlay: {
     flex: 1,

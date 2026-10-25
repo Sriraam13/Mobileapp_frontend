@@ -11,6 +11,7 @@ import { useOrderStore, useLiveOrderStore, useRestaurantStore } from '../../stor
 import { orderApi } from '../../services/apiService';
 import { resolveOutletLocation, getDistanceInKm, calculateDeliveryFee } from '../../utils/deliveryArea';
 import { getFullImageUrl } from '../../constants/api';
+import { BrandColors } from '../../constants/theme';
 import SelectTableModal from '../../components/ui/SelectTableModal';
 import DineInConflictModal from '../../components/ui/DineInConflictModal';
 
@@ -358,12 +359,14 @@ export default function CheckoutScreen() {
                   <Text style={styles.itemPrice}>Rs. {item.price}</Text>
                   
                   <View style={styles.stepper}>
-                    <TouchableOpacity style={styles.stepBtnMinus} onPress={() => handleDecrement(item.id)}>
-                      <Ionicons name="remove" size={16} color="#ff3400" />
+                    <TouchableOpacity style={styles.stepBtnMinus} onPress={() => handleDecrement(item.id)} activeOpacity={0.7}>
+                      <View style={styles.minusIconBar} />
                     </TouchableOpacity>
-                    <Text style={styles.stepVal}>{item.quantity}</Text>
-                    <TouchableOpacity style={styles.stepBtnPlus} onPress={() => incrementQuantity(item.id as any)}>
-                      <Ionicons name="add" size={16} color="#ff3400" />
+                    <View style={styles.stepValContainer}>
+                      <Text style={styles.stepVal}>{item.quantity}</Text>
+                    </View>
+                    <TouchableOpacity style={styles.stepBtnPlus} onPress={() => incrementQuantity(item.id as any)} activeOpacity={0.7}>
+                      <Ionicons name="add" size={16} color="#fff" />
                     </TouchableOpacity>
                   </View>
                 </View>
@@ -826,23 +829,49 @@ const styles = StyleSheet.create({
   stepper: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#fff0e6',
-    borderRadius: 20,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#EFEFEF',
+    padding: 2,
+    gap: 4,
   },
   stepBtnMinus: {
-    paddingHorizontal: 4,
+    width: 26,
+    height: 26,
+    borderRadius: 6,
+    backgroundColor: '#F3F4F6',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
-  stepBtnPlus: {
+  minusIconBar: {
+    width: 10,
+    height: 3,
+    backgroundColor: BrandColors.primary,
+    borderRadius: 2,
+  },
+  stepValContainer: {
+    minWidth: 26,
+    height: 26,
     paddingHorizontal: 4,
+    borderRadius: 6,
+    backgroundColor: '#F3F4F6',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   stepVal: {
-    fontSize: 14,
-    fontWeight: 'bold',
-    color: '#ff3400',
-    width: 24,
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#000000',
     textAlign: 'center',
+  },
+  stepBtnPlus: {
+    width: 26,
+    height: 26,
+    borderRadius: 6,
+    backgroundColor: BrandColors.primary,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   discountBanner: {
     flexDirection: 'row',

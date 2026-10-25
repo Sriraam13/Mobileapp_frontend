@@ -64,11 +64,20 @@ export default function AddAddress() {
         return;
       }
       
-      let location = await Location.getCurrentPositionAsync({
-        accuracy: Location.Accuracy.Balanced,
-      }).catch(async () => {
-        return await Location.getLastKnownPositionAsync({});
-      });
+      let location: Location.LocationObject | null = null;
+      try {
+        location = await Location.getCurrentPositionAsync({
+          accuracy: Location.Accuracy.High,
+        });
+      } catch (err1) {
+        try {
+          location = await Location.getCurrentPositionAsync({
+            accuracy: Location.Accuracy.Balanced,
+          });
+        } catch (err2) {
+          location = await Location.getLastKnownPositionAsync({});
+        }
+      }
 
       if (!location || !location.coords) {
         if (isManualPress) {
@@ -82,8 +91,8 @@ export default function AddAddress() {
       const detectedRegion = {
         latitude,
         longitude,
-        latitudeDelta: 0.012,
-        longitudeDelta: 0.012,
+        latitudeDelta: 0.005,
+        longitudeDelta: 0.005,
       };
       setRegion(detectedRegion);
       mapRef.current?.animateToRegion(detectedRegion, 500);
@@ -435,7 +444,7 @@ export default function AddAddress() {
             >
               <Marker
                 coordinate={{ latitude: region.latitude, longitude: region.longitude }}
-                title="Your Location"
+                title="Current Location"
               />
             </MapView>
           )}
@@ -446,13 +455,17 @@ export default function AddAddress() {
             </View>
           )}
           
-          {/* Locate Me Button */}
+          {/* Locate Me / Current Location Button */}
           {!isLocating && (
             <TouchableOpacity 
-              style={{ position: 'absolute', bottom: 16, right: 16, backgroundColor: '#fff', width: 44, height: 44, borderRadius: 22, justifyContent: 'center', alignItems: 'center', shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.2, shadowRadius: 4, elevation: 5 }} 
+              style={styles.currentLocationBtn} 
               onPress={() => detectLocation(true)}
+              activeOpacity={0.85}
             >
-              <Ionicons name="locate" size={24} color="#ff4500" />
+              <View style={styles.currentLocationIconWrap}>
+                <Ionicons name="locate" size={20} color="#ff4500" />
+              </View>
+              <Text style={styles.currentLocationBtnText}>Current Location</Text>
             </TouchableOpacity>
           )}
         </View>
@@ -724,6 +737,44 @@ const styles = StyleSheet.create({
     backgroundColor: '#eee',
     marginBottom: 20,
     zIndex: 1,
+  },
+  currentLocationBtn: {
+    position: 'absolute',
+    bottom: 16,
+    right: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#ffffff',
+    paddingVertical: 6,
+    paddingLeft: 6,
+    paddingRight: 14,
+    borderRadius: 24,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 5,
+    elevation: 6,
+    borderWidth: 1,
+    borderColor: '#f0f0f0',
+  },
+  currentLocationIconWrap: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: '#ffffff',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 6,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.12,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+  currentLocationBtnText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#ff4500',
   },
   mapImage: {
     width: '100%',
