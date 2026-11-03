@@ -1,3 +1,4 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { View, Text, StyleSheet, FlatList, TouchableOpacity, StatusBar, Image, RefreshControl, ActivityIndicator, Platform, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -68,46 +69,79 @@ export default function Orders() {
       let formattedOrders: any[] = [];
 
       // Fetch online customer orders for this specific phone from backend
+      let fetchFailed = false;
       if (userPhone && rawUserDigits.length >= 10 && !['1234567890', '9876543210'].includes(userLast10)) {
-        const [data1, data2] = await Promise.all([
-          orderApi.getCustomerOrders(userPhone, 1).catch(() => []),
-          orderApi.getCustomerOrders(userPhone, 2).catch(() => [])
+        const [res1, res2] = await Promise.allSettled([
+          orderApi.getCustomerOrders(userPhone, 1),
+          orderApi.getCustomerOrders(userPhone, 2)
         ]);
 
         let allData: any[] = [];
-        if (Array.isArray(data1)) allData = [...allData, ...data1];
-        if (Array.isArray(data2)) allData = [...allData, ...data2];
+        if (res1.status === 'fulfilled' && Array.isArray(res1.value)) allData = [...allData, ...res1.value];
+        if (res2.status === 'fulfilled' && Array.isArray(res2.value)) allData = [...allData, ...res2.value];
+        if (res1.status === 'rejected' && res2.status === 'rejected') fetchFailed = true;
 
-        if (allData.length > 0) {
-          formattedOrders = allData.map((entry: any) => {
-            const o = entry.order;
-            const items = entry.items;
-            const finalOrderId = o.orderId || `ORD-${String(o.id).padStart(6, '0')}`;
-            const { mappedType, tableNumber } = parseOrderTypeAndTable(o.order_type, o.table_number);
+        if (!fetchFailed) {
+          // Backend responded: active DB orders are the source of truth!
+          const activeDbIds = new Set(allData.map(entry => String(entry.order?.id || '').replace(/\D/g, '')).filter(Boolean));
 
-            const normPayMethod = (o.payment_method || '').toLowerCase().replace(/[\s_-]/g, '');
-            const isCounter = normPayMethod === 'payatcounter' || normPayMethod === 'counter';
-            const isPaidStatus = (o.payment_status || '').toUpperCase() === 'PAID';
-
-            return {
-              id: finalOrderId,
-              dbId: o.id,
-              restaurant: o.restaurant_id === 2 ? 'MGR Nagar' : 'Mugalivakkam',
-              restaurant_id: o.restaurant_id,
-              bill_no: o.bill_no,
-              dine_in_session_id: o.dine_in_session_id,
-              date: o.created_at || '2000-01-01T00:00:00Z',
-              status: o.status || 'Pending',
-              payment_status: isPaidStatus ? 'Paid' : (o.payment_status || (isCounter ? 'Pay at Counter' : 'Pending')),
-              payment_method: o.payment_method,
-              table_number: tableNumber,
-              items: items || [],
-              total: o.total_amount || 0,
-              image: items?.[0]?.image_url ? getFullImageUrl(items[0].image_url, items[0].name) : 'https://via.placeholder.com/150',
-              order_type: mappedType,
-              isCatering: false
-            };
+          // Automatically prune deleted orders from local useOrderStore
+          const currentPast = useOrderStore.getState().pastOrders || [];
+          const prunedPast = currentPast.filter(o => {
+            const ordPhone = String(o.customer_phone || '').replace(/\D/g, '');
+            const isThisCustomer = ordPhone.endsWith(userLast10) || ordPhone === rawUserDigits;
+            if (!isThisCustomer) return true;
+            const oId = String(o.dbOrderId || o.orderId || '').replace(/\D/g, '');
+            return activeDbIds.has(oId);
           });
+          useOrderStore.getState().setPastOrders(prunedPast);
+
+          // Automatically prune deleted orders from AsyncStorage userOrders
+          try {
+            const storedOrdersStr = await AsyncStorage.getItem('userOrders');
+            if (storedOrdersStr) {
+              const parsed = JSON.parse(storedOrdersStr);
+              if (Array.isArray(parsed)) {
+                const filtered = parsed.filter((o: any) => {
+                  const oDb = String(o.dbOrderId || o.id || '').replace(/\D/g, '');
+                  return activeDbIds.has(oDb);
+                });
+                await AsyncStorage.setItem('userOrders', JSON.stringify(filtered));
+              }
+            }
+          } catch (_) {}
+
+          if (allData.length > 0) {
+            formattedOrders = allData.map((entry: any) => {
+              const o = entry.order;
+              const items = entry.items;
+              const finalOrderId = o.orderId || `ORD-${String(o.id).padStart(6, '0')}`;
+              const { mappedType, tableNumber } = parseOrderTypeAndTable(o.order_type, o.table_number);
+
+              const normPayMethod = (o.payment_method || '').toLowerCase().replace(/[\s_-]/g, '');
+              const isCounter = normPayMethod === 'payatcounter' || normPayMethod === 'counter';
+              const isPaidStatus = (o.payment_status || '').toUpperCase() === 'PAID';
+
+              return {
+                id: finalOrderId,
+                dbId: o.id,
+                restaurant: o.restaurant_id === 2 ? 'MGR Nagar' : 'Mugalivakkam',
+                restaurant_id: o.restaurant_id,
+                bill_no: o.bill_no,
+                dine_in_session_id: o.dine_in_session_id,
+                date: o.created_at || '2000-01-01T00:00:00Z',
+                status: o.status || 'Pending',
+                payment_status: isPaidStatus ? 'Paid' : (o.payment_status || (isCounter ? 'Pay at Counter' : 'Pending')),
+                payment_method: o.payment_method,
+                table_number: tableNumber,
+                items: items || [],
+                total: o.total_amount || 0,
+                image: items?.[0]?.image_url ? getFullImageUrl(items[0].image_url, items[0].name) : 'https://via.placeholder.com/150',
+                order_type: mappedType,
+                isCatering: false
+              };
+            });
+          }
         }
       }
       
@@ -141,8 +175,8 @@ export default function Orders() {
         }
       }
 
-      // Fallback to local pastOrders strictly if offline and matching user phone
-      if (formattedOrders.length === 0 && userPhone && rawUserDigits.length >= 10 && !['1234567890', '9876543210'].includes(userLast10)) {
+      // Fallback to local pastOrders strictly if offline/network failed
+      if (fetchFailed && formattedOrders.length === 0 && userPhone && rawUserDigits.length >= 10 && !['1234567890', '9876543210'].includes(userLast10)) {
         const accountPastOrders = (pastOrders || []).filter((o: any) => {
           if (o.customer_phone) {
             const ordPhone = String(o.customer_phone).replace(/\D/g, '');
@@ -189,10 +223,10 @@ export default function Orders() {
           }
 
           let groupKey: string | null = null;
-          if (ord.bill_no) {
-            groupKey = `bill_${ord.restaurant_id || ord.restaurant}_${ord.bill_no}`;
-          } else if (ord.dine_in_session_id) {
+          if (ord.dine_in_session_id) {
             groupKey = `sess_${ord.restaurant_id || ord.restaurant}_${ord.dine_in_session_id}`;
+          } else if (ord.bill_no) {
+            groupKey = `bill_${ord.restaurant_id || ord.restaurant}_${ord.bill_no}`;
           } else if (ord.table_number && (ord.payment_status || '').toUpperCase() !== 'PAID') {
             groupKey = `unpaid_table_${ord.restaurant_id || ord.restaurant}_${ord.table_number}`;
           }
@@ -430,18 +464,20 @@ export default function Orders() {
 
   const handleReorder = (order: any) => {
     clearCart();
-    if (order.order_type === 'Take Away') setOrderType('Take Away');
-    else if (order.order_type === 'Delivery') setOrderType('Delivery');
+    const rawType = String(order.order_type || '').toUpperCase().replace(/[\s_-]/g, '');
+    if (rawType.includes('DELIV')) setOrderType('Delivery');
+    else if (rawType.includes('TAKE') || rawType.includes('PICKUP') || rawType.includes('PARCEL')) setOrderType('Take Away');
     else setOrderType('Dine In');
 
     if (Array.isArray(order.items)) {
       order.items.forEach((item: any) => {
+        const realItemId = item.menu_item_id || item.menuItemId || item.id;
         addItem({
-          id: String(item.menu_item_id || item.id),
-          name: item.name || 'Item',
-          price: item.price || 0,
-          quantity: item.quantity || 1,
-          image: item.image_url || item.image || '',
+          id: String(realItemId),
+          name: item.name || item.itemName || 'Item',
+          price: Number(item.price || item.unit_price || 0),
+          quantity: Number(item.quantity || item.qty || 1),
+          image: getFullImageUrl(item.image_url || item.image, item.name || item.itemName),
           category: item.category || 'General',
         });
       });
@@ -466,7 +502,8 @@ export default function Orders() {
       return;
     }
 
-    if (order.order_type === 'Delivery') {
+    const rawType = String(order.order_type || '').toUpperCase().replace(/[\s_-]/g, '');
+    if (rawType.includes('DELIV')) {
       router.push({
         pathname: '/delivery-success',
         params: {
@@ -474,12 +511,12 @@ export default function Orders() {
           orderId: order.id,
           orderType: 'Delivery',
           total: String(order.total || 0),
-          paymentMethod: order.payment_method || 'Cash',
+          paymentMethod: order.payment_method || 'UPI',
           phone: phone || '',
           cart: typeof order.items === 'string' ? order.items : JSON.stringify(order.items || []),
         }
       });
-    } else if (order.order_type === 'Takeaway' || order.order_type === 'Take Away') {
+    } else if (rawType.includes('TAKE') || rawType.includes('PICKUP') || rawType.includes('PARCEL')) {
       router.push({
         pathname: '/order-success',
         params: {

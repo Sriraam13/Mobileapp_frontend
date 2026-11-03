@@ -1,63 +1,128 @@
-import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Share, Alert, Platform, ActivityIndicator } from 'react-native';
-import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
-import { useRouter, useLocalSearchParams } from 'expo-router';
-import { useCartStore, useRestaurantStore } from '../../store';
+import React, { useEffect, useState } from 'react';
+import {
+  View,
+  Text,
+  StyleSheet,
+  TouchableOpacity,
+  Animated,
+  ScrollView,
+  BackHandler,
+  Alert,
+  ActivityIndicator,
+  Share,
+} from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Ionicons } from '@expo/vector-icons';
+import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useCartStore, useRestaurantStore, useLiveOrderStore } from '../../store';
 import { useAuthStore } from '../../store/useAuthStore';
-
 import { orderApi, customerApi, deliveryApi } from '../../services/apiService';
-import { formatDateOnly } from '../../utils/dateUtils';
+import { getFullImageUrl } from '../../constants/api';
+import { formatTime } from '../../utils/dateUtils';
+
+const UDIPI_GREEN = '#00a01d';
 
 export default function DeliveryCompletedScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const params = useLocalSearchParams<{
-    orderId: string;
-    dbOrderId?: string;
-    cart: string;
-    riderName?: string;
-    riderPhone?: string;
-    totalAmount?: string;
-    paymentMethod?: string;
-  }>();
-
   const { clearCart, addItem, setOrderType } = useCartStore();
   const { customerId } = useAuthStore();
   const { selectedOutlet } = useRestaurantStore();
 
-  const [foodRating, setFoodRating] = useState(0);
-  const [deliveryRating, setDeliveryRating] = useState(0);
-  const [selectedTags, setSelectedTags] = useState<string[]>([]);
-  const [feedbackSubmitted, setFeedbackSubmitted] = useState(false);
+  const params = useLocalSearchParams<{
+    orderId: string;
+    dbOrderId?: string;
+    totalAmount?: string;
+    paymentMethod?: string;
+    cart?: string;
+    date?: string;
+    phone?: string;
+    discountAmount?: string;
+    discountCode?: string;
+    orderType?: string;
+    subtotal?: string;
+    customerName?: string;
+    orderStatus?: string;
+    billNo?: string;
+    riderName?: string;
+  }>();
 
-  const tags = ['Great packaging', 'Tasty Food', 'Fast Delivery', 'Friendly Rider', 'Perfect Temperature'];
-
-  const toggleTag = (tag: string) => {
-    setSelectedTags(prev =>
-      prev.includes(tag) ? prev.filter(t => t !== tag) : [...prev, tag]
-    );
-  };
+  // ── Derived values ──
+  const rawIdDigits = String(params.dbOrderId || params.orderId || '').replace(/\D/g, '');
+  const displayOrderId = rawIdDigits ? `ORD-${rawIdDigits}` : (params.orderId || 'ORD-000000');
+  const feedbackOrderId = params.dbOrderId || rawIdDigits || displayOrderId;
 
   const [loading, setLoading] = useState(true);
   const [orderData, setOrderData] = useState<any>(null);
   const [trackingData, setTrackingData] = useState<any>(null);
   const [loyaltyPoints, setLoyaltyPoints] = useState<number | null>(null);
 
+  // ── Feedback State ──
+  const [recommendation, setRecommendation] = useState<'RECOMMENDED' | 'NOT_RECOMMENDED' | null>(null);
+  const [selectedTags, setSelectedTags] = useState<string[]>([]);
+  const [submitting, setSubmitting] = useState(false);
+  const [feedbackDone, setFeedbackDone] = useState(false);
+
+  const POSITIVE_TAGS = ['On-time delivery', 'Hot & fresh food', 'Polite rider', 'Great packing'];
+  const CRITIQUE_TAGS = ['Late delivery', 'Cold food', 'Damaged packing', 'Missing items'];
+  const TAGS = recommendation === 'NOT_RECOMMENDED' ? CRITIQUE_TAGS : POSITIVE_TAGS;
+
+  const toggleTag = (tag: string) =>
+    setSelectedTags(prev =>
+      prev.includes(tag) ? prev.filter(t => t !== tag) : [...prev, tag]
+    );
+
+  // ── Animation Values (1:1 identical to takeaway screen) ──
+  const [headerScale] = useState(() => new Animated.Value(0.85));
+  const [cardOpacity] = useState(() => new Animated.Value(0));
+  const [cardTranslateY] = useState(() => new Animated.Value(30));
+
+  // ── Navigation ──
+  const handleReturnHome = () => {
+    try {
+      useLiveOrderStore.getState().clearLiveOrder();
+    } catch (_) {}
+    router.dismissAll();
+    router.replace('/(main)/home' as any);
+  };
+
   useEffect(() => {
+    useLiveOrderStore.getState().clearLiveOrder();
+
+    Animated.sequence([
+      Animated.spring(headerScale, { toValue: 1, useNativeDriver: true, tension: 60 }),
+      Animated.parallel([
+        Animated.timing(cardOpacity, { toValue: 1, duration: 350, useNativeDriver: true }),
+        Animated.timing(cardTranslateY, { toValue: 0, duration: 350, useNativeDriver: true }),
+      ]),
+    ]).start();
+
+    const onBack = () => {
+      handleReturnHome();
+      return true;
+    };
+    const sub = BackHandler.addEventListener('hardwareBackPress', onBack);
+    return () => sub.remove();
+  }, []);
+
+  // ── Data Fetching (Delivery endpoints preserved) ──
+  useEffect(() => {
+    const dbId = params.dbOrderId || rawIdDigits;
+    if (!dbId) {
+      setLoading(false);
+      return;
+    }
+
     const fetchRealData = async () => {
-      const dbId = params.dbOrderId;
-      if (!dbId) {
-        setLoading(false);
-        return;
-      }
       try {
         const restaurantId = selectedOutlet?.restaurant_id ? Number(selectedOutlet.restaurant_id) : null;
         if (!restaurantId) throw new Error('Restaurant context is unavailable for this order');
+
         const results = await Promise.allSettled([
           orderApi.getOrderDetails(dbId, restaurantId),
           deliveryApi.getOrderTracking(dbId),
         ]);
+
         if (results[0].status === 'fulfilled' && results[0].value?.order) {
           setOrderData(results[0].value);
         }
@@ -65,398 +130,787 @@ export default function DeliveryCompletedScreen() {
           setTrackingData(results[1].value);
         }
 
-        // Fetch loyalty transactions, don't fail if it doesn't work
+        // Fetch loyalty transactions
         try {
           const lData = customerId ? await customerApi.getLoyalty(Number(customerId)).catch(() => null) : null;
           if (lData) {
-            // Find the points earned for this order
-            // Note: The structure might be 'recent_transactions' or 'transactions'
             const txs = lData.recent_transactions || lData.transactions || [];
             const txForOrder = txs.find((t: any) => String(t.order_id) === String(dbId));
             if (txForOrder && txForOrder.points) {
               setLoyaltyPoints(txForOrder.points);
             }
           }
-        } catch (e) {
-          // Ignore loyalty error
-        }
-
+        } catch (_) {}
       } catch (err) {
-        console.error('Failed to load completed order data', err);
+        console.warn('Failed to load completed delivery data', err);
       } finally {
         setLoading(false);
       }
     };
+
     fetchRealData();
-  }, [params.dbOrderId, selectedOutlet]);
+  }, [params.dbOrderId, rawIdDigits, selectedOutlet]);
 
   const items = orderData?.items?.length ? orderData.items : (() => {
     try {
-      if (params.cart && params.cart !== '[object Object]') {
-        const parsed = JSON.parse(params.cart);
+      const rawCart = params.cart || (params as any).cartData || (params as any).cartItems;
+      if (rawCart && rawCart !== '[object Object]') {
+        const parsed = typeof rawCart === 'string' ? JSON.parse(rawCart) : rawCart;
         return Array.isArray(parsed) ? parsed : [];
       }
-    } catch (e) {}
+    } catch (_) {}
     return [];
   })();
 
-  const subtotal = items.reduce((acc: number, item: any) => acc + (Number(item.price || item.unit_price) * (item.quantity || 1)), 0);
-  const totalAmt = orderData?.order?.total_amount ? Number(orderData.order.total_amount) : (params.totalAmount ? Number(params.totalAmount) : subtotal);
-  const orderIdDisplay = params.orderId || (orderData?.order?.id ? `ORD-${orderData.order.id}` : 'UDP-XXXXXX');
-  const deliveryFee = Number(orderData?.order?.delivery_fee || 0);
+  const itemsSubtotal = items.reduce(
+    (acc: number, item: any) => acc + (Number(item.price || item.unit_price || item.price_at_order || 0) * (item.quantity || item.qty || 1)),
+    0
+  );
+  const subtotal = itemsSubtotal > 0 ? itemsSubtotal : Number(orderData?.order?.subtotal || params.subtotal || 0);
+
+  // Delivery fee is strictly 0 Rs for all delivery orders as requested
+  const deliveryFee = 0.0;
   const packagingFee = Number(orderData?.order?.packaging_fee || 0);
   const gstAmt = Number(orderData?.order?.gst_amount || 0);
-  const tipAmt = Number(orderData?.order?.tip_amount || 0);
-  const discountAmt = Number(orderData?.order?.discount_amount || 0);
-  const grandTotal = totalAmt;
-  const paymentMethod = orderData?.order?.payment_method || params.paymentMethod || 'UPI';
-  
-  const deliveredTimelineEvent = trackingData?.timeline?.find((event: any) => event.status === 'DELIVERED');
-  const deliveredAt = trackingData?.assignment?.delivered_at || orderData?.order?.delivered_at || deliveredTimelineEvent?.created_at;
-  const deliveryDateStr = deliveredAt
-    ? formatDateOnly(deliveredAt)
-    : 'Date unavailable';
+  const discountAmt = Number(orderData?.order?.discount_amount || params.discountAmount || 0);
 
-  const handleReorder = () => {
-    if (items.length === 0) {
-      Alert.alert('No items', 'Cannot reorder — order details not found.');
+  // Guarantee totalAmount mathematically matches the breakdown items on screen:
+  // Item Subtotal + Packaging + GST - Discount + Delivery Fee (Rs. 0)
+  const calculatedBreakdownTotal = Math.max(0, subtotal + packagingFee + gstAmt - discountAmt);
+  const rawDbTotal = Number(orderData?.order?.total_amount || params.totalAmount || 0);
+  const rawDbDelivFee = Number(orderData?.order?.delivery_fee || 0);
+  const safeDbTotal = Math.max(0, rawDbTotal - rawDbDelivFee);
+
+  const totalAmount = (subtotal > 0)
+    ? calculatedBreakdownTotal
+    : (safeDbTotal > 0 ? safeDbTotal : calculatedBreakdownTotal);
+
+  const rawMethod = orderData?.order?.payment_method || params.paymentMethod || 'UPI';
+  const paymentMethod = (!rawMethod || rawMethod.toLowerCase().includes('cash') || rawMethod.toLowerCase().includes('cod') || rawMethod.toLowerCase().includes('counter'))
+    ? 'UPI'
+    : (rawMethod.toLowerCase().includes('upi') || rawMethod.toLowerCase().includes('razorpay') ? 'UPI' : rawMethod);
+  const billNumber = orderData?.order?.bill_no || params.billNo || null;
+  const completedTime = formatTime(orderData?.order?.delivered_at || params.date);
+
+  const calculatedLoyaltyPoints = loyaltyPoints || Math.max(1, Math.round(totalAmount / 10));
+
+  const submitFeedback = async () => {
+    if (recommendation === null) {
+      Alert.alert('Feedback Required', 'Please select Recommended or Not Recommended before submitting.');
       return;
     }
-    clearCart();
-    setOrderType('Delivery');
-    items.forEach((item: any) => {
-      addItem({
-        id: item.id || item.menu_item_id,
-        name: item.name,
-        price: item.price,
-        quantity: item.quantity,
-        image: item.image || item.image_url || 'https://via.placeholder.com/150',
-        category: item.category || 'Special',
-      });
-    });
-    router.push('/checkout');
-  };
-
-  const handleShareInvoice = async () => {
-    const lines = [
-      `🧾 Order Invoice — Udupi Restaurant`,
-      `Order ID: ${orderIdDisplay}`,
-      `Date: ${new Date().toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' })}`,
-      `Payment: ${params.paymentMethod || 'UPI'}`,
-      ``,
-      `Items:`,
-      ...items.map((i: any) => `  ${i.name} x${i.quantity || 1}  —  Rs. ${Number(i.price) * (i.quantity || 1)}`),
-      ``,
-      `Subtotal:   Rs. ${subtotal}`,
-      `Delivery:   Rs. ${deliveryFee}`,
-      `GST (5%):   Rs. ${gstAmt}`,
-      `─────────────────────`,
-      `Total:      Rs. ${grandTotal}`,
-      ``,
-      `Thank you for ordering! 🙏`,
-    ].join('\n');
-
+    setSubmitting(true);
     try {
-      await Share.share({ message: lines, title: `Invoice — ${orderIdDisplay}` });
-    } catch (e) {
-      Alert.alert('Share failed', 'Could not open share sheet.');
+      const apiTags = selectedTags.map(t =>
+        t === 'Great packing' ? 'GREAT_PACKAGING' : t.toUpperCase().replace(/ /g, '_')
+      );
+      const starRating = recommendation === 'RECOMMENDED' ? 5 : 0;
+      const res = await orderApi.submitFeedback(feedbackOrderId, {
+        rating: starRating,
+        feedback_tags: [recommendation, ...apiTags],
+      } as any);
+
+      if (res?.success) {
+        setFeedbackDone(true);
+        Alert.alert('Thank you! 🎉', res.message || 'Your feedback has been submitted.');
+      } else {
+        Alert.alert('Error', 'Could not submit feedback. Please try again.');
+      }
+    } catch (e: any) {
+      Alert.alert('Error', e.message || 'Network error submitting feedback.');
+    } finally {
+      setSubmitting(false);
     }
   };
 
-  const handleSubmitFeedback = () => {
-    setFeedbackSubmitted(true);
-    Alert.alert('Thank you!', 'Your feedback has been submitted.');
+  const handleReorder = () => {
+    clearCart();
+    setOrderType('Delivery');
+
+    items.forEach((item: any) => {
+      const realItemId = item.menu_item_id || item.menuItemId || item.id;
+      addItem({
+        id: realItemId,
+        name: item.name || item.itemName || 'Item',
+        price: Number(item.price || item.unit_price || 0),
+        quantity: item.quantity || item.qty || 1,
+        image: getFullImageUrl(item.image || item.image_url, item.name || item.itemName),
+        category: item.category || 'General',
+      });
+    });
+    Alert.alert('Reordered', 'Items have been added back to your cart.');
+    router.dismissAll();
+    router.replace('/(checkout)/delivery-checkout' as any);
   };
 
-  const renderStars = (rating: number, setRating: (v: number) => void) => (
-    <View style={styles.starsRow}>
-      {[1, 2, 3, 4, 5].map(star => (
-        <TouchableOpacity key={star} onPress={() => setRating(star)} activeOpacity={0.7}>
-          <Ionicons
-            name={star <= rating ? 'star' : 'star-outline'}
-            size={26}
-            color={star <= rating ? '#ffc107' : '#ddd'}
-            style={{ marginLeft: 4 }}
-          />
-        </TouchableOpacity>
-      ))}
-    </View>
-  );
+  const handleDownloadInvoice = () => {
+    router.push({
+      pathname: '/(checkout)/invoice' as any,
+      params: {
+        orderId: displayOrderId,
+        dbOrderId: params.dbOrderId || feedbackOrderId,
+        billNo: billNumber ? String(billNumber) : '',
+        finalTotal: totalAmount.toString(),
+        subtotal: subtotal.toString(),
+        mobileNumber: params.phone || orderData?.order?.customer_phone || 'DELIVERY',
+        customerName: params.customerName || orderData?.order?.customer_name || 'REGISTERED',
+        paymentMethod: paymentMethod,
+        cartData: JSON.stringify(items),
+        discountAmount: discountAmt.toString(),
+        discountCode: params.discountCode || '',
+        orderType: 'Delivery',
+      },
+    });
+  };
 
   if (loading) {
     return (
-      <SafeAreaView style={[styles.safeArea, { backgroundColor: '#00a01d', alignItems: 'center', justifyContent: 'center' }]}> 
-        <ActivityIndicator size="large" color="#fff" />
-        <Text style={{ color: '#fff', marginTop: 12 }}>Loading your completed order...</Text>
-      </SafeAreaView>
+      <View style={[styles.root, { alignItems: 'center', justifyContent: 'center' }]}>
+        <ActivityIndicator size="large" color={UDIPI_GREEN} />
+        <Text style={{ marginTop: 14, color: '#666', fontWeight: '600' }}>Loading your order details...</Text>
+      </View>
     );
   }
 
   return (
-    <SafeAreaView style={[styles.safeArea, { backgroundColor: '#00a01d' }]}>
-      <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false} bounces={false}>
-
-        {/* Green header */}
-        <View style={styles.headerBox}>
-          <View style={styles.checkCircle}>
-            <Ionicons name="checkmark" size={40} color="#00a01d" />
-          </View>
-          <Text style={styles.headerTitle}>Order Delivered! 🎉</Text>
-          <Text style={styles.headerSubtitle}>
-            {params.riderName ? `Delivered by ${params.riderName}` : 'Your food has been delivered'}
-          </Text>
-          <View style={styles.orderIdPill}>
-            <Text style={styles.orderIdPillText}>{orderIdDisplay}</Text>
-          </View>
+    <View style={styles.root}>
+      {/* ── Header (Exact Takeaway UI & Curved Udipi Green) ── */}
+      <Animated.View
+        style={[
+          styles.header,
+          { paddingTop: insets.top + 28, backgroundColor: UDIPI_GREEN },
+          { transform: [{ scale: headerScale }] },
+        ]}
+      >
+        {/* Icon circle */}
+        <View style={styles.iconCircle}>
+          <Ionicons name="bicycle-outline" size={30} color={UDIPI_GREEN} />
         </View>
+        <Text style={styles.headerTitle}>Delivered!</Text>
+        <Text style={styles.headerSubtitle}>
+          Order completed at {completedTime}  •  {paymentMethod ? `Paid (${paymentMethod})` : 'Paid'}  •  Total Rs. {totalAmount.toFixed(0)}
+        </Text>
 
-        {/* White body */}
-        <View style={styles.bodySection}>
+        {/* Highlighted Bill Number Badge */}
+        {billNumber ? (
+          <View style={styles.billBadge}>
+            <Ionicons name="receipt" size={15} color="#15803d" />
+            <Text style={styles.billBadgeLabel}>BILL NUMBER</Text>
+            <Text style={styles.billBadgeValue}>#{billNumber}</Text>
+          </View>
+        ) : null}
+      </Animated.View>
 
-          {/* Invoice Card */}
-          <View style={styles.invoiceCard}>
-            <View style={styles.invoiceHeader}>
-              <Text style={styles.invoiceTitle}>Order Invoice</Text>
-              <TouchableOpacity style={styles.shareBtn} onPress={handleShareInvoice}>
-                <Ionicons name="share-outline" size={16} color="#ff3400" />
-                <Text style={styles.shareBtnText}>Share</Text>
+      <ScrollView
+        style={styles.scroll}
+        contentContainerStyle={[styles.scrollContent, { paddingBottom: insets.bottom + 200 }]}
+        showsVerticalScrollIndicator={false}
+      >
+        <Animated.View
+          style={{ opacity: cardOpacity, transform: [{ translateY: cardTranslateY }] }}
+        >
+          {/* ── Loyalty Points Card ── */}
+          <View style={styles.loyaltyCard}>
+            <View style={styles.loyaltyLeft}>
+              <Ionicons name="gift-outline" size={18} color={UDIPI_GREEN} />
+              <Text style={styles.loyaltyLabel}>Data Udipi Club Points</Text>
+            </View>
+            <Text style={styles.loyaltyPoints}>+{calculatedLoyaltyPoints} points</Text>
+          </View>
+
+          {/* ── Feedback Card ── */}
+          <View style={styles.card}>
+            <Text style={styles.feedbackQuestion}>How was your delivery experience?</Text>
+
+            {/* Recommendation Buttons */}
+            <View style={styles.recommendRow}>
+              <TouchableOpacity
+                style={[
+                  styles.recommendBtn,
+                  recommendation === 'RECOMMENDED' && styles.recommendBtnActive,
+                ]}
+                onPress={() => {
+                  if (!feedbackDone) {
+                    setRecommendation('RECOMMENDED');
+                    setSelectedTags([]);
+                  }
+                }}
+                activeOpacity={0.8}
+                disabled={feedbackDone}
+              >
+                <Ionicons
+                  name={recommendation === 'RECOMMENDED' ? 'thumbs-up' : 'thumbs-up-outline'}
+                  size={20}
+                  color={recommendation === 'RECOMMENDED' ? UDIPI_GREEN : '#6b7280'}
+                />
+                <Text
+                  numberOfLines={1}
+                  adjustsFontSizeToFit
+                  minimumFontScale={0.8}
+                  style={[
+                    styles.recommendText,
+                    recommendation === 'RECOMMENDED' && styles.recommendTextActive,
+                  ]}
+                >
+                  Recommended
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[
+                  styles.notRecommendBtn,
+                  recommendation === 'NOT_RECOMMENDED' && styles.notRecommendBtnActive,
+                ]}
+                onPress={() => {
+                  if (!feedbackDone) {
+                    setRecommendation('NOT_RECOMMENDED');
+                    setSelectedTags([]);
+                  }
+                }}
+                activeOpacity={0.8}
+                disabled={feedbackDone}
+              >
+                <Ionicons
+                  name={recommendation === 'NOT_RECOMMENDED' ? 'thumbs-down' : 'thumbs-down-outline'}
+                  size={20}
+                  color={recommendation === 'NOT_RECOMMENDED' ? '#dc2626' : '#6b7280'}
+                />
+                <Text
+                  numberOfLines={1}
+                  adjustsFontSizeToFit
+                  minimumFontScale={0.8}
+                  style={[
+                    styles.notRecommendText,
+                    recommendation === 'NOT_RECOMMENDED' && styles.notRecommendTextActive,
+                  ]}
+                >
+                  Not Recommended
+                </Text>
               </TouchableOpacity>
             </View>
 
-            <View style={styles.invoiceMeta}>
-              <View>
-                <Text style={styles.invoiceMetaLabel}>Date</Text>
-                <Text style={styles.invoiceMetaValue}>{deliveryDateStr}</Text>
-              </View>
-              <View style={{ alignItems: 'flex-end' }}>
-                <Text style={styles.invoiceMetaLabel}>Payment</Text>
-                <Text style={styles.invoiceMetaValue}>{paymentMethod}</Text>
-              </View>
+            {/* Quick Tags Section Header */}
+            {recommendation && (
+              <Text style={styles.tagSectionTitle}>
+                {recommendation === 'RECOMMENDED' ? 'WHAT DID YOU LIKE MOST?' : 'WHAT CAN WE IMPROVE?'}
+              </Text>
+            )}
+
+            {/* Quick Tags */}
+            <View style={styles.tagsWrap}>
+              {TAGS.map(tag => {
+                const selected = selectedTags.includes(tag);
+                return (
+                  <TouchableOpacity
+                    key={tag}
+                    onPress={() => !feedbackDone && toggleTag(tag)}
+                    style={[styles.tagPill, selected && styles.tagPillSelected]}
+                    activeOpacity={0.8}
+                    disabled={feedbackDone}
+                  >
+                    <Text style={[styles.tagText, selected && styles.tagTextSelected]}>
+                      {tag}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
             </View>
 
-            <View style={styles.invoiceDivider} />
+            {/* Submit / Done */}
+            {feedbackDone ? (
+              <View style={styles.feedbackDoneRow}>
+                <Ionicons name="checkmark-circle" size={18} color={UDIPI_GREEN} />
+                <Text style={styles.feedbackDoneText}>Feedback submitted — thank you!</Text>
+              </View>
+            ) : (
+              <TouchableOpacity
+                style={[styles.submitBtn, recommendation === null && styles.submitBtnDisabled]}
+                onPress={submitFeedback}
+                activeOpacity={0.8}
+                disabled={submitting || recommendation === null}
+              >
+                {submitting ? (
+                  <ActivityIndicator color="#fff" size="small" />
+                ) : (
+                  <Text style={styles.submitBtnText}>Submit Feedback</Text>
+                )}
+              </TouchableOpacity>
+            )}
+          </View>
 
-            {/* Items */}
-            {items.map((item: any, idx: number) => (
-              <View key={idx} style={styles.invoiceItemRow}>
-                <View style={styles.invoiceItemLeft}>
-                  <View style={styles.qtyBadge}><Text style={styles.qtyText}>{item.quantity || 1}</Text></View>
-                  <Text style={styles.invoiceItemName} numberOfLines={1}>{item.name || item.itemName || 'Item'}</Text>
+          {/* ── Items Ordered & Breakdown Card ── */}
+          {items.length > 0 && (
+            <View style={styles.card}>
+              <Text style={styles.sectionTitle}>Items Ordered</Text>
+              {items.map((item: any, idx: number) => {
+                const qty = item.quantity || item.qty || 1;
+                const price = Number(item.price || item.unit_price || 0);
+                return (
+                  <View key={idx} style={styles.itemRow}>
+                    <Text style={styles.itemName}>
+                      {qty}x {item.name || item.itemName || 'Item'}
+                    </Text>
+                    <Text style={styles.itemPrice}>
+                      Rs. {(price * qty).toFixed(0)}
+                    </Text>
+                  </View>
+                );
+              })}
+
+              <View style={styles.divider} />
+
+              <View style={styles.itemRow}>
+                <Text style={styles.breakdownLabel}>Subtotal</Text>
+                <Text style={styles.breakdownValue}>Rs. {subtotal.toFixed(0)}</Text>
+              </View>
+
+              {/* Delivery Fee: 0 Rs (FREE) */}
+              <View style={styles.itemRow}>
+                <Text style={styles.breakdownLabel}>Delivery Fee</Text>
+                <Text style={[styles.breakdownValue, { color: UDIPI_GREEN, fontWeight: '700' }]}>
+                  FREE (Rs. 0)
+                </Text>
+              </View>
+
+              {packagingFee > 0 && (
+                <View style={styles.itemRow}>
+                  <Text style={styles.breakdownLabel}>Packaging Charges</Text>
+                  <Text style={styles.breakdownValue}>Rs. {packagingFee.toFixed(0)}</Text>
                 </View>
-                <Text style={styles.invoiceItemPrice}>Rs. {Number(item.price || item.unit_price) * (item.quantity || 1)}</Text>
-              </View>
-            ))}
-
-            <View style={styles.invoiceDivider} />
-
-            {/* Breakdown */}
-            <View style={styles.breakdownRow}>
-              <Text style={styles.breakdownLabel}>Subtotal</Text>
-              <Text style={styles.breakdownValue}>Rs. {subtotal}</Text>
-            </View>
-            {packagingFee > 0 && (
-              <View style={styles.breakdownRow}>
-                <Text style={styles.breakdownLabel}>Packaging fee</Text>
-                <Text style={styles.breakdownValue}>Rs. {packagingFee}</Text>
-              </View>
-            )}
-            <View style={styles.breakdownRow}>
-              <Text style={styles.breakdownLabel}>Delivery fee</Text>
-              <Text style={styles.breakdownValue}>Rs. {deliveryFee}</Text>
-            </View>
-            {tipAmt > 0 && (
-              <View style={styles.breakdownRow}>
-                <Text style={styles.breakdownLabel}>Rider Tip</Text>
-                <Text style={styles.breakdownValue}>Rs. {tipAmt}</Text>
-              </View>
-            )}
-            <View style={styles.breakdownRow}>
-              <Text style={styles.breakdownLabel}>GST (5%)</Text>
-              <Text style={styles.breakdownValue}>Rs. {gstAmt}</Text>
-            </View>
-            {discountAmt > 0 && (
-              <View style={styles.breakdownRow}>
-                <Text style={[styles.breakdownLabel, { color: '#00a01d' }]}>Discount</Text>
-                <Text style={[styles.breakdownValue, { color: '#00a01d' }]}>- Rs. {discountAmt}</Text>
-              </View>
-            )}
-
-            <View style={[styles.invoiceDivider, { marginBottom: 12 }]} />
-            <View style={styles.grandTotalRow}>
-              <Text style={styles.grandTotalLabel}>Total Paid</Text>
-              <Text style={styles.grandTotalValue}>Rs. {grandTotal}</Text>
-            </View>
-          </View>
-
-          {/* Loyalty Points */}
-          <View style={styles.loyaltyPill}>
-            <MaterialCommunityIcons name="medal-outline" size={20} color="#ff8c00" />
-            <Text style={styles.loyaltyText}>
-              {loyaltyPoints ? (
-                <>You earned <Text style={{ color: '#ff8c00', fontWeight: 'bold' }}>{loyaltyPoints} Loyalty Points!</Text></>
-              ) : (
-                'Points will appear shortly'
               )}
-            </Text>
-          </View>
 
-          {/* Rating Card */}
-          {!feedbackSubmitted ? (
-            <View style={styles.ratingCard}>
-              <Text style={styles.cardTitle}>Rate Your Experience</Text>
+              {gstAmt > 0 && (
+                <View style={styles.itemRow}>
+                  <Text style={styles.breakdownLabel}>GST (5%)</Text>
+                  <Text style={styles.breakdownValue}>Rs. {gstAmt.toFixed(2)}</Text>
+                </View>
+              )}
 
-              <View style={styles.ratingRow}>
-                <Text style={styles.ratingLabel}>Food Quality</Text>
-                {renderStars(foodRating, setFoodRating)}
+              {discountAmt > 0 && (
+                <View style={styles.itemRow}>
+                  <Text style={[styles.breakdownLabel, { color: UDIPI_GREEN }]}>Discount</Text>
+                  <Text style={[styles.breakdownValue, { color: UDIPI_GREEN, fontWeight: '700' }]}>
+                    - Rs. {discountAmt.toFixed(2)}
+                  </Text>
+                </View>
+              )}
+
+              <View style={styles.divider} />
+              <View style={styles.itemRow}>
+                <Text style={[styles.itemName, { fontWeight: '700', color: '#111' }]}>
+                  Total Paid {paymentMethod ? `(${paymentMethod})` : ''}
+                </Text>
+                <Text style={[styles.itemPrice, { color: UDIPI_GREEN, fontSize: 16 }]}>
+                  Rs. {totalAmount.toFixed(0)}
+                </Text>
               </View>
-              <View style={styles.ratingRow}>
-                <Text style={styles.ratingLabel}>Delivery Service</Text>
-                {renderStars(deliveryRating, setDeliveryRating)}
-              </View>
-
-              <Text style={styles.tagsTitle}>WHAT DID YOU LIKE MOST?</Text>
-              <View style={styles.tagsContainer}>
-                {tags.map(tag => {
-                  const active = selectedTags.includes(tag);
-                  return (
-                    <TouchableOpacity key={tag} style={[styles.tagBtn, active && styles.tagBtnActive]} onPress={() => toggleTag(tag)}>
-                      <Text style={[styles.tagText, active && styles.tagTextActive]}>{tag}</Text>
-                    </TouchableOpacity>
-                  );
-                })}
-              </View>
-
-              <TouchableOpacity style={styles.submitFeedbackBtn} onPress={handleSubmitFeedback}>
-                <Text style={styles.submitFeedbackText}>Submit Feedback</Text>
-              </TouchableOpacity>
-            </View>
-          ) : (
-            <View style={styles.feedbackDoneBox}>
-              <Ionicons name="checkmark-circle" size={32} color="#00a01d" />
-              <Text style={styles.feedbackDoneText}>Thanks for your feedback!</Text>
             </View>
           )}
-
-          {/* Action Buttons */}
-          <TouchableOpacity style={styles.reorderBtn} onPress={handleReorder}>
-            <Ionicons name="refresh" size={18} color="#fff" style={{ marginRight: 8 }} />
-            <Text style={styles.reorderBtnText}>Reorder This Meal</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={styles.homeBtn}
-            onPress={() => router.push({
-              pathname: '/(checkout)/invoice' as any,
-              params: {
-                dbOrderId: String(params.dbOrderId || ''),
-                orderId: orderIdDisplay || '',
-                orderType: 'Delivery',
-                paymentMethod: paymentMethod || 'UPI',
-                finalTotal: String(totalAmt || ''),
-                cartData: JSON.stringify(items || []),
-              },
-            })}
-            disabled={!params.dbOrderId}
-          >
-            <Ionicons name="document-text-outline" size={18} color="#fff" style={{ marginRight: 8 }} />
-            <Text style={styles.homeBtnText}>Download Invoice</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity style={styles.homeBtn} onPress={() => router.replace('/(main)/home' as any)}>
-            <Text style={styles.homeBtnText}>Back to Home</Text>
-          </TouchableOpacity>
-
-        </View>
+        </Animated.View>
       </ScrollView>
-    </SafeAreaView>
+
+      {/* ── Bottom Actions (Exact Takeaway UI & Udipi Green) ── */}
+      <View style={[styles.bottomBar, { paddingBottom: insets.bottom + 16 }]}>
+        {/* Reorder */}
+        <TouchableOpacity style={styles.reorderBtn} onPress={handleReorder} activeOpacity={0.85}>
+          <Ionicons name="refresh-outline" size={18} color="#fff" style={{ marginRight: 8 }} />
+          <Text style={styles.reorderText}>Reorder This Meal</Text>
+        </TouchableOpacity>
+
+        {/* Download E-Invoice */}
+        <TouchableOpacity style={styles.invoiceBtn} onPress={handleDownloadInvoice} activeOpacity={0.85}>
+          <Ionicons name="document-text-outline" size={16} color={UDIPI_GREEN} style={{ marginRight: 6 }} />
+          <Text style={styles.invoiceText}>Download E-Invoice</Text>
+        </TouchableOpacity>
+
+        {/* Back to Home */}
+        <TouchableOpacity onPress={handleReturnHome} activeOpacity={0.7} style={styles.homeBtn}>
+          <Text style={styles.homeText}>Back to Home</Text>
+        </TouchableOpacity>
+      </View>
+    </View>
   );
 }
 
+// ─── Styles (Exact 1:1 match with Takeaway order-completed.tsx with Udipi Green) ───
+
 const styles = StyleSheet.create({
-  safeArea: { flex: 1 },
-  scrollContent: { flexGrow: 1 },
+  root: {
+    flex: 1,
+    backgroundColor: '#f5f5f5',
+  },
 
   // Header
-  headerBox: { backgroundColor: '#00a01d', alignItems: 'center', paddingTop: 32, paddingBottom: 40, paddingHorizontal: 20 },
-  checkCircle: {
-    width: 72, height: 72, borderRadius: 36, backgroundColor: '#fff',
-    alignItems: 'center', justifyContent: 'center', marginBottom: 16,
+  header: {
+    alignItems: 'center',
+    paddingBottom: 32,
+    borderBottomLeftRadius: 28,
+    borderBottomRightRadius: 28,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.12,
+    shadowRadius: 8,
+    elevation: 6,
   },
-  headerTitle: { fontSize: 26, fontWeight: '800', color: '#fff', marginBottom: 6 },
-  headerSubtitle: { fontSize: 14, color: 'rgba(255,255,255,0.85)', textAlign: 'center', marginBottom: 14 },
-  orderIdPill: {
-    backgroundColor: 'rgba(255,255,255,0.2)', paddingHorizontal: 16, paddingVertical: 6, borderRadius: 20,
+  iconCircle: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    backgroundColor: '#fff',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 14,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
   },
-  orderIdPillText: { color: '#fff', fontWeight: 'bold', fontSize: 13 },
-
-  // Body
-  bodySection: { backgroundColor: '#fff', flex: 1, paddingTop: 24, paddingHorizontal: 16 },
-
-  // Invoice
-  invoiceCard: {
-    backgroundColor: '#fff', borderRadius: 16, padding: 20,
-    borderWidth: 1, borderColor: '#f0f0f0',
-    shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.06, shadowRadius: 8,
-    elevation: 3, marginBottom: 20,
+  headerTitle: {
+    fontSize: 24,
+    fontWeight: '800',
+    color: '#fff',
+    letterSpacing: 0.3,
+    marginBottom: 6,
   },
-  invoiceHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 },
-  invoiceTitle: { fontSize: 17, fontWeight: '800', color: '#000' },
-  shareBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: '#fff5f2', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20 },
-  shareBtnText: { color: '#ff3400', fontSize: 13, fontWeight: '600' },
-  invoiceMeta: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 14 },
-  invoiceMetaLabel: { fontSize: 11, color: '#999', marginBottom: 2 },
-  invoiceMetaValue: { fontSize: 13, fontWeight: '700', color: '#333' },
-  invoiceDivider: { height: 1, backgroundColor: '#f0f0f0', marginVertical: 12 },
-  invoiceItemRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 },
-  invoiceItemLeft: { flexDirection: 'row', alignItems: 'center', flex: 1 },
-  qtyBadge: {
-    width: 22, height: 22, borderRadius: 11, backgroundColor: '#f0f0f0',
-    alignItems: 'center', justifyContent: 'center', marginRight: 10,
+  headerSubtitle: {
+    fontSize: 13,
+    color: 'rgba(255,255,255,0.88)',
+    textAlign: 'center',
+    paddingHorizontal: 24,
   },
-  qtyText: { fontSize: 11, fontWeight: 'bold', color: '#333' },
-  invoiceItemName: { fontSize: 13, color: '#333', flex: 1 },
-  invoiceItemPrice: { fontSize: 13, fontWeight: '700', color: '#000' },
-  breakdownRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8 },
-  breakdownLabel: { fontSize: 13, color: '#777' },
-  breakdownValue: { fontSize: 13, color: '#333' },
-  grandTotalRow: { flexDirection: 'row', justifyContent: 'space-between' },
-  grandTotalLabel: { fontSize: 16, fontWeight: '800', color: '#000' },
-  grandTotalValue: { fontSize: 16, fontWeight: '800', color: '#ff3400' },
 
-  // Loyalty
-  loyaltyPill: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
-    backgroundColor: '#fff8ee', alignSelf: 'center', paddingVertical: 10, paddingHorizontal: 20,
-    borderRadius: 24, marginBottom: 20, borderWidth: 1, borderColor: '#ffe0aa',
+  // Scroll
+  scroll: { flex: 1 },
+  scrollContent: {
+    paddingHorizontal: 16,
+    paddingTop: 18,
   },
-  loyaltyText: { fontSize: 14, color: '#333', marginLeft: 8 },
 
-  // Rating
-  ratingCard: { backgroundColor: '#f9f9f9', borderRadius: 16, padding: 20, marginBottom: 20 },
-  cardTitle: { fontSize: 16, fontWeight: '700', color: '#333', textAlign: 'center', marginBottom: 18 },
-  ratingRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 },
-  ratingLabel: { fontSize: 14, color: '#555', fontWeight: '500' },
-  starsRow: { flexDirection: 'row', alignItems: 'center' },
-  tagsTitle: { fontSize: 11, fontWeight: '700', color: '#aaa', textAlign: 'center', marginTop: 14, marginBottom: 12 },
-  tagsContainer: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: 8 },
-  tagBtn: { borderWidth: 1, borderColor: '#e0e0e0', backgroundColor: '#fff', paddingVertical: 7, paddingHorizontal: 14, borderRadius: 20 },
-  tagBtnActive: { borderColor: '#ff3400', backgroundColor: '#fff5f2' },
-  tagText: { fontSize: 12, color: '#888' },
-  tagTextActive: { color: '#ff3400', fontWeight: '600' },
-  submitFeedbackBtn: { marginTop: 16, paddingVertical: 11, alignItems: 'center', backgroundColor: '#e6f7eb', borderRadius: 10 },
-  submitFeedbackText: { color: '#00a01d', fontWeight: '700', fontSize: 14 },
+  // Loyalty card
+  loyaltyCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#e6f7eb',
+    borderWidth: 1,
+    borderColor: '#bbf7d0',
+    borderRadius: 16,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    marginBottom: 14,
+  },
+  loyaltyLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  loyaltyLabel: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#333',
+  },
+  loyaltyPoints: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: UDIPI_GREEN,
+  },
 
-  // Feedback done
-  feedbackDoneBox: { alignItems: 'center', paddingVertical: 24, marginBottom: 20 },
-  feedbackDoneText: { marginTop: 8, fontSize: 14, color: '#00a01d', fontWeight: '600' },
+  // Card
+  card: {
+    backgroundColor: '#fff',
+    borderRadius: 20,
+    padding: 20,
+    marginBottom: 14,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 6,
+    elevation: 2,
+  },
 
-  // Buttons
+  // Feedback
+  feedbackQuestion: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#111',
+    textAlign: 'center',
+    marginBottom: 16,
+  },
+  billBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#ffffff',
+    paddingVertical: 7,
+    paddingHorizontal: 16,
+    borderRadius: 22,
+    marginTop: 14,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.12,
+    shadowRadius: 4,
+    elevation: 3,
+    gap: 7,
+  },
+  billBadgeLabel: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: '#15803d',
+    letterSpacing: 0.8,
+  },
+  billBadgeValue: {
+    fontSize: 16,
+    fontWeight: '900',
+    color: '#111827',
+    letterSpacing: 0.5,
+  },
+  recommendRow: {
+    flexDirection: 'row',
+    gap: 10,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  recommendBtn: {
+    flex: 1,
+    height: 52,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 8,
+    borderRadius: 14,
+    backgroundColor: '#f9fafb',
+    borderWidth: 1.5,
+    borderColor: '#e5e7eb',
+    gap: 6,
+  },
+  recommendBtnActive: {
+    backgroundColor: '#f0fdf4',
+    borderColor: UDIPI_GREEN,
+    shadowColor: UDIPI_GREEN,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  notRecommendBtn: {
+    flex: 1,
+    height: 52,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 8,
+    borderRadius: 14,
+    backgroundColor: '#f9fafb',
+    borderWidth: 1.5,
+    borderColor: '#e5e7eb',
+    gap: 6,
+  },
+  notRecommendBtnActive: {
+    backgroundColor: '#fef2f2',
+    borderColor: '#ef4444',
+    shadowColor: '#ef4444',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  recommendText: {
+    fontSize: 12.5,
+    fontWeight: '600',
+    color: '#4b5563',
+    textAlign: 'center',
+  },
+  recommendTextActive: {
+    color: '#15803d',
+    fontWeight: '700',
+  },
+  notRecommendText: {
+    fontSize: 12.5,
+    fontWeight: '600',
+    color: '#4b5563',
+    textAlign: 'center',
+  },
+  notRecommendTextActive: {
+    color: '#b91c1c',
+    fontWeight: '700',
+  },
+  tagSectionTitle: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#888',
+    letterSpacing: 0.5,
+    textAlign: 'center',
+    marginBottom: 10,
+  },
+  tagsWrap: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    justifyContent: 'center',
+    marginBottom: 20,
+  },
+  tagPill: {
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 20,
+    backgroundColor: '#f0f0f0',
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+  },
+  tagPillSelected: {
+    backgroundColor: '#e6f7eb',
+    borderColor: UDIPI_GREEN,
+  },
+  tagText: {
+    fontSize: 12,
+    color: '#666',
+    fontWeight: '500',
+  },
+  tagTextSelected: {
+    color: UDIPI_GREEN,
+    fontWeight: '700',
+  },
+  submitBtn: {
+    backgroundColor: UDIPI_GREEN,
+    borderRadius: 14,
+    paddingVertical: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: UDIPI_GREEN,
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.25,
+    shadowRadius: 6,
+    elevation: 3,
+  },
+  submitBtnDisabled: {
+    backgroundColor: '#ccc',
+    shadowOpacity: 0,
+    elevation: 0,
+  },
+  submitBtnText: {
+    color: '#fff',
+    fontSize: 15,
+    fontWeight: '700',
+    letterSpacing: 0.3,
+  },
+  feedbackDoneRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#f0fdf4',
+    borderRadius: 12,
+    paddingVertical: 12,
+    gap: 6,
+    borderWidth: 1,
+    borderColor: '#bbf7d0',
+  },
+  feedbackDoneText: {
+    fontSize: 13,
+    color: UDIPI_GREEN,
+    fontWeight: '600',
+  },
+
+  // Items ordered
+  sectionTitle: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#111',
+    marginBottom: 14,
+  },
+  itemRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 6,
+  },
+  itemName: {
+    fontSize: 13,
+    color: '#444',
+    fontWeight: '500',
+    flex: 1,
+    marginRight: 8,
+  },
+  itemPrice: {
+    fontSize: 13,
+    color: '#111',
+    fontWeight: '700',
+  },
+  breakdownLabel: {
+    fontSize: 13,
+    color: '#666',
+    fontWeight: '500',
+  },
+  breakdownValue: {
+    fontSize: 13,
+    color: '#222',
+    fontWeight: '600',
+  },
+  divider: {
+    height: 1,
+    backgroundColor: '#f0f0f0',
+    marginVertical: 8,
+  },
+
+  // Bottom bar
+  bottomBar: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    backgroundColor: '#fff',
+    paddingHorizontal: 16,
+    paddingTop: 14,
+    borderTopWidth: 1,
+    borderTopColor: '#ececec',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: -2 },
+    shadowOpacity: 0.06,
+    shadowRadius: 6,
+    elevation: 8,
+  },
   reorderBtn: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
-    backgroundColor: '#ff3400', paddingVertical: 16, borderRadius: 14, marginBottom: 12,
-    shadowColor: '#ff3400', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 8, elevation: 5,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: UDIPI_GREEN,
+    borderRadius: 24,
+    paddingVertical: 15,
+    marginBottom: 10,
+    shadowColor: UDIPI_GREEN,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.22,
+    shadowRadius: 6,
+    elevation: 3,
   },
-  reorderBtnText: { color: '#fff', fontSize: 16, fontWeight: '700' },
-  homeBtn: { alignItems: 'center', paddingVertical: 14, marginBottom: 30 },
-  homeBtnText: { color: '#888', fontSize: 15, fontWeight: '500' },
+  reorderText: {
+    color: '#fff',
+    fontSize: 15,
+    fontWeight: '700',
+  },
+  invoiceBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#e6f7eb',
+    borderRadius: 24,
+    paddingVertical: 13,
+    marginBottom: 8,
+    borderWidth: 1.5,
+    borderColor: UDIPI_GREEN,
+  },
+  invoiceText: {
+    color: UDIPI_GREEN,
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  homeBtn: {
+    alignItems: 'center',
+    paddingVertical: 10,
+  },
+  homeText: {
+    fontSize: 14,
+    color: '#888',
+    fontWeight: '600',
+  },
 });

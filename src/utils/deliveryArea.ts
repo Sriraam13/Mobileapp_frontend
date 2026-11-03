@@ -88,6 +88,22 @@ export function getDistanceInKm(
 }
 
 /**
+ * Finds the nearest known outlet based on geographic coordinates
+ */
+export function findNearestOutlet(latitude: number, longitude: number): OutletLocation {
+  let closest = ALL_BRANCHES[0];
+  let minDistance = Infinity;
+  for (const branch of ALL_BRANCHES) {
+    const d = getDistanceInKm(latitude, longitude, branch);
+    if (d < minDistance) {
+      minDistance = d;
+      closest = branch;
+    }
+  }
+  return closest;
+}
+
+/**
  * Validates whether coordinates are within the strict 5 km radius of the selected outlet.
  */
 export function isWithinDeliveryArea(
@@ -184,20 +200,12 @@ export function checkDeliveryCoverage(
   };
 }
 
-export const DELIVERY_FEE_RATE_TEXT = '₹100 flat for first 5 km + ₹20/km thereafter';
+export const DELIVERY_FEE_RATE_TEXT = 'Free Delivery (₹0)';
 
 /**
- * Calculates delivery fee based on distance:
- * - ₹100 flat for the first 5 km (or base flat rate if distance <= 5 km)
- * - ₹20/km thereon for each additional km beyond 5 km
+ * Calculates delivery fee:
+ * - ₹0 (Free delivery)
  */
-export function calculateDeliveryFee(distanceKm?: number | null): number {
-  if (distanceKm == null || isNaN(distanceKm) || distanceKm <= 0) {
-    return 100;
-  }
-  if (distanceKm <= 5) {
-    return 100;
-  }
-  const extraKm = distanceKm - 5;
-  return Math.round(100 + extraKm * 20);
+export function calculateDeliveryFee(_distanceKm?: number | null): number {
+  return 0;
 }

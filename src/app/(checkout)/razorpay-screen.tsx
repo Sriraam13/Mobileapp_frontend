@@ -242,7 +242,7 @@ export default function RazorpayScreen() {
           remember_customer: true,
           prefill: {
             contact: '${phone || '+919876543210'}',
-            method: '${paymentMethodId || 'card'}',
+            method: '${paymentMethodId || 'upi'}',
             ${activeCard && paymentMethodId !== 'upi' ? `name: '${activeCard.title}',` : ''}
             ${activeCard && paymentMethodId !== 'upi' ? `'card[number]': '${activeCard.subtitle}',` : ''}
             ${activeCard && paymentMethodId !== 'upi' ? `card: { number: '${activeCard.subtitle}', name: '${activeCard.title}' },` : ''}
@@ -252,7 +252,7 @@ export default function RazorpayScreen() {
             ${activeCard ? `saved_card_title: '${activeCard.title}',` : ''}
           },
           theme: {
-            color: '#ff3400'
+            color: '#00a01d'
           },
           handler: function(response) {
             window.ReactNativeWebView.postMessage(JSON.stringify({
@@ -470,7 +470,15 @@ export default function RazorpayScreen() {
             url.startsWith('paytm://') ||
             url.startsWith('bhim://')
           ) {
-            Linking.openURL(url).catch((err) => {
+            let targetUrl = url;
+            if (url.startsWith('intent://')) {
+              try {
+                const schemeMatch = url.match(/scheme=([^;]+)/);
+                const scheme = schemeMatch ? schemeMatch[1] : 'upi';
+                targetUrl = url.replace(/^intent:\/\//, `${scheme}://`).split('#Intent')[0];
+              } catch (_) {}
+            }
+            Linking.openURL(targetUrl).catch((err) => {
               console.error('Failed to open UPI app', err);
             });
             return false;

@@ -7,13 +7,13 @@ import * as Location from 'expo-location';
 import { API_BASE_URL } from '../../constants/api';
 import { useAuthStore, useAddressStore, useRestaurantStore } from '../../store';
 import BottomNavBar from '../../components/layout/BottomNavBar';
-import { isWithinDeliveryArea, checkDeliveryCoverage, DeliveryCoverageResult } from '../../utils/deliveryArea';
+import { isWithinDeliveryArea, checkDeliveryCoverage, DeliveryCoverageResult, findNearestOutlet } from '../../utils/deliveryArea';
+import { useCartStore } from '../../store/useCartStore';
 import DeliveryUnavailableModal from '../../components/ui/DeliveryUnavailableModal';
 import { LIGHT_MAP_STYLE } from '../../constants/mapStyle';
+import InteractiveGoogleMap, { InteractiveGoogleMapRef } from '../../components/ui/InteractiveGoogleMap';
 
-const MapView = Platform.OS !== 'web' ? require('react-native-maps').default : null;
-const { PROVIDER_GOOGLE } = Platform.OS !== 'web' ? require('react-native-maps') : { PROVIDER_GOOGLE: 'google' };
-const Marker = Platform.OS !== 'web' ? require('react-native-maps').Marker : null;
+// Native maps removed in favor of Interactive Google Map
 
 export default function AddAddress() {
   const router = useRouter();
@@ -29,11 +29,12 @@ export default function AddAddress() {
   const [landmark, setLandmark] = useState('');
   const [fullAddress, setFullAddress] = useState(params.predefinedAddress || '');
   const [isLocating, setIsLocating] = useState(false);
+  const existingCoords = addresses.find(a => a.latitude && a.longitude);
   const [region, setRegion] = useState({
-    latitude: params.latitude ? Number(params.latitude) : 13.0210,
-    longitude: params.longitude ? Number(params.longitude) : 80.1614,
-    latitudeDelta: 0.012,
-    longitudeDelta: 0.012,
+    latitude: params.latitude ? Number(params.latitude) : (existingCoords?.latitude ? Number(existingCoords.latitude) : 13.0210),
+    longitude: params.longitude ? Number(params.longitude) : (existingCoords?.longitude ? Number(existingCoords.longitude) : 80.1614),
+    latitudeDelta: 0.008,
+    longitudeDelta: 0.008,
   });
   const [refreshing, setRefreshing] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -55,7 +56,11 @@ export default function AddAddress() {
   const detectLocation = useCallback(async (isManualPress = false) => {
     setIsLocating(true);
     try {
-      let { status } = await Location.requestForegroundPermissionsAsync();
+      let { status } = await Location.getForegroundPermissionsAsync();
+      if (status !== 'granted') {
+        const req = await Location.requestForegroundPermissionsAsync();
+        status = req.status;
+      }
       if (status !== 'granted') {
         if (isManualPress) {
           Alert.alert("Permission Needed", "Please enable location permission to auto-detect your delivery address.");
@@ -65,19 +70,22 @@ export default function AddAddress() {
       }
       
       let location: Location.LocationObject | null = null;
+
+      // 1. Immediately try cached GPS position (<20ms)
       try {
-        location = await Location.getCurrentPositionAsync({
-          accuracy: Location.Accuracy.High,
-        });
-      } catch (err1) {
-        try {
-          location = await Location.getCurrentPositionAsync({
-            accuracy: Location.Accuracy.Balanced,
-          });
-        } catch (err2) {
-          location = await Location.getLastKnownPositionAsync({});
+        location = await Location.getLastKnownPositionAsync({});
+      } catch (_) {}
+
+      // 2. Fetch fresh balanced GPS fix with a 5s timeout
+      try {
+        const freshLocation = await Promise.race([
+          Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced }),
+          new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 5000))
+        ]);
+        if (freshLocation && freshLocation.coords) {
+          location = freshLocation;
         }
-      }
+      } catch (_) {}
 
       if (!location || !location.coords) {
         if (isManualPress) {
@@ -114,17 +122,33 @@ export default function AddAddress() {
         let route = '';
         let sublocality = '';
         let locality = '';
+        let premise = '';
         
         result.address_components.forEach((comp: any) => {
+          if (comp.types.includes('premise') || comp.types.includes('subpremise')) premise = comp.long_name;
           if (comp.types.includes('street_number')) streetNumber = comp.long_name;
           if (comp.types.includes('route')) route = comp.long_name;
           if (comp.types.includes('sublocality') || comp.types.includes('sublocality_level_1')) sublocality = comp.long_name;
           if (comp.types.includes('locality')) locality = comp.long_name;
         });
-        
-        if (streetNumber) setFlat(streetNumber);
-        if (route) setBuilding(route);
-        if (sublocality || locality) setLandmark(sublocality || locality);
+
+        // Never set restaurant fallback values like 125B or Mugalivakkam Main Road
+        const isRestaurantFallback = (streetNumber === '125B' || streetNumber === '125') &&
+          (route.toLowerCase().includes('mugalivakkam') || route.toLowerCase().includes('mount-poonamallee'));
+
+        if (!isRestaurantFallback) {
+          if (premise) {
+            setBuilding(premise);
+          } else if (route) {
+            setBuilding(route);
+          }
+          if (sublocality || locality) {
+            setLandmark(sublocality || locality);
+          }
+          if (streetNumber && !streetNumber.toLowerCase().includes('125b')) {
+            setFlat(streetNumber);
+          }
+        }
       }
     } catch (e) {
       console.error("Error auto-detecting location:", e);
@@ -254,19 +278,7 @@ export default function AddAddress() {
 
 
 
-  useEffect(() => {
-    if (isLocating) return;
-    const parts = [
-      flat ? `${flat}` : '',
-      floor ? `${floor}` : '',
-      building ? `${building}` : '',
-      landmark ? `${landmark}` : ''
-    ].filter(Boolean);
-    if (parts.length > 0) {
-       // eslint-disable-next-line react-hooks/set-state-in-effect
-       setFullAddress(parts.join(', '));
-    }
-  }, [flat, floor, building, landmark]);
+  // Keep fullAddress synced with geocoded result without destroying components
 
   const handleSave = async () => {
     if (!fullAddress.trim()) {
@@ -283,11 +295,19 @@ export default function AddAddress() {
     
     setIsSaving(true);
     const newId = Date.now();
+
+    // Cleanly prepend flat/floor/building to geocoded address if not already present
+    let finalAddressText = fullAddress.trim();
+    const prefixParts = [flat, floor, building].filter(Boolean).filter(part => !finalAddressText.toLowerCase().includes(part.toLowerCase()));
+    if (prefixParts.length > 0) {
+      finalAddressText = `${prefixParts.join(', ')}, ${finalAddressText}`;
+    }
+
     const payload = {
       id: newId,
       type: addressType,
-      address: fullAddress.trim(),
-      full_address: fullAddress.trim(),
+      address: finalAddressText,
+      full_address: finalAddressText,
       latitude: region.latitude,
       longitude: region.longitude,
       flat_house_no: flat || '',
@@ -314,7 +334,7 @@ export default function AddAddress() {
           floor: floor || null,
           building_apartment_name: building || null,
           landmark: landmark || null,
-          full_address: fullAddress.trim(),
+          full_address: finalAddressText,
           latitude: region.latitude,
           longitude: region.longitude,
           city: 'Chennai',
@@ -329,7 +349,23 @@ export default function AddAddress() {
         const finalId = resp?.address?.id || resp?.id || newId;
         payload.id = finalId;
         addAddress(payload);
-        setSelectedDeliveryAddress(fullAddress.trim(), finalId);
+        setSelectedDeliveryAddress(finalAddressText, finalId);
+
+        // Dynamically set nearest restaurant outlet and ensure delivery mode
+        try {
+          const nearest = findNearestOutlet(region.latitude, region.longitude);
+          if (nearest && nearest.restaurant_id) {
+            useRestaurantStore.getState().setSelectedOutlet({
+              restaurant_id: nearest.restaurant_id,
+              id: nearest.restaurant_id,
+              name: nearest.name,
+              latitude: nearest.latitude,
+              longitude: nearest.longitude,
+            });
+          }
+          useCartStore.getState().setOrderType('Delivery');
+        } catch (_) {}
+
         setIsSaving(false);
         router.replace({ pathname: '/menu', params: { orderType: 'Delivery' } });
       } catch (e: any) {
@@ -339,7 +375,23 @@ export default function AddAddress() {
       }
     } else {
       addAddress(payload);
-      setSelectedDeliveryAddress(fullAddress.trim(), newId);
+      setSelectedDeliveryAddress(finalAddressText, newId);
+
+      // Dynamically set nearest restaurant outlet and ensure delivery mode
+      try {
+        const nearest = findNearestOutlet(region.latitude, region.longitude);
+        if (nearest && nearest.restaurant_id) {
+          useRestaurantStore.getState().setSelectedOutlet({
+            restaurant_id: nearest.restaurant_id,
+            id: nearest.restaurant_id,
+            name: nearest.name,
+            latitude: nearest.latitude,
+            longitude: nearest.longitude,
+          });
+        }
+        useCartStore.getState().setOrderType('Delivery');
+      } catch (_) {}
+
       setIsSaving(false);
       router.replace({ pathname: '/menu', params: { orderType: 'Delivery' } });
     }
@@ -407,47 +459,52 @@ export default function AddAddress() {
 
         {/* Map View */}
         <View style={styles.mapContainer}>
-          {Platform.OS === 'web' ? (
-            <Image 
-              source={{ uri: `https://maps.googleapis.com/maps/api/staticmap?center=${region.latitude},${region.longitude}&zoom=16&size=600x300&markers=color:red%7C${region.latitude},${region.longitude}&key=${process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY || 'AIzaSyA2qxAJag8F89Q_TdtjqU_42W6JAVJ5_qg'}` }} 
-              style={styles.mapImage} 
-              resizeMode="cover"
-            />
-          ) : (
-            <MapView
-              ref={mapRef}
-              style={styles.mapImage}
-              region={region}
-              userInterfaceStyle="light"
-              customMapStyle={LIGHT_MAP_STYLE}
-              showsUserLocation={true}
-              showsMyLocationButton={false}
-              onRegionChangeComplete={async (newRegion: any, details: any) => {
-                setRegion(newRegion);
-                if (!isLocating && details?.isGesture) {
-                  setHasConfirmedLocation(true);
-                  try {
-                    const apiKey = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY || 'AIzaSyA2qxAJag8F89Q_TdtjqU_42W6JAVJ5_qg';
-                    const geocodeUrl = `https://maps.googleapis.com/maps/api/geocode/json?latlng=${newRegion.latitude},${newRegion.longitude}&key=${apiKey}`;
-                    const response = await fetch(geocodeUrl);
-                    const data = await response.json();
-                    
-                    if (data.status === 'OK' && data.results && data.results.length > 0) {
-                      const result = data.results[0];
-                      setFullAddress(result.formatted_address);
-                    }
-                  } catch (e) {
-                    console.error("Geocoding on pan failed:", e);
+          <InteractiveGoogleMap
+            ref={mapRef}
+            latitude={region.latitude}
+            longitude={region.longitude}
+            style={styles.mapImage}
+            onLocationChange={async (newCoords) => {
+              const newRegion = {
+                latitude: newCoords.latitude,
+                longitude: newCoords.longitude,
+                latitudeDelta: 0.012,
+                longitudeDelta: 0.012,
+              };
+              setRegion(newRegion);
+              setHasConfirmedLocation(true);
+              try {
+                const apiKey = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY || 'AIzaSyA2qxAJag8F89Q_TdtjqU_42W6JAVJ5_qg';
+                const geocodeUrl = `https://maps.googleapis.com/maps/api/geocode/json?latlng=${newCoords.latitude},${newCoords.longitude}&key=${apiKey}`;
+                const response = await fetch(geocodeUrl);
+                const data = await response.json();
+                if (data.status === 'OK' && data.results && data.results.length > 0) {
+                  const result = data.results[0];
+                  setFullAddress(result.formatted_address);
+                  let streetNumber = '';
+                  let route = '';
+                  let sublocality = '';
+                  let locality = '';
+                  result.address_components.forEach((comp: any) => {
+                    if (comp.types.includes('street_number')) streetNumber = comp.long_name;
+                    if (comp.types.includes('route')) route = comp.long_name;
+                    if (comp.types.includes('sublocality') || comp.types.includes('sublocality_level_1')) sublocality = comp.long_name;
+                    if (comp.types.includes('locality')) locality = comp.long_name;
+                  });
+                  const isRestaurantFallback = (streetNumber === '125B' || streetNumber === '125') &&
+                    (route.toLowerCase().includes('mugalivakkam') || route.toLowerCase().includes('mount-poonamallee'));
+                  if (!isRestaurantFallback) {
+                    if (premise && !building) setBuilding(premise);
+                    else if (route && !building) setBuilding(route);
+                    if ((sublocality || locality) && !landmark) setLandmark(sublocality || locality);
+                    if (streetNumber && !flat && !streetNumber.toLowerCase().includes('125b')) setFlat(streetNumber);
                   }
                 }
-              }}
-            >
-              <Marker
-                coordinate={{ latitude: region.latitude, longitude: region.longitude }}
-                title="Current Location"
-              />
-            </MapView>
-          )}
+              } catch (e) {
+                console.error("Geocoding on pan failed:", e);
+              }
+            }}
+          />
           {isLocating && (
             <View style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(255,255,255,0.85)', justifyContent: 'center', alignItems: 'center' }]}>
               <ActivityIndicator size="large" color="#ff4500" />

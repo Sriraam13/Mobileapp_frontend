@@ -39,7 +39,8 @@ export default function DeliveryCheckoutScreen() {
   const distanceKm = (selectedAddressObj?.latitude && selectedAddressObj?.longitude)
     ? getDistanceInKm(selectedAddressObj.latitude, selectedAddressObj.longitude, targetOutlet)
     : null;
-  const deliveryFee = calculateDeliveryFee(distanceKm);
+  // Delivery fee is strictly Rs. 0 (Free Delivery)
+  const deliveryFee = 0;
   
   const baseTotal = subtotal + packagingCharges + gst - discountAmount + deliveryFee;
   const finalTotal = baseTotal + (selectedTip || 0);
@@ -70,7 +71,7 @@ export default function DeliveryCheckoutScreen() {
             <View style={styles.addressInfo}>
               <Text style={styles.addressType}>{selectedDeliveryAddress ? deliveryAddressType : 'Home'}</Text>
               <Text style={styles.addressText} numberOfLines={1}>
-                {selectedDeliveryAddress || 'Flat 402, Maple Heights, Karaman...'}
+                {selectedDeliveryAddress || 'Tap to select delivery address'}
               </Text>
             </View>
             <TouchableOpacity onPress={() => router.push('/add-address')}>
@@ -197,7 +198,11 @@ export default function DeliveryCheckoutScreen() {
           </View>
           <View style={styles.billSplitRow}>
             <Text style={styles.billSplitLabel}>Delivery Fee</Text>
-            <Text style={styles.billSplitValue}>Rs. {deliveryFee.toFixed(2)}</Text>
+            {deliveryFee === 0 ? (
+              <Text style={[styles.billSplitValue, { color: '#00a01d', fontWeight: '700' }]}>FREE (Rs. 0)</Text>
+            ) : (
+              <Text style={styles.billSplitValue}>Rs. {deliveryFee.toFixed(2)}</Text>
+            )}
           </View>
           <View style={styles.billSplitRow}>
             <Text style={styles.billSplitLabel}>Packaging Charges</Text>
@@ -262,6 +267,8 @@ export default function DeliveryCheckoutScreen() {
                 tipAmount: selectedTip || 0,
                 instructions: instruction,
                 deliveryFee: deliveryFee.toString(),
+                addressId: selectedAddressObj?.id ? String(selectedAddressObj.id) : '',
+                deliveryAddress: selectedAddressObj?.full_address || selectedAddressObj?.address || selectedDeliveryAddress || '',
               }
             });
           }}

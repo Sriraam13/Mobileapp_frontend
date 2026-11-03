@@ -185,7 +185,8 @@ export default function CheckoutScreen() {
       setSubmitting(true);
       try {
         const formattedCart = cartItems.map(item => ({
-          id: Number(item.id),
+          id: Number((item as any).menu_item_id || item.id),
+          menu_item_id: (item as any).menu_item_id ? Number((item as any).menu_item_id) : undefined,
           quantity: item.quantity,
           price: item.price,
           name: item.name,

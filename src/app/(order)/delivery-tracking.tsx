@@ -1,10 +1,26 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Image, Platform, StatusBar, Dimensions, Linking, Alert, Animated, Modal, ActivityIndicator } from 'react-native';
+import {
+  View,
+  Text,
+  StyleSheet,
+  ScrollView,
+  TouchableOpacity,
+  Image,
+  Platform,
+  StatusBar,
+  Dimensions,
+  Linking,
+  Alert,
+  Modal,
+  ActivityIndicator,
+} from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Ionicons, MaterialIcons } from '@expo/vector-icons';
+import { Ionicons, MaterialIcons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { deliveryApi, orderApi } from '../../services/apiService';
 import { useRestaurantStore, useLiveOrderStore } from '../../store';
+import { purgeDeletedOrderLocally } from '../../store/sessionUtils';
+import { getFullImageUrl } from '../../constants/api';
 import {
   DELIVERY_STATUS,
   getDeliveryContextText,
@@ -14,14 +30,16 @@ import {
   isTerminalStatus,
   resolveDeliveryStatus,
 } from '../../utils/deliveryStatusUtils';
-import { formatTime } from '../../utils/dateUtils';
 import { LIGHT_MAP_STYLE } from '../../constants/mapStyle';
 import { resolveOutletLocation } from '../../utils/deliveryArea';
+import {
+  getKitchenBanner,
+  getKitchenLevel,
+  getDishProgress,
+  normalizeOrderType,
+  getUnifiedDeliveryStage,
+} from '../../utils/orderStatusMessages';
 
-const MapView = Platform.OS !== 'web' ? require('react-native-maps').default : null;
-const Marker = Platform.OS !== 'web' ? require('react-native-maps').Marker : null;
-const Polyline = Platform.OS !== 'web' ? require('react-native-maps').Polyline : null;
-const MapViewDirections = Platform.OS !== 'web' ? require('react-native-maps-directions').default : null;
 
 const { width } = Dimensions.get('window');
 
@@ -39,12 +57,10 @@ export default function DeliveryTrackingScreen() {
   }>();
 
   const { selectedOutlet } = useRestaurantStore();
-  const [detailsExpanded, setDetailsExpanded] = useState(false);
   const [currentStatus, setCurrentStatus] = useState('PENDING');
   const [deliveryStatus, setDeliveryStatus] = useState<DeliveryStatus>(null);
-  const [riderNotified, setRiderNotified] = useState(false);
-  const [riderAssignedBanner, setRiderAssignedBanner] = useState<string | null>(null);
-  const [pulseAnim] = useState(() => new Animated.Value(1));
+  const [orderDetails, setOrderDetails] = useState<any>(null);
+  const [orderSummaryExpanded, setOrderSummaryExpanded] = useState(true);
 
   // Cancellation State
   const [cancelling, setCancelling] = useState(false);
@@ -94,14 +110,16 @@ export default function DeliveryTrackingScreen() {
     vehicle_type?: string;
     vehicle_number?: string;
     profile_image?: string;
+    partner?: string;
+    delivery_partner?: string;
+    eta?: string;
+    estimated_delivery_time?: string;
+    tracking_url?: string;
+    otp?: string;
   } | null>(null);
 
-  const [riderLocation, setRiderLocation] = useState<{
-    latitude: number;
-    longitude: number;
-    speed?: number;
-    heading?: number;
-  } | null>(null);
+  const [assignmentData, setAssignmentData] = useState<any>(null);
+
 
   const [customerLocation, setCustomerLocation] = useState<{
     full_address?: string;
@@ -121,20 +139,95 @@ export default function DeliveryTrackingScreen() {
   const lastDeliveryStatusRef = useRef<string>('');
   const [networkError, setNetworkError] = useState(false);
 
-  // Pulse animation for searching state
-  useEffect(() => {
-    const pulse = Animated.loop(
-      Animated.sequence([
-        Animated.timing(pulseAnim, { toValue: 1.15, duration: 800, useNativeDriver: true }),
-        Animated.timing(pulseAnim, { toValue: 1, duration: 800, useNativeDriver: true }),
-      ])
-    );
-    pulse.start();
-    return () => pulse.stop();
-  }, []);
+  // Live Decreasing Countdown for Delivery ETA
+  const [countdownText, setCountdownText] = useState<string>('');
 
   useEffect(() => {
-    const dbId = params.dbOrderId;
+    const rawEta = assignmentData?.estimated_delivery_time || riderInfo?.estimated_delivery_time || riderInfo?.eta || '';
+    if (!rawEta) {
+      setCountdownText('');
+      return;
+    }
+
+    const match = rawEta.match(/\d+/);
+    const etaMinutes = match ? parseInt(match[0], 10) : 25;
+
+    let baseTime = Date.now();
+    if (assignmentData?.assigned_at) {
+      let isoStr = String(assignmentData.assigned_at).trim();
+      if (!isoStr.endsWith('Z') && !isoStr.includes('+')) {
+        isoStr += 'Z';
+      }
+      const parsedAssigned = new Date(isoStr).getTime();
+      if (!isNaN(parsedAssigned) && parsedAssigned > 0) {
+        const elapsedMs = Date.now() - parsedAssigned;
+        const totalDurationMs = etaMinutes * 60 * 1000;
+        if (elapsedMs >= 0 && elapsedMs < totalDurationMs) {
+          baseTime = parsedAssigned;
+        } else {
+          baseTime = Date.now();
+        }
+      }
+    }
+
+    const targetTime = baseTime + etaMinutes * 60 * 1000;
+
+    const updateCountdown = () => {
+      if (isDeliveredStatus(deliveryStatus)) {
+        setCountdownText('Delivered');
+        return;
+      }
+
+      const now = Date.now();
+      const diffMs = targetTime - now;
+
+      if (diffMs <= 0) {
+        setCountdownText('Arriving soon');
+        return;
+      }
+
+      const totalSeconds = Math.floor(diffMs / 1000);
+      const minutes = Math.floor(totalSeconds / 60);
+      const seconds = totalSeconds % 60;
+      const formattedSec = seconds < 10 ? `0${seconds}` : `${seconds}`;
+
+      setCountdownText(`${minutes}:${formattedSec} mins`);
+    };
+
+    updateCountdown();
+    const timer = setInterval(updateCountdown, 1000);
+
+    return () => clearInterval(timer);
+  }, [assignmentData?.estimated_delivery_time, assignmentData?.assigned_at, riderInfo?.estimated_delivery_time, riderInfo?.eta, deliveryStatus]);
+
+  // Partner details are shown ONLY when Admin has actually entered them.
+  const isAssignmentActive = Boolean(assignmentData?.status && !['UNASSIGNED', 'CANCELLED', 'PENDING'].includes(assignmentData.status));
+  const hasAdminAssignedPartner = Boolean(
+    isAssignmentActive && (
+      assignmentData?.delivery_partner ||
+      riderInfo?.name ||
+      riderInfo?.delivery_partner ||
+      riderInfo?.partner
+    )
+  );
+
+  // Persisted order type: this screen is delivery-only. Redirect anything else.
+  const persistedOrderType = normalizeOrderType(orderDetails?.order?.order_type);
+  useEffect(() => {
+    if (persistedOrderType !== 'UNKNOWN' && persistedOrderType !== 'DELIVERY') {
+      router.replace({
+        pathname: '/(order)/track-order',
+        params: {
+          orderId: params.orderId || String(orderDetails?.order?.id || ''),
+          dbOrderId: params.dbOrderId || String(orderDetails?.order?.id || ''),
+          orderType: persistedOrderType === 'TAKEAWAY' ? 'Take Away' : 'Dine In',
+        },
+      } as any);
+    }
+  }, [persistedOrderType]);
+
+  useEffect(() => {
+    const dbId = params.dbOrderId || (params.orderId ? params.orderId.replace(/\D/g, '') : '');
     if (!dbId) return;
 
     let interval: ReturnType<typeof setInterval>;
@@ -161,12 +254,12 @@ export default function DeliveryTrackingScreen() {
           if (trackingData.rider) {
             setRiderInfo(trackingData.rider);
           }
-          if (trackingData.rider_location?.latitude) {
-            setRiderLocation({
-              latitude: Number(trackingData.rider_location.latitude),
-              longitude: Number(trackingData.rider_location.longitude),
-              speed: trackingData.rider_location.speed,
-              heading: trackingData.rider_location.heading,
+          if (trackingData.assignment) {
+            setAssignmentData({
+              ...trackingData.assignment,
+              delivery_partner: trackingData.assignment.delivery_partner || trackingData.delivery_partner || trackingData.rider?.delivery_partner,
+              estimated_delivery_time: trackingData.assignment.estimated_delivery_time || trackingData.estimated_delivery_time || trackingData.rider?.estimated_delivery_time,
+              otp: trackingData.otp || trackingData.assignment.otp || trackingData.rider?.otp,
             });
           }
           if (trackingData.delivery_address) {
@@ -204,13 +297,16 @@ export default function DeliveryTrackingScreen() {
           }
         }
 
-        if (orderData?.order) {
-          const s = orderData.order.status ? orderData.order.status.toUpperCase() : 'PENDING';
-          setCurrentStatus(s);
+        if (orderData) {
+          setOrderDetails(orderData);
+          if (orderData.order?.status) {
+            const s = orderData.order.status.toUpperCase();
+            setCurrentStatus(s);
+          }
         }
 
-        // Determine delivery status from either response
-        const rawDS = orderData?.order?.delivery_status;
+        // Determine delivery status from orderData or trackingData
+        const rawDS = orderData?.order?.delivery_status || trackingData?.delivery_status;
         if (rawDS) {
           const resolvedDS = resolveDeliveryStatus(lastDeliveryStatusRef.current, rawDS);
           lastDeliveryStatusRef.current = resolvedDS;
@@ -235,14 +331,17 @@ export default function DeliveryTrackingScreen() {
           }
         }
       } catch (err: any) {
-        console.warn('Tracking poll status:', err?.message || err);
-        if (err?.message?.includes("404") || err?.message?.includes("not found")) {
+        const msg = String(err?.message || err || '').toLowerCase();
+        const isNotFound = err?.status === 404 || msg.includes('404') || msg.includes('not found');
+        if (isNotFound) {
           if (interval) clearInterval(interval);
-          useLiveOrderStore.getState().clearLiveOrder();
-          Alert.alert("Order Not Found", "Your order could not be found on the server.", [
+          await purgeDeletedOrderLocally(dbId || params.orderId || '');
+          Alert.alert("Order Not Found", "This delivery order is no longer available.", [
             { text: "OK", onPress: () => router.replace('/(main)/home') }
           ]);
+          return;
         } else {
+          console.warn('Tracking poll status:', err?.message || err);
           setNetworkError(true);
         }
       } finally {
@@ -253,395 +352,483 @@ export default function DeliveryTrackingScreen() {
     fetchTracking();
     interval = setInterval(fetchTracking, 4000);
     return () => clearInterval(interval);
-  }, [params.dbOrderId, selectedOutlet]);
+  }, [params.dbOrderId, params.orderId, selectedOutlet]);
 
-  const orderIdText = params.orderId || 'ORD-123456';
-
-  const items = (() => {
+  // Items resolution
+  const displayItems = (() => {
+    if (orderDetails?.items && Array.isArray(orderDetails.items) && orderDetails.items.length > 0) {
+      return orderDetails.items;
+    }
     try {
       if (params.cart && params.cart !== '[object Object]') {
         const parsed = JSON.parse(params.cart);
-        return Array.isArray(parsed) ? parsed : [];
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
       }
     } catch (e) { }
     return [];
   })();
 
-  const subtotal = items.reduce((acc: number, item: any) => acc + (Number(item.price) * (item.quantity || 1)), 0);
+  const computedItemsSubtotal = displayItems.reduce((acc: number, it: any) => acc + (Number(it.price || 0) * Number(it.quantity || it.qty || 1)), 0);
+  const packagingFeeVal = Number(orderDetails?.order?.packaging_fee || 0);
+  const gstAmtVal = Number(orderDetails?.order?.gst_amount || 0);
+  const discountAmtVal = Number(orderDetails?.order?.discount_amount || 0);
+  const calculatedGrandTotal = Math.max(0, computedItemsSubtotal + packagingFeeVal + gstAmtVal - discountAmtVal);
+  const rawDbTotal = Number(orderDetails?.order?.total_amount || params.totalAmount || 0);
+  const rawDbDelivFee = Number(orderDetails?.order?.delivery_fee || 0);
+  const safeDbTotal = Math.max(0, rawDbTotal - rawDbDelivFee);
 
-  // Determine current step index for order progress
-  // 0: Order Confirmed, 1: Preparing, 2: Ready to Pickup, 3: Out for Delivery, 4: Delivered
-  const activeStep = getDeliveryProgressStep(currentStatus, deliveryStatus);
+  const totalAmountVal = (computedItemsSubtotal > 0)
+    ? calculatedGrandTotal
+    : (safeDbTotal > 0 ? safeDbTotal : calculatedGrandTotal);
 
-  const progressSteps = [
-    { label: 'Order\nConfirmed', icon: 'checkmark-circle' },
-    { label: 'Preparing', icon: 'restaurant' },
-    { label: 'Ready to\nPickup', icon: 'fast-food' },
-    { label: 'Out for\nDelivery', icon: 'bicycle' },
-    { label: 'Delivered', icon: 'home' },
+  const rawIdDigits = String(orderDetails?.order?.id || params.dbOrderId || params.orderId || '').replace(/\D/g, '');
+  const displayOrderNumber = rawIdDigits ? `DU-${rawIdDigits}` : 'DU';
+
+  // Single unified stage calculation based on KOT kitchen status and delivery status
+  const unifiedStage = getUnifiedDeliveryStage(currentStatus, deliveryStatus, displayItems);
+  const stepIndex = unifiedStage.stepIndex;
+  const isConfirmedCard = stepIndex < 3;
+  const topStatusText = unifiedStage.statusText;
+
+  // Delivery Partner Information (only real, Admin-entered values; nothing fabricated)
+  const partnerName = assignmentData?.delivery_partner || riderInfo?.delivery_partner || riderInfo?.partner || '';
+  const etaVal = assignmentData?.estimated_delivery_time || riderInfo?.estimated_delivery_time || riderInfo?.eta || '';
+  const otpVal = assignmentData?.otp || riderInfo?.otp || (orderDetails?.order as any)?.delivery_otp || '';
+  const riderPhoneVal = riderInfo?.phone
+    ? (riderInfo.phone.startsWith('+91') ? riderInfo.phone : `+91 ${riderInfo.phone}`)
+    : null;
+  const trackingUrl = assignmentData?.tracking_url || riderInfo?.tracking_url || (assignmentData as any)?.tracking_url || '';
+  const effectiveTrackingUrl = trackingUrl || (
+    customerLocation?.latitude && customerLocation?.longitude
+      ? `https://www.google.com/maps/dir/?api=1&destination=${customerLocation.latitude},${customerLocation.longitude}`
+      : ''
+  );
+  const assignmentStatusVal = assignmentData?.status
+    ? String(assignmentData.status).replace(/_/g, ' ').toLowerCase().replace(/^\w|\s\w/g, (c: string) => c.toUpperCase())
+    : '';
+
+  // Single Unified 4-Step Stepper (Order Confirmed -> Cooking/Preparing -> Out for Delivery -> Delivered)
+  const unifiedSteps = [
+    { label: 'Order\nConfirmed', icon: 'checkmark', type: 'ion' },
+    { label: 'Cooking', icon: 'flame', type: 'ion' },
+    { label: 'Out for\nDelivery', icon: 'moped', type: 'mc' },
+    { label: 'Delivered', icon: 'home-outline', type: 'ion' },
   ];
 
-  const isCancelled = (currentStatus || '').toUpperCase() === 'CANCELLED' || deliveryStatus === DELIVERY_STATUS.CANCELLED;
-  const canCancel = !isCancelled && activeStep === 0 && ['PENDING', 'CONFIRMED'].includes((currentStatus || '').toUpperCase());
-
-  const isSearchingRider = !riderInfo && (!deliveryStatus || deliveryStatus === DELIVERY_STATUS.RIDER_SEARCHING);
-  const isOutForDelivery = isLiveTrackingStatus(deliveryStatus);
-  const isBeforePickup = Boolean(deliveryStatus && !isOutForDelivery && !isTerminalStatus(deliveryStatus));
-
-  const statusMsg = {
-    title: isSearchingRider
-      ? 'Finding your delivery partner...'
-      : getDeliveryContextText(deliveryStatus),
-    sub: isSearchingRider ? 'Your order is confirmed and being prepared' : 'Live tracking'
-  };
-
-
-  const activeRestaurant = restaurantLocation?.latitude && restaurantLocation?.longitude
-    ? restaurantLocation
-    : resolveOutletLocation(selectedOutlet);
-
-  const mapCenterLat = riderLocation?.latitude ?? customerLocation?.latitude ?? activeRestaurant.latitude;
-  const mapCenterLng = riderLocation?.longitude ?? customerLocation?.longitude ?? activeRestaurant.longitude;
-  const hasCompleteMapData = Boolean(customerLocation?.latitude != null && customerLocation?.longitude != null && activeRestaurant.latitude != null && activeRestaurant.longitude != null);
+  const statusLevel = stepIndex >= 3 ? 5 : getKitchenLevel(currentStatus);
+  const banner = { title: unifiedStage.bannerTitle, sub: unifiedStage.bannerSub };
 
   const handleCallRider = () => {
-    if (riderInfo?.phone) {
-      Linking.openURL(`tel:${riderInfo.phone}`);
-    } else {
-      Alert.alert('Delivery Partner', 'Your delivery partner will be assigned shortly.');
+    if (riderPhoneVal) {
+      Linking.openURL(`tel:${riderPhoneVal}`);
     }
   };
 
+  const handleTrackOnPartnerApp = () => {
+    const targetUrl = effectiveTrackingUrl || trackingUrl;
+    if (targetUrl) {
+      Linking.openURL(targetUrl);
+    }
+  };
+
+  const isCancelled = (currentStatus || '').toUpperCase() === 'CANCELLED' || deliveryStatus === DELIVERY_STATUS.CANCELLED;
+  const canCancel = !isCancelled && stepIndex <= 1 && ['PENDING', 'CONFIRMED'].includes((currentStatus || '').toUpperCase());
+
   return (
-    <SafeAreaView style={styles.safeArea}>
-      <StatusBar barStyle="dark-content" backgroundColor="#fff" />
+    <SafeAreaView style={styles.pixelContainer}>
+      <StatusBar barStyle="dark-content" backgroundColor="#ffffff" />
 
-      {/* Header */}
-      <View style={styles.header}>
-        <View style={styles.headerLeft}>
-          <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
-            <Ionicons name="chevron-back" size={24} color="#000" />
-          </TouchableOpacity>
-          <Text style={styles.headerTitle}>{isBeforePickup ? 'Order Tracking' : 'Live Tracking'}</Text>
+      {/* Top Header */}
+      <View style={[styles.pixelHeader, { paddingTop: insets.top + 4 }]}>
+        <TouchableOpacity onPress={() => router.back()} style={styles.pixelBackBtn} activeOpacity={0.7}>
+          <Ionicons name="arrow-back" size={24} color="#111827" />
+        </TouchableOpacity>
+        <View style={styles.pixelHeaderTitleBlock}>
+          <Text style={styles.headerOrderIdRed}>#{displayOrderNumber}</Text>
+          <Text style={styles.pixelHeaderTitle}>Order Status</Text>
         </View>
-        <View style={styles.liveBadge}>
-          <Animated.View style={[styles.liveDot, { transform: [{ scale: pulseAnim }] }]} />
-          <Text style={styles.liveText}>{isBeforePickup ? 'STATUS' : 'LIVE'}</Text>
-        </View>
-      </View>
-
-      {riderAssignedBanner && (
-        <View style={{ backgroundColor: '#e8f5e9', padding: 12, marginHorizontal: 16, marginTop: 12, borderRadius: 8, flexDirection: 'row', alignItems: 'center' }}>
-          <Ionicons name="bicycle" size={24} color="#00a01d" style={{ marginRight: 8 }} />
-          <Text style={{ flex: 1, color: '#00a01d', fontWeight: 'bold' }}>{riderAssignedBanner}</Text>
-        </View>
-      )}
-
-      <ScrollView style={styles.container} contentContainerStyle={{ paddingBottom: 120 }} showsVerticalScrollIndicator={false}>
-
-        {/* Map Section */}
-        <View style={styles.mapContainer}>
-          {Platform.OS !== 'web' && MapView && !isTerminalStatus(deliveryStatus) && hasCompleteMapData ? (
-            <MapView
-              style={StyleSheet.absoluteFill}
-              userInterfaceStyle="light"
-              customMapStyle={LIGHT_MAP_STYLE}
-              region={{
-                latitude: mapCenterLat,
-                longitude: mapCenterLng,
-                latitudeDelta: 0.03,
-                longitudeDelta: 0.03,
-              }}
-            >
-              {/* Restaurant Marker */}
-              {activeRestaurant.latitude != null && activeRestaurant.longitude != null && (
-                <Marker
-                  coordinate={{ latitude: activeRestaurant.latitude, longitude: activeRestaurant.longitude }}
-                  title={activeRestaurant.name || 'Restaurant'}
-                >
-                  <View style={styles.restaurantMarker}>
-                    <Ionicons name="restaurant" size={14} color="#ff3400" />
-                  </View>
-                </Marker>
-              )}
-
-              {/* Rider Marker */}
-              {riderLocation && (
-                <Marker
-                  coordinate={{ latitude: riderLocation.latitude, longitude: riderLocation.longitude }}
-                  title={riderInfo?.name || 'Delivery Partner'}
-                >
-                  <View style={[styles.restaurantMarker, { backgroundColor: '#333' }]}>
-                    <MaterialIcons 
-                      name={riderInfo?.vehicle_type?.toLowerCase() === 'car' ? 'directions-car' : 'motorcycle'} 
-                      size={18} 
-                      color="#fff" 
-                    />
-                  </View>
-                </Marker>
-              )}
-
-              {/* Customer Destination */}
-              {customerLocation?.latitude && customerLocation?.longitude && (
-                <Marker
-                  coordinate={{ latitude: customerLocation.latitude, longitude: customerLocation.longitude }}
-                  title="Your Location"
-                >
-                  <View style={styles.homeMarker}>
-                    <Ionicons name="home" size={16} color="#00a01d" />
-                  </View>
-                </Marker>
-              )}
-
-              {/* Route polyline when we have both rider and customer */}
-              {MapViewDirections && riderLocation && customerLocation?.latitude && process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY ? (
-                <MapViewDirections
-                  origin={{ latitude: riderLocation.latitude, longitude: riderLocation.longitude }}
-                  destination={{ latitude: customerLocation.latitude!, longitude: customerLocation.longitude! }}
-                  apikey={process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY}
-                  strokeWidth={4}
-                  strokeColor="#ff3400"
-                />
-              ) : Polyline && riderLocation && customerLocation?.latitude && (
-                <Polyline
-                  coordinates={[
-                    { latitude: riderLocation.latitude, longitude: riderLocation.longitude },
-                    { latitude: customerLocation.latitude!, longitude: customerLocation.longitude! },
-                  ]}
-                  strokeColor="#ff3400"
-                  strokeWidth={3}
-                  lineDashPattern={[8, 4]}
-                />
-              )}
-            </MapView>
-          ) : (
-            <View style={[styles.mapImage, { backgroundColor: '#f5f5f5', justifyContent: 'center', alignItems: 'center' }]}>
-              {!isTerminalStatus(deliveryStatus) && hasCompleteMapData ? (
-                riderLocation || hasCompleteMapData ? (
-                  <Image
-                    source={{ uri: `https://maps.googleapis.com/maps/api/staticmap?center=${mapCenterLat},${mapCenterLng}&zoom=14&size=600x400&markers=color:red%7Clabel:R%7C${activeRestaurant.latitude},${activeRestaurant.longitude}&markers=color:green%7Clabel:H%7C${customerLocation?.latitude},${customerLocation?.longitude}${riderLocation ? `&markers=color:blue%7Clabel:D%7C${riderLocation.latitude},${riderLocation.longitude}` : ''}&path=color:0xff3400ff%7Cweight:3%7C${activeRestaurant.latitude},${activeRestaurant.longitude}%7C${customerLocation?.latitude},${customerLocation?.longitude}&key=${process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY || ''}` }}
-                    style={styles.mapImage}
-                    resizeMode="cover"
-                  />
-                ) : (
-                  <Text style={{ color: '#666', textAlign: 'center', padding: 20 }}>Waiting for rider location...</Text>
-                )
-              ) : (
-                <View style={{ alignItems: 'center', padding: 20 }}>
-                  <Ionicons name="restaurant" size={48} color="#ccc" />
-                  <Text style={{ marginTop: 12, color: '#888', textAlign: 'center' }}>Map will be available once the rider picks up your order.</Text>
-                </View>
-              )}
-            </View>
-          )}
-
-          {/* Rider Card floating over map */}
-          <View style={styles.riderCard}>
-            <View style={styles.riderRow}>
-              <View style={styles.riderAvatarBox}>
-                {isSearchingRider ? (
-                  <Animated.View style={{ transform: [{ scale: pulseAnim }] }}>
-                    <Ionicons name="search" size={22} color="#ff3400" />
-                  </Animated.View>
-                ) : (
-                  <Ionicons name="person" size={24} color="#555" />
-                )}
-              </View>
-              <View style={styles.riderInfo}>
-                {isSearchingRider ? (
-                  <>
-                    <Text style={styles.riderName}>Finding your rider...</Text>
-                    <Text style={styles.riderRole}>Assigning the best delivery partner</Text>
-                  </>
-                ) : (
-                  <>
-                    <Text style={styles.riderName}>{riderInfo?.name || 'Delivery Partner'}</Text>
-                    <Text style={styles.riderRole}>{riderInfo?.vehicle_type ? `${riderInfo.vehicle_type} • ${riderInfo.vehicle_number || ''}` : 'Your delivery partner'}</Text>
-                    {riderInfo?.rating && riderInfo.rating > 0 ? (
-                      <View style={styles.ratingBadge}>
-                        <Ionicons name="star" size={10} color="#fff" />
-                        <Text style={styles.ratingText}>{riderInfo.rating.toFixed(1)}</Text>
-                      </View>
-                    ) : null}
-                  </>
-                )}
-      </View>
-      {!isSearchingRider && (
-        <View style={styles.riderActions}>
-          <TouchableOpacity style={styles.actionBtn} onPress={handleCallRider}>
-            <Ionicons name="call" size={18} color="#ff3400" />
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.actionBtn} onPress={() => Alert.alert('Chat', 'Live chat coming soon!')}>
-            <Ionicons name="chatbubble-ellipses" size={18} color="#ff3400" />
-          </TouchableOpacity>
-        </View>
-      )}
-    </View>
-          </View >
-        </View >
-
-    {/* Content below map */ }
-    < View style = { styles.detailsContainer } >
-
-      {/* Order ID + ETA row */}
-      <View style={styles.orderInfoRow}>
-        <View style={{ flex: 1, paddingRight: 8 }}>
-          <Text style={styles.infoLabel}>Order ID</Text>
-          <Text style={styles.orderIdVal} numberOfLines={1} adjustsFontSizeToFit>{orderIdText}</Text>
-        </View>
-        <View style={{ flex: 1, alignItems: 'flex-end', paddingLeft: 8 }}>
-          <Text style={styles.infoLabel}>Delivery Status</Text>
-          <Text style={styles.etaVal} numberOfLines={2} adjustsFontSizeToFit>
-            {deliveryStatus === DELIVERY_STATUS.DELIVERED ? 'Delivered' : getDeliveryContextText(deliveryStatus)}
-          </Text>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+          <View style={[styles.pixelTopStatusPill, isConfirmedCard && { backgroundColor: '#FFEDD5' }]}>
+            <MaterialCommunityIcons
+              name="moped"
+              size={16}
+              color={isConfirmedCard ? '#EA580C' : '#16A34A'}
+            />
+            <Text style={[styles.pixelTopStatusText, isConfirmedCard && { color: '#EA580C' }]}>
+              {topStatusText}
+            </Text>
+          </View>
         </View>
       </View>
 
-    <View style={styles.divider} />
-
-  {/* Order Progress */ }
-          <Text style={styles.sectionTitle}>Order Progress</Text>
-          <View style={styles.progressTracker}>
-            {progressSteps.map((step, idx) => {
-              const isCompleted = activeStep > idx;
-              const isActive = activeStep === idx;
-
-              let circleStyle: any = styles.stepPending;
-              if (isCompleted) circleStyle = styles.stepCompleted;
-              else if (isActive) circleStyle = styles.stepActive;
-
-              let textStyle = styles.stepTextPending;
-              if (isCompleted) textStyle = styles.stepTextCompleted;
-              else if (isActive) textStyle = styles.stepTextActive;
-
-              const lineStyle = isCompleted ? styles.lineCompleted : isActive ? styles.lineActive : styles.linePending;
-
-              // Try to find the step in the timeline for real timestamps
-              let stepTimeStr = '...';
-              if (timeline && timeline.length > 0) {
-                let matchingStatus = '';
-                if (idx === 0) matchingStatus = 'PENDING';
-                else if (idx === 1) matchingStatus = 'PREPARING';
-                else if (idx === 2) matchingStatus = 'READY';
-                else if (idx === 3) matchingStatus = 'RIDER_ASSIGNED';
-                else if (idx === 4) matchingStatus = 'PICKED_UP';
-
-                // Find the *first* occurrence of this status to show when it began
-                const event = timeline.find((t: any) => t.status === matchingStatus);
-                if (event && event.timestamp) {
-                  stepTimeStr = formatTime(event.timestamp);
-                }
-              }
-
-              const timeColor = isCompleted ? '#00a01d' : isActive ? '#ff3400' : '#ccc';
-
-              return (
-                <React.Fragment key={idx}>
-                  <View style={styles.stepItem}>
-                    <View style={[styles.stepCircle, circleStyle]}>
-                      {isCompleted && <Ionicons name="checkmark" size={12} color="#fff" />}
-                      {isActive && <View style={styles.innerDot} />}
+      <ScrollView
+        contentContainerStyle={{ paddingBottom: 110, paddingHorizontal: 16 }}
+        showsVerticalScrollIndicator={false}
+      >
+        <View style={{ paddingTop: 8 }}>
+          {/* Single Unified Stepper (Based on KOT Kitchen + Delivery) */}
+          <View style={styles.pixelStepperBox}>
+            <View style={styles.pixelStepperTrack}>
+              <View style={[styles.pixelStepperLine, { left: '12%', right: '62%', backgroundColor: stepIndex >= 2 ? '#00A01D' : '#E5E7EB' }]} />
+              <View style={[styles.pixelStepperLine, { left: '38%', right: '38%', backgroundColor: stepIndex > 3 ? '#00A01D' : stepIndex === 3 ? '#FF3400' : '#E5E7EB' }]} />
+              <View style={[styles.pixelStepperLine, { left: '62%', right: '12%', backgroundColor: stepIndex >= 4 ? '#00A01D' : '#E5E7EB' }]} />
+              {unifiedSteps.map((st, idx) => {
+                const sNum = idx + 1;
+                const done = stepIndex > sNum || (sNum === 4 && stepIndex >= 4) || (sNum === 1 && stepIndex >= 1);
+                const active = stepIndex === sNum && !done;
+                const bg = done ? '#00A01D' : active ? '#FF3400' : '#FFFFFF';
+                const border = done ? '#00A01D' : active ? '#FF3400' : '#D1D5DB';
+                const fg = done || active ? '#FFFFFF' : '#9CA3AF';
+                const tc = done ? '#00A01D' : active ? '#FF3400' : '#6B7280';
+                return (
+                  <View key={st.label} style={styles.pixelStepColumn}>
+                    <View style={[styles.pixelStepCircle, { backgroundColor: bg, borderColor: border }]}>
+                      {st.type === 'mc' ? (
+                        <MaterialCommunityIcons name={st.icon as any} size={18} color={fg} />
+                      ) : (
+                        <Ionicons name={st.icon as any} size={16} color={fg} />
+                      )}
                     </View>
-                    <Text style={[styles.stepText, textStyle]}>{step.label}</Text>
-                    <Text style={[styles.stepTime, { color: timeColor }]}>{isCompleted ? stepTimeStr : isActive ? 'Now' : '...'}</Text>
+                    <Text style={[styles.pixelStepLabel, { color: tc, fontWeight: done || active ? '700' : '600' }]}>{st.label}</Text>
                   </View>
-                  {idx < progressSteps.length - 1 && (
-                    <View style={[styles.stepLine, lineStyle]} />
+                );
+              })}
+            </View>
+          </View>
+
+          {/* Context-appropriate preparation message */}
+          <View style={styles.imageChefCard}>
+            <View style={styles.imageChefIconBox}>
+              <Ionicons name={isCancelled ? 'close-circle' : 'flame'} size={24} color="#FF3400" />
+            </View>
+            <View style={{ flex: 1, marginLeft: 12 }}>
+              <Text style={styles.imageChefTitle}>{banner.title}</Text>
+              <Text style={styles.imageChefSub}>{banner.sub}</Text>
+            </View>
+          </View>
+
+          {/* Dish preparation status (from persisted item statuses) */}
+          {displayItems.length > 0 && (
+            <>
+              <Text style={styles.imageDishSectionTitle}>Dish preparation status</Text>
+              <View style={styles.imageDishList}>
+                {displayItems.map((item: any, idx: number) => {
+                  const prog = getDishProgress(item, statusLevel, currentStatus);
+                  const imgUri = getFullImageUrl(item.image_url || item.image, item.name);
+                  return (
+                    <View key={item.id || idx} style={styles.imageDishCard}>
+                      {imgUri ? (
+                        <Image source={{ uri: imgUri }} style={styles.imageDishImg} />
+                      ) : (
+                        <View style={[styles.imageDishImg, { backgroundColor: '#F3F4F6' }]} />
+                      )}
+                      <View style={{ flex: 1, marginLeft: 12 }}>
+                        <View style={styles.imageDishTopRow}>
+                          <Text style={[styles.imageDishName, { flex: 1, marginRight: 8 }]} numberOfLines={2}>
+                            {item.name} (x{item.quantity || item.qty || 1})
+                          </Text>
+                          <Text style={[styles.imageDishTag, { color: prog.color }]}>{prog.label}</Text>
+                        </View>
+                        <View style={styles.imageProgressBarBg}>
+                          <View style={[styles.imageProgressBarFill, { width: prog.pct as any, backgroundColor: prog.color }]} />
+                        </View>
+                        {!!prog.sub && <Text style={styles.imageDishSub}>{prog.sub}</Text>}
+                      </View>
+                    </View>
+                  );
+                })}
+              </View>
+            </>
+          )}
+
+          {/* Delivery partner (same screen, delivery orders only) */}
+          {!isCancelled && (
+            <View style={styles.pixelPartnerCard}>
+              <View style={styles.pixelPartnerTopRow}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.pixelPartnerLabel}>Delivery Partner</Text>
+                  {hasAdminAssignedPartner && !!partnerName && (
+                    <Text style={styles.pixelPartnerName}>{partnerName}</Text>
                   )}
-                </React.Fragment>
-              );
-            })}
-          </View>
+                </View>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                  <View style={[styles.pixelAssignedPill, !hasAdminAssignedPartner && { backgroundColor: '#FEF3C7' }]}>
+                    <Text style={[styles.pixelAssignedText, !hasAdminAssignedPartner && { color: '#D97706' }]}>
+                      {hasAdminAssignedPartner ? 'Assigned' : 'Pending'}
+                    </Text>
+                  </View>
+                </View>
+              </View>
 
-          <View style={styles.divider} />
-
-  {/* Current Status Banner */ }
-  <View style={styles.statusBanner}>
-    <View style={[styles.statusIconCircle, { backgroundColor: isSearchingRider ? '#fff5f0' : '#e6f7ec' }]}>
-      <Ionicons
-        name={isSearchingRider ? 'search' : isOutForDelivery ? 'bicycle' : 'restaurant'}
-        size={20}
-        color={isSearchingRider ? '#ff3400' : '#00a01d'}
-      />
-    </View>
-    <View style={{ flex: 1, marginLeft: 12 }}>
-      <Text style={styles.statusBannerTitle}>{statusMsg.title}</Text>
-      <Text style={styles.statusBannerSub}>{statusMsg.sub}</Text>
-    </View>
-  </View>
-
-  { networkError && <Text style={{ color: '#777', fontSize: 12, marginTop: 8 }}>Retrying...</Text> }
-
-  <View style={styles.divider} />
-
-  {/* Order Details Accordion */ }
-  <TouchableOpacity
-    style={styles.accordionHeader}
-    onPress={() => setDetailsExpanded(!detailsExpanded)}
-    activeOpacity={0.7}
-  >
-    <Text style={styles.sectionTitle}>Order Details</Text>
-    <Ionicons name={detailsExpanded ? 'chevron-up' : 'chevron-down'} size={20} color="#888" />
-  </TouchableOpacity>
-
-  {
-    detailsExpanded && (
-      <View style={styles.accordionContent}>
-        {items.map((item: any, idx: number) => (
-          <View key={idx} style={styles.itemRow}>
-            <Text style={styles.itemName}>{item.name || item.itemName} x{item.quantity || 1}</Text>
-            <Text style={styles.itemPrice}>Rs. {Number(item.price) * (item.quantity || 1)}</Text>
-          </View>
-        ))}
-        <View style={styles.subtotalRow}>
-          <Text style={styles.subtotalLabel}>Total</Text>
-          <Text style={styles.subtotalValue}>Rs. {subtotal || params.totalAmount || '0'}</Text>
-        </View>
-      </View>
-    )
-  }
-
-          {/* Cancellation Card for Delivery (Before Kitchen Prepares) */}
-          {canCancel && (
-            <View style={styles.cancelCard}>
-              <View style={{ flex: 1, marginRight: 12 }}>
-                <Text style={styles.cancelCardTitle}>Need to cancel?</Text>
-                <Text style={styles.cancelCardSub}>
-                  Cancellation is available before the kitchen starts preparing your food.
+              {!hasAdminAssignedPartner ? (
+                <Text style={{ fontSize: 13, color: '#6B7280', paddingVertical: 8 }}>
+                  Delivery partner details will be updated shortly.
                 </Text>
-              </View>
-              <TouchableOpacity
-                style={styles.cancelDeliveryBtn}
-                onPress={handleOpenCancelModal}
-                disabled={cancelling}
-                activeOpacity={0.8}
-              >
-                <Ionicons name="close-circle-outline" size={16} color="#DC2626" />
-                <Text style={styles.cancelDeliveryBtnText}>Cancel Order</Text>
-              </TouchableOpacity>
+              ) : (
+                <>
+                  {!!riderInfo?.name && (
+                    <View style={styles.pixelDetailRow}>
+                      <View style={styles.pixelRowLeft}>
+                        <Ionicons name="person" size={18} color="#6B7280" style={styles.pixelRowIcon} />
+                        <Text style={styles.pixelRowLabel}>Rider Name</Text>
+                      </View>
+                      <Text style={styles.pixelRowValue} numberOfLines={1}>{riderInfo.name}</Text>
+                    </View>
+                  )}
+                  {!!riderPhoneVal && (
+                    <View style={styles.pixelDetailRow}>
+                      <View style={styles.pixelRowLeft}>
+                        <Ionicons name="call" size={18} color="#6B7280" style={styles.pixelRowIcon} />
+                        <Text style={styles.pixelRowLabel}>Rider Phone</Text>
+                      </View>
+                      <Text style={[styles.pixelRowValue, { fontWeight: '600', color: '#111827' }]}>{riderPhoneVal}</Text>
+                      <TouchableOpacity style={styles.pixelGreenCallBtn} onPress={handleCallRider} activeOpacity={0.8}>
+                        <Ionicons name="call" size={16} color="#FFFFFF" />
+                      </TouchableOpacity>
+                    </View>
+                  )}
+                  {!!riderInfo?.vehicle_type && (
+                    <View style={styles.pixelDetailRow}>
+                      <View style={styles.pixelRowLeft}>
+                        <MaterialIcons name="two-wheeler" size={18} color="#6B7280" style={styles.pixelRowIcon} />
+                        <Text style={styles.pixelRowLabel}>Vehicle Type</Text>
+                      </View>
+                      <Text style={styles.pixelRowValue}>{riderInfo.vehicle_type}</Text>
+                    </View>
+                  )}
+                  {!!riderInfo?.vehicle_number && (
+                    <View style={styles.pixelDetailRow}>
+                      <View style={styles.pixelRowLeft}>
+                        <MaterialCommunityIcons name="card-bulleted-outline" size={18} color="#6B7280" style={styles.pixelRowIcon} />
+                        <Text style={styles.pixelRowLabel}>Vehicle Number</Text>
+                      </View>
+                      <Text style={styles.pixelRowValue}>{riderInfo.vehicle_number}</Text>
+                    </View>
+                  )}
+                  {!!assignmentStatusVal && (
+                    <View style={styles.pixelDetailRow}>
+                      <View style={styles.pixelRowLeft}>
+                        <Ionicons name="information-circle-outline" size={18} color="#6B7280" style={styles.pixelRowIcon} />
+                        <Text style={styles.pixelRowLabel}>Assignment Status</Text>
+                      </View>
+                      <Text style={styles.pixelRowValue}>{assignmentStatusVal}</Text>
+                    </View>
+                  )}
+                  {!!otpVal && (
+                    <View style={styles.pixelDetailRow}>
+                      <View style={styles.pixelRowLeft}>
+                        <Ionicons name="key-outline" size={18} color="#FF6600" style={styles.pixelRowIcon} />
+                        <Text style={styles.pixelRowLabel}>Delivery OTP</Text>
+                      </View>
+                      <View style={styles.otpBadgeContainer}>
+                        <Text style={styles.otpBadgeText}>{otpVal}</Text>
+                      </View>
+                    </View>
+                  )}
+                  {!!(countdownText || etaVal) && (
+                    <View style={styles.pixelDetailRow}>
+                      <View style={styles.pixelRowLeft}>
+                        <Ionicons name="time-outline" size={18} color="#059669" style={styles.pixelRowIcon} />
+                        <Text style={styles.pixelRowLabel}>Estimated Arrival (ETA)</Text>
+                      </View>
+                      <View style={styles.etaCountdownBadge}>
+                        <View style={styles.etaGreenPulseDot} />
+                        <Text style={styles.etaCountdownText}>{countdownText || etaVal}</Text>
+                      </View>
+                    </View>
+                  )}
+                  <View style={[styles.pixelDetailRow, { borderBottomWidth: 0 }]}>
+                    <View style={styles.pixelRowLeft}>
+                      <Ionicons name="navigate-outline" size={18} color="#00A01D" style={styles.pixelRowIcon} />
+                      <Text style={styles.pixelRowLabel}>Rider Live Track</Text>
+                    </View>
+                    <TouchableOpacity
+                      style={styles.pixelTrackBadge}
+                      onPress={handleTrackOnPartnerApp}
+                      activeOpacity={0.7}
+                    >
+                      <Ionicons name="location" size={13} color="#00A01D" style={{ marginRight: 4 }} />
+                      <Text style={styles.pixelTrackBadgeText}>Track Rider ↗</Text>
+                    </TouchableOpacity>
+                  </View>
+                  <TouchableOpacity 
+                    style={styles.pixelTrackPartnerAppBtn} 
+                    onPress={handleTrackOnPartnerApp} 
+                    activeOpacity={0.8}
+                  >
+                    <Ionicons name="navigate-circle" size={20} color="#00A01D" />
+                    <Text style={styles.pixelTrackPartnerAppText}>Track Rider Live Location</Text>
+                    <Ionicons name="chevron-forward" size={16} color="#00A01D" />
+                  </TouchableOpacity>
+                </>
+              )}
             </View>
           )}
 
-          {/* Cancelled Banner */}
-          {isCancelled && (
-            <View style={styles.cancelledBanner}>
-              <Ionicons name="close-circle" size={24} color="#DC2626" />
-              <View style={{ marginLeft: 12, flex: 1 }}>
-                <Text style={styles.cancelledBannerTitle}>Order Cancelled</Text>
-                <Text style={styles.cancelledBannerSub}>This delivery order has been cancelled.</Text>
+          {/* Order Summary Collapsible Card */}
+          <View style={styles.pixelSummaryCard}>
+            <TouchableOpacity
+              style={styles.pixelSummaryHeader}
+              onPress={() => setOrderSummaryExpanded(prev => !prev)}
+              activeOpacity={0.7}
+            >
+              <View style={styles.pixelSummaryTitleRow}>
+                <Text style={styles.pixelSummaryTitle}>Order Summary</Text>
+                <Text style={styles.pixelSummaryCount}> ({displayItems.length} Items)</Text>
               </View>
+              <View style={styles.pixelSummaryPriceRow}>
+                <Text style={styles.pixelSummaryPriceText}>₹{totalAmountVal.toFixed(0)}</Text>
+                <Ionicons
+                  name={orderSummaryExpanded ? 'chevron-up' : 'chevron-down'}
+                  size={18}
+                  color="#FF3400"
+                  style={{ marginLeft: 4 }}
+                />
+              </View>
+            </TouchableOpacity>
+
+            {orderSummaryExpanded && (
+              <View style={styles.pixelSummaryBody}>
+                {displayItems.map((item: any, idx: number) => {
+                  const qty = Number(item.quantity || item.qty || 1);
+                  const price = Number(item.price || 0);
+                  const imgUri = getFullImageUrl(item.image_url || item.image, item.name);
+                  return (
+                    <View key={item.id || item.menu_item_id || idx} style={styles.pixelItemRow}>
+                      {imgUri ? (
+                        <Image source={{ uri: imgUri }} style={styles.pixelItemThumb} />
+                      ) : (
+                        <View style={[styles.pixelItemThumb, { backgroundColor: '#F3F4F6' }]} />
+                      )}
+                      <View style={{ flex: 1, marginLeft: 12 }}>
+                        <Text style={styles.pixelItemName} numberOfLines={2}>{item.name}</Text>
+                        <Text style={styles.pixelItemSub}>{qty} × ₹{price.toFixed(0)}</Text>
+                      </View>
+                      <Text style={styles.pixelItemRowPrice}>₹{(price * qty).toFixed(0)}</Text>
+                    </View>
+                  );
+                })}
+
+                {/* Split up Bill Summary */}
+                {(() => {
+                  const itemsSubtotal = displayItems.reduce((acc: number, it: any) => {
+                    return acc + (Number(it.price || 0) * Number(it.quantity || it.qty || 1));
+                  }, 0);
+                  const orderObj = orderDetails?.order;
+                  const subtotalVal = Number(orderObj?.subtotal || itemsSubtotal);
+                  // Delivery fee is strictly Rs. 0 (Free Delivery)
+                  const deliveryFeeVal = 0;
+                  const taxesVal = Number(orderObj?.gst_amount || 0);
+                  const discountVal = Number(orderObj?.discount_amount || 0);
+
+                  return (
+                    <View style={styles.pixelBillSplitBox}>
+                      <View style={styles.pixelBillDivider} />
+                      <Text style={styles.pixelBillHeader}>BILL SUMMARY</Text>
+
+                      <View style={styles.pixelBillRow}>
+                        <Text style={styles.pixelBillLabel}>Item Total</Text>
+                        <Text style={styles.pixelBillValue}>₹{subtotalVal.toFixed(0)}</Text>
+                      </View>
+
+                      <View style={styles.pixelBillRow}>
+                        <Text style={styles.pixelBillLabel}>Delivery Fee</Text>
+                        {deliveryFeeVal > 0 ? (
+                          <Text style={styles.pixelBillValue}>₹{deliveryFeeVal.toFixed(0)}</Text>
+                        ) : (
+                          <Text style={styles.pixelBillValue}>
+                            <Text style={{ textDecorationLine: 'line-through', color: '#9CA3AF' }}>₹40</Text>
+                            <Text style={{ color: '#16A34A', fontWeight: '700' }}> FREE</Text>
+                          </Text>
+                        )}
+                      </View>
+
+                      {taxesVal > 0 && (
+                        <View style={styles.pixelBillRow}>
+                          <Text style={styles.pixelBillLabel}>Taxes & Restaurant Charges</Text>
+                          <Text style={styles.pixelBillValue}>₹{taxesVal.toFixed(2)}</Text>
+                        </View>
+                      )}
+
+                      {discountVal > 0 && (
+                        <View style={styles.pixelBillRow}>
+                          <Text style={[styles.pixelBillLabel, { color: '#DC2626' }]}>Coupon / Discount</Text>
+                          <Text style={[styles.pixelBillValue, { color: '#DC2626' }]}>- ₹{discountVal.toFixed(2)}</Text>
+                        </View>
+                      )}
+
+                      <View style={[styles.pixelBillRow, styles.pixelGrandTotalRow]}>
+                        <Text style={styles.pixelGrandTotalLabel}>To Pay / Paid</Text>
+                        <Text style={styles.pixelGrandTotalValue}>₹{totalAmountVal.toFixed(0)}</Text>
+                      </View>
+                    </View>
+                  );
+                })()}
+              </View>
+            )}
+          </View>
+
+          {/* Need help with your order? Card */}
+          <View style={styles.pixelHelpCard}>
+            <View style={styles.pixelHelpIconWrap}>
+              <Ionicons name="headset-outline" size={24} color="#FF3400" />
+            </View>
+            <View style={{ flex: 1, marginLeft: 12 }}>
+              <Text style={styles.pixelHelpTitle}>Need help with your order?</Text>
+              <Text style={styles.pixelHelpSub}>Our support team is here to help</Text>
+            </View>
+            {!!selectedOutlet?.phone && (
               <TouchableOpacity
-                style={styles.returnHomeBtn}
-                onPress={() => router.replace('/(main)/home')}
+                style={styles.pixelChatBtn}
+                onPress={() => Linking.openURL(`tel:${selectedOutlet.phone}`)}
                 activeOpacity={0.8}
               >
-                <Text style={styles.returnHomeBtnText}>Home</Text>
+                <Text style={styles.pixelChatBtnText}>Call</Text>
               </TouchableOpacity>
-            </View>
-          )}
-
+            )}
+          </View>
         </View>
+
+        {/* Cancellation Card for Delivery (Before Kitchen Prepares) */}
+        {canCancel && (
+          <View style={styles.cancelCard}>
+            <View style={{ flex: 1, marginRight: 12 }}>
+              <Text style={styles.cancelCardTitle}>Need to cancel?</Text>
+              <Text style={styles.cancelCardSub}>
+                Cancellation is available before the kitchen starts preparing your food.
+              </Text>
+            </View>
+            <TouchableOpacity
+              style={styles.cancelDeliveryBtn}
+              onPress={handleOpenCancelModal}
+              disabled={cancelling}
+              activeOpacity={0.8}
+            >
+              <Ionicons name="close-circle-outline" size={16} color="#DC2626" />
+              <Text style={styles.cancelDeliveryBtnText}>Cancel Order</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+
+        {/* Cancelled Banner */}
+        {isCancelled && (
+          <View style={styles.cancelledBanner}>
+            <Ionicons name="close-circle" size={24} color="#DC2626" />
+            <View style={{ marginLeft: 12, flex: 1 }}>
+              <Text style={styles.cancelledBannerTitle}>Order Cancelled</Text>
+              <Text style={styles.cancelledBannerSub}>This delivery order has been cancelled.</Text>
+            </View>
+            <TouchableOpacity
+              style={styles.returnHomeBtn}
+              onPress={() => router.replace('/(main)/home')}
+              activeOpacity={0.8}
+            >
+              <Text style={styles.returnHomeBtnText}>Home</Text>
+            </TouchableOpacity>
+          </View>
+        )}
       </ScrollView>
+
 
       {/* Cancellation Modal */}
       <Modal
@@ -692,135 +879,701 @@ export default function DeliveryTrackingScreen() {
           </View>
         </View>
       </Modal>
+
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  safeArea: { flex: 1, backgroundColor: '#fff' },
-  header: {
+  pixelContainer: {
+    flex: 1,
+    backgroundColor: '#FFFFFF',
+  },
+  pixelHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: 16,
-    paddingVertical: 12,
-    backgroundColor: '#fff',
+    paddingBottom: 8,
+    backgroundColor: '#FFFFFF',
   },
-  headerLeft: { flexDirection: 'row', alignItems: 'center' },
-  backBtn: { padding: 4, marginRight: 8 },
-  headerTitle: { fontSize: 18, fontWeight: 'bold', color: '#000' },
-  liveBadge: {
+  pixelBackBtn: {
+    padding: 6,
+    marginRight: 6,
+  },
+  pixelHeaderTitleBlock: {
+    flex: 1,
+  },
+  headerOrderIdRed: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: '#FF3400',
+  },
+  pixelHeaderTitle: {
+    fontSize: 22,
+    fontWeight: '900',
+    color: '#111827',
+  },
+  pixelTopStatusPill: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#ffebf0',
+    backgroundColor: '#DCFCE7',
     paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: 12,
+    paddingVertical: 6,
+    borderRadius: 20,
   },
-  liveDot: {
-    width: 7,
-    height: 7,
-    borderRadius: 3.5,
-    backgroundColor: '#ff3400',
-    marginRight: 5,
+  pixelTopStatusText: {
+    fontSize: 12.5,
+    fontWeight: '700',
+    color: '#16A34A',
+    marginLeft: 6,
   },
-  liveText: { fontSize: 11, fontWeight: 'bold', color: '#ff3400' },
-  container: { flex: 1 },
-  mapContainer: {
-    width: '100%',
-    height: width * 0.95,
-    position: 'relative',
-    backgroundColor: '#e8f0e8',
+  viewModeSwitcher: {
+    flexDirection: 'row',
+    marginHorizontal: 16,
+    marginBottom: 8,
+    backgroundColor: '#F3F4F6',
+    borderRadius: 10,
+    padding: 3,
   },
-  mapImage: { width: '100%', height: '100%' },
-  restaurantMarker: {
-    width: 34, height: 34, borderRadius: 17, backgroundColor: '#fff',
-    borderWidth: 2, borderColor: '#ff3400', alignItems: 'center', justifyContent: 'center',
+  viewModeTab: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 7,
+    borderRadius: 8,
   },
-  riderMarker: {
-    width: 40, height: 40, borderRadius: 20, backgroundColor: '#ff2a2a',
-    alignItems: 'center', justifyContent: 'center', borderWidth: 2.5, borderColor: '#fff',
-    shadowColor: '#ff2a2a', shadowOffset: { width: 0, height: 3 }, shadowOpacity: 0.4, shadowRadius: 6, elevation: 6,
+  viewModeTabActive: {
+    backgroundColor: '#111827',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+    elevation: 2,
   },
-  homeMarker: {
-    width: 34, height: 34, borderRadius: 17, backgroundColor: '#fff',
-    borderWidth: 2, borderColor: '#00a01d', alignItems: 'center', justifyContent: 'center',
+  viewModeTabText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#4B5563',
   },
-  riderCard: {
-    position: 'absolute',
-    bottom: 20, left: 16, right: 16,
-    backgroundColor: '#fff',
+  viewModeTabTextActive: {
+    color: '#FFFFFF',
+    fontWeight: '700',
+  },
+
+  // Image UI Specific Styles
+  imageStepperBox: {
+    backgroundColor: '#F9FAFB',
+    borderRadius: 16,
+    paddingVertical: 14,
+    paddingHorizontal: 10,
+    marginBottom: 14,
+  },
+  imageStepsRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+  },
+  imageStepItem: {
+    alignItems: 'center',
+    width: '19%',
+  },
+  imageStepCircle: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 6,
+  },
+  imageStepLabel: {
+    fontSize: 11,
+    fontWeight: '700',
+    textAlign: 'center',
+    lineHeight: 14,
+  },
+  imageChefCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1.5,
+    borderColor: '#FF4500',
     borderRadius: 18,
     padding: 16,
-    shadowColor: '#000', shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.12, shadowRadius: 12,
-    elevation: 6,
+    marginBottom: 12,
   },
-  riderRow: { flexDirection: 'row', alignItems: 'center' },
-  riderAvatarBox: {
-    width: 52, height: 52, borderRadius: 26, backgroundColor: '#f5f5f5',
-    alignItems: 'center', justifyContent: 'center', marginRight: 12,
+  imageChefIconBox: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: '#FFF0EB',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  riderInfo: { flex: 1 },
-  riderName: { fontSize: 15, fontWeight: 'bold', color: '#000', marginBottom: 2 },
-  riderRole: { fontSize: 12, color: '#888', marginBottom: 4 },
-  ratingBadge: {
-    flexDirection: 'row', alignItems: 'center', backgroundColor: '#00a01d',
-    paddingHorizontal: 7, paddingVertical: 2, borderRadius: 8, alignSelf: 'flex-start',
+  imageChefTitle: {
+    fontSize: 17,
+    fontWeight: '900',
+    color: '#111827',
   },
-  ratingText: { color: '#fff', fontSize: 10, fontWeight: 'bold', marginLeft: 3 },
-  riderActions: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  actionBtn: {
-    width: 42, height: 42, borderRadius: 21, backgroundColor: '#fff',
-    borderWidth: 1, borderColor: '#ffe6e0', alignItems: 'center', justifyContent: 'center',
-    shadowColor: '#ff3400', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.06, shadowRadius: 4, elevation: 1,
+  imageChefSub: {
+    fontSize: 13,
+    color: '#6B7280',
+    marginTop: 2,
   },
-  detailsContainer: { padding: 20 },
-  orderInfoRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  infoLabel: { fontSize: 11, color: '#888', marginBottom: 4 },
-  orderIdVal: { fontSize: 17, fontWeight: 'bold', color: '#000' },
-  etaVal: { fontSize: 17, fontWeight: 'bold', color: '#ff3400' },
-  divider: { height: 1, backgroundColor: '#f0f0f0', marginVertical: 18 },
-  sectionTitle: { fontSize: 16, fontWeight: 'bold', color: '#000', marginBottom: 16 },
-  progressTracker: {
-    flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between',
+  imagePrepBox: {
+    backgroundColor: '#1F2937',
+    borderRadius: 16,
+    padding: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 12,
   },
-  stepItem: { alignItems: 'center', width: 62 },
-  stepCircle: {
-    width: 22, height: 22, borderRadius: 11, alignItems: 'center', justifyContent: 'center', marginBottom: 6,
+  imagePrepLabel: {
+    fontSize: 12,
+    color: '#9CA3AF',
+    marginBottom: 4,
   },
-  stepCompleted: { backgroundColor: '#00a01d' },
-  stepActive: { backgroundColor: '#fff', borderWidth: 2.5, borderColor: '#ff3400' },
-  innerDot: { width: 9, height: 9, borderRadius: 4.5, backgroundColor: '#ff3400' },
-  stepPending: { backgroundColor: '#fff', borderWidth: 2, borderColor: '#ddd' },
-  stepText: { fontSize: 10, fontWeight: '700', textAlign: 'center', marginBottom: 3 },
-  stepTextCompleted: { color: '#00a01d' },
-  stepTextActive: { color: '#ff3400' },
-  stepTextPending: { color: '#ccc' },
-  stepTime: { fontSize: 9 },
-  stepLine: { flex: 1, height: 2.5, marginTop: 9, marginHorizontal: 2 },
-  lineCompleted: { backgroundColor: '#00a01d' },
-  lineActive: { backgroundColor: '#ff3400' },
-  linePending: { backgroundColor: '#e0e0e0' },
-  statusBanner: {
-    flexDirection: 'row', alignItems: 'center',
-    backgroundColor: '#f9f9f9', borderRadius: 14, padding: 16,
+  imagePrepTime: {
+    fontSize: 20,
+    fontWeight: '900',
+    color: '#FFFFFF',
   },
-  statusIconCircle: {
-    width: 42, height: 42, borderRadius: 21, alignItems: 'center', justifyContent: 'center',
+  imageAlertBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    borderRadius: 16,
+    padding: 14,
+    marginBottom: 12,
   },
-  statusBannerTitle: { fontSize: 15, fontWeight: 'bold', color: '#000', marginBottom: 2 },
-  statusBannerSub: { fontSize: 12, color: '#666' },
-  accordionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  accordionContent: { marginTop: 14, backgroundColor: '#f9f9f9', borderRadius: 12, padding: 16 },
-  itemRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 12 },
-  itemName: { fontSize: 13, color: '#333', flex: 1 },
-  itemPrice: { fontSize: 13, fontWeight: 'bold', color: '#000' },
-  subtotalRow: {
-    flexDirection: 'row', justifyContent: 'space-between',
-    borderTopWidth: 1, borderTopColor: '#e0e0e0', paddingTop: 12, marginTop: 4,
+  imageAlertTitle: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: '#111827',
   },
-  subtotalLabel: { fontSize: 14, fontWeight: 'bold', color: '#000' },
-  subtotalValue: { fontSize: 14, fontWeight: 'bold', color: '#ff3400' },
+  imageAlertSub: {
+    fontSize: 12,
+    color: '#6B7280',
+    marginTop: 2,
+  },
+  adminAssignNoticeBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FFF7ED',
+    borderWidth: 1,
+    borderColor: '#FED7AA',
+    borderRadius: 16,
+    padding: 14,
+    marginBottom: 14,
+  },
+  adminAssignNoticeIconBox: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#FFEDD5',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  adminAssignNoticeTitle: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: '#C2410C',
+  },
+  adminAssignNoticeSub: {
+    fontSize: 11.5,
+    color: '#9A3412',
+    marginTop: 2,
+    lineHeight: 15,
+  },
+  adminAssignNoticeBtn: {
+    backgroundColor: '#EA580C',
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderRadius: 10,
+    marginLeft: 8,
+  },
+  adminAssignNoticeBtnText: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: '#FFFFFF',
+  },
+  imageDishSectionTitle: {
+    fontSize: 16,
+    fontWeight: '900',
+    color: '#111827',
+    marginBottom: 10,
+    marginTop: 4,
+  },
+  imageDishList: {
+    marginBottom: 10,
+  },
+  imageDishCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#F3F4F6',
+    borderRadius: 16,
+    padding: 12,
+    marginBottom: 10,
+  },
+  imageDishImg: {
+    width: 54,
+    height: 54,
+    borderRadius: 12,
+    backgroundColor: '#F3F4F6',
+  },
+  imageDishTopRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 6,
+  },
+  imageDishName: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#111827',
+    flex: 1,
+    marginRight: 8,
+  },
+  imageDishTag: {
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  imageProgressBarBg: {
+    height: 6,
+    backgroundColor: '#E5E7EB',
+    borderRadius: 3,
+    overflow: 'hidden',
+    marginBottom: 4,
+  },
+  imageProgressBarFill: {
+    height: '100%',
+    borderRadius: 3,
+  },
+  imageDishSub: {
+    fontSize: 11.5,
+    color: '#6B7280',
+  },
+
+  // Delivery Partner View Styles
+  pixelStepperBox: {
+    marginTop: 4,
+    marginBottom: 8,
+    paddingVertical: 10,
+  },
+  pixelStepperTrack: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    position: 'relative',
+  },
+  pixelStepperLine: {
+    position: 'absolute',
+    top: 17,
+    height: 3,
+    zIndex: 0,
+  },
+  pixelStepColumn: {
+    alignItems: 'center',
+    width: 76,
+    zIndex: 1,
+  },
+  pixelStepCircle: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    borderWidth: 2,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 6,
+  },
+  pixelStepLabel: {
+    fontSize: 11.5,
+    textAlign: 'center',
+    lineHeight: 15,
+  },
+  pixelMintBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F0FDF4',
+    borderWidth: 1,
+    borderColor: '#BBF7D0',
+    borderRadius: 16,
+    padding: 14,
+    marginTop: 10,
+  },
+  pixelOrangeBanner: {
+    backgroundColor: '#FFF7ED',
+    borderColor: '#FED7AA',
+  },
+  pixelMintIconBox: {
+    width: 44,
+    height: 44,
+    borderRadius: 12,
+    backgroundColor: '#DCFCE7',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  pixelOrangeIconBox: {
+    backgroundColor: '#FFEDD5',
+  },
+  pixelMintContentBox: {
+    flex: 1,
+    marginLeft: 12,
+    marginRight: 8,
+  },
+  pixelMintTitle: {
+    fontSize: 15,
+    fontWeight: '800',
+    color: '#111827',
+  },
+  pixelMintSubtitle: {
+    fontSize: 12,
+    fontWeight: '400',
+    color: '#6B7280',
+    marginTop: 3,
+    lineHeight: 16,
+  },
+  pixelMintEtaPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#DCFCE7',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 16,
+  },
+  pixelOrangeEtaPill: {
+    backgroundColor: '#FFEDD5',
+  },
+  pixelMintEtaText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#15803D',
+  },
+  pixelOrangeEtaText: {
+    color: '#EA580C',
+  },
+  pixelPartnerCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#F3F4F6',
+    padding: 16,
+    marginTop: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.04,
+    shadowRadius: 3,
+    elevation: 1,
+  },
+  pixelPartnerTopRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+  },
+  pixelPartnerLabel: {
+    fontSize: 13,
+    color: '#6B7280',
+    fontWeight: '500',
+  },
+  pixelPartnerName: {
+    fontSize: 18,
+    fontWeight: '800',
+    color: '#111827',
+    marginTop: 2,
+  },
+  pixelAssignedPill: {
+    backgroundColor: '#DCFCE7',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 6,
+  },
+  pixelAssignedText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#16A34A',
+  },
+  pixelAdminIconBtn: {
+    padding: 4,
+    backgroundColor: '#F3F4F6',
+    borderRadius: 6,
+    marginLeft: 4,
+  },
+  pixelDetailRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F3F4F6',
+  },
+  pixelRowLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexShrink: 0,
+    marginRight: 12,
+  },
+  pixelRowIcon: {
+    marginRight: 10,
+  },
+  pixelRowLabel: {
+    fontSize: 13.5,
+    color: '#4B5563',
+    fontWeight: '500',
+  },
+  pixelRowValue: {
+    fontSize: 13.5,
+    color: '#111827',
+    fontWeight: '600',
+    textAlign: 'right',
+  },
+  otpBadgeContainer: {
+    backgroundColor: '#FFF3E0',
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+    borderRadius: 8,
+    borderWidth: 1.5,
+    borderColor: '#FFB74D',
+  },
+  otpBadgeText: {
+    fontSize: 16,
+    fontWeight: '800',
+    color: '#E65100',
+    letterSpacing: 3,
+  },
+  etaCountdownBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#ECFDF5',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#A7F3D0',
+  },
+  etaGreenPulseDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: '#059669',
+    marginRight: 6,
+  },
+  etaCountdownText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#065F46',
+  },
+  pixelTrackBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#E8F5E9',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: '#C8E6C9',
+  },
+  pixelTrackBadgeText: {
+    fontSize: 12.5,
+    fontWeight: '700',
+    color: '#00A01D',
+  },
+  pixelGreenCallBtn: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: '#16A34A',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: 8,
+  },
+  pixelTrackPartnerAppBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1.5,
+    borderColor: '#22C55E',
+    borderRadius: 10,
+    height: 46,
+    marginTop: 14,
+  },
+  pixelTrackPartnerAppText: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#16A34A',
+    marginHorizontal: 8,
+  },
+  viewLiveMapLink: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#2563EB',
+    textDecorationLine: 'underline',
+  },
+  pixelSummaryCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#F3F4F6',
+    padding: 16,
+    marginTop: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.04,
+    shadowRadius: 3,
+    elevation: 1,
+  },
+  pixelSummaryHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  pixelSummaryTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  pixelSummaryTitle: {
+    fontSize: 15.5,
+    fontWeight: '700',
+    color: '#111827',
+  },
+  pixelSummaryCount: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: '#6B7280',
+  },
+  pixelSummaryPriceRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  pixelSummaryPriceText: {
+    fontSize: 17,
+    fontWeight: '800',
+    color: '#EA580C',
+  },
+  pixelSummaryBody: {
+    marginTop: 14,
+    borderTopWidth: 1,
+    borderTopColor: '#F3F4F6',
+    paddingTop: 12,
+  },
+  pixelItemRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 10,
+  },
+  pixelItemThumb: {
+    width: 48,
+    height: 48,
+    borderRadius: 8,
+    backgroundColor: '#F3F4F6',
+  },
+  pixelItemName: {
+    fontSize: 14.5,
+    fontWeight: '600',
+    color: '#111827',
+  },
+  pixelItemSub: {
+    fontSize: 13,
+    color: '#6B7280',
+    marginTop: 3,
+  },
+  pixelItemRowPrice: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#111827',
+    marginLeft: 8,
+  },
+  pixelBillSplitBox: {
+    marginTop: 6,
+    paddingTop: 6,
+  },
+  pixelBillDivider: {
+    height: 1,
+    backgroundColor: '#E5E7EB',
+    marginBottom: 10,
+  },
+  pixelBillHeader: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: '#9CA3AF',
+    letterSpacing: 0.8,
+    marginBottom: 8,
+  },
+  pixelBillRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 6,
+  },
+  pixelBillLabel: {
+    fontSize: 13,
+    color: '#4B5563',
+    fontWeight: '500',
+  },
+  pixelBillValue: {
+    fontSize: 13,
+    color: '#111827',
+    fontWeight: '600',
+  },
+  pixelGrandTotalRow: {
+    marginTop: 6,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: '#E5E7EB',
+    marginBottom: 0,
+  },
+  pixelGrandTotalLabel: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: '#111827',
+  },
+  pixelGrandTotalValue: {
+    fontSize: 16,
+    fontWeight: '800',
+    color: '#EA580C',
+  },
+  pixelHelpCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FFF7ED',
+    borderRadius: 16,
+    padding: 14,
+    marginTop: 16,
+  },
+  pixelHelpIconWrap: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#FFEDD5',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  pixelHelpTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#111827',
+  },
+  pixelHelpSub: {
+    fontSize: 12,
+    color: '#6B7280',
+    marginTop: 2,
+  },
+  pixelChatBtn: {
+    backgroundColor: '#FFEDD5',
+    paddingVertical: 7,
+    paddingHorizontal: 16,
+    borderRadius: 20,
+  },
+  pixelChatBtnText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#EA580C',
+  },
   cancelCard: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -853,11 +1606,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     borderRadius: 10,
     gap: 4,
-    shadowColor: '#DC2626',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.08,
-    shadowRadius: 3,
-    elevation: 1,
   },
   cancelDeliveryBtnText: {
     fontSize: 13,
@@ -896,6 +1644,35 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '700',
   },
+  mapModalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F3F4F6',
+  },
+  restaurantMarker: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: '#fff',
+    borderWidth: 2,
+    borderColor: '#ff3400',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  homeMarker: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: '#fff',
+    borderWidth: 2,
+    borderColor: '#00a01d',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   modalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0, 0, 0, 0.55)',
@@ -909,11 +1686,6 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     padding: 24,
     alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.2,
-    shadowRadius: 16,
-    elevation: 8,
   },
   modalIconBox: {
     width: 60,

@@ -45,6 +45,8 @@ interface OrderState {
   currentOrder: any | null; // Detailed current order obj
 
   addPastOrder: (order: PastOrder) => void;
+  removePastOrder: (orderIdOrDbId: string | number) => void;
+  setPastOrders: (orders: PastOrder[]) => void;
   setCurrentOrder: (order: any) => void;
   clearCurrentOrder: () => void;
 }
@@ -75,6 +77,21 @@ export const useOrderStore = create<OrderState>()(
         }
         return { pastOrders: [order, ...state.pastOrders] };
       }),
+      removePastOrder: (orderIdOrDbId) => set((state) => {
+        const rawTarget = String(orderIdOrDbId || '').trim();
+        const digitsTarget = rawTarget.replace(/\D/g, '');
+        return {
+          pastOrders: state.pastOrders.filter((o) => {
+            const oOrd = String(o.orderId || '').trim();
+            const oDb = String(o.dbOrderId || '').trim();
+            const oDbDigits = oDb.replace(/\D/g, '');
+            if (rawTarget && (oOrd === rawTarget || oDb === rawTarget)) return false;
+            if (digitsTarget && (oDbDigits === digitsTarget || oOrd.replace(/\D/g, '') === digitsTarget)) return false;
+            return true;
+          })
+        };
+      }),
+      setPastOrders: (pastOrders) => set({ pastOrders }),
       setCurrentOrder: (currentOrder) => set({ currentOrder }),
       clearCurrentOrder: () => set({ currentOrder: null })
     }),

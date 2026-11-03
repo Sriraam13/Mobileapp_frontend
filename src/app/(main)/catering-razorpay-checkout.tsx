@@ -6,6 +6,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { WebView } from 'react-native-webview';
 import { useRouter, useLocalSearchParams } from 'expo-router';
+import * as Linking from 'expo-linking';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuthStore } from '../../store/useAuthStore';
 import { API_BASE_URL } from '../../constants/api';
@@ -36,7 +37,7 @@ export default function CateringRazorpayCheckout() {
   const customerEmail = (params.customerEmail as string) || 'customer@example.com';
   const customerPhone = (params.customerPhone as string) || auth.phone || '9999999999';
 
-  const RAZORPAY_KEY = process.env.EXPO_PUBLIC_RAZORPAY_KEY_ID || 'rzp_test_XXXXXXXXXXXXXXXX';
+  const RAZORPAY_KEY = process.env.EXPO_PUBLIC_RAZORPAY_KEY_ID || 'rzp_live_T4wysiHzIDwFA1';
   const BASE_URL = API_BASE_URL;
 
   const authHeaders = {
@@ -281,6 +282,33 @@ export default function CateringRazorpayCheckout() {
         domStorageEnabled
         originWhitelist={['*']}
         mixedContentMode="always"
+        onShouldStartLoadWithRequest={(request) => {
+          const url = request.url;
+          if (
+            url.startsWith('upi://') ||
+            url.startsWith('tez://') ||
+            url.startsWith('phonepe://') ||
+            url.startsWith('paytmmp://') ||
+            url.startsWith('intent://') ||
+            url.startsWith('gpay://') ||
+            url.startsWith('paytm://') ||
+            url.startsWith('bhim://')
+          ) {
+            let targetUrl = url;
+            if (url.startsWith('intent://')) {
+              try {
+                const schemeMatch = url.match(/scheme=([^;]+)/);
+                const scheme = schemeMatch ? schemeMatch[1] : 'upi';
+                targetUrl = url.replace(/^intent:\/\//, `${scheme}://`).split('#Intent')[0];
+              } catch (_) {}
+            }
+            Linking.openURL(targetUrl).catch((err) => {
+              console.error('Failed to open UPI app', err);
+            });
+            return false;
+          }
+          return true;
+        }}
       />
 
       {/* Loading overlay */}

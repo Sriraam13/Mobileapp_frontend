@@ -18,6 +18,7 @@ import DineInActiveBanner from '../../components/DineInActiveBanner';
 import SelectTableModal from '../../components/ui/SelectTableModal';
 import DineInConflictModal from '../../components/ui/DineInConflictModal';
 import { BrandColors } from '../../constants/theme';
+import { purgeDeletedOrderLocally } from '../../store/sessionUtils';
 
 const { width: windowWidth } = Dimensions.get('window');
 const CARD_GAP = 10;
@@ -390,6 +391,23 @@ export default function Home() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Verify active live order exists in DB; purge automatically if deleted
+  useEffect(() => {
+    const liveStore = useLiveOrderStore.getState();
+    const liveDbId = liveStore.dbOrderId || (liveStore.orderId ? liveStore.orderId.replace(/\D/g, '') : null);
+    if (liveDbId) {
+      const restId = selectedOutlet?.restaurant_id ? Number(selectedOutlet.restaurant_id) : 1;
+      orderApi.getOrderDetails(liveDbId, restId)
+        .catch((err: any) => {
+          const msg = String(err?.message || err || '').toLowerCase();
+          const isNotFound = err?.status === 404 || msg.includes('404') || msg.includes('not found');
+          if (isNotFound) {
+            purgeDeletedOrderLocally(liveDbId);
+          }
+        });
+    }
+  }, [selectedOutlet]);
+
   // Sync dine-in session when viewing Dine-in tab to detect cancellations
   useEffect(() => {
     if (activeTab !== 'Dine-in') return;
@@ -465,9 +483,18 @@ export default function Home() {
         setSelectedBranchName(cleanName);
       }
 
-      // Fetch popular dishes
-      const itemData = await menuApi.getItems(restId);
-      const formattedItems = itemData.slice(0, 10).map((item: any, idx: number) => ({
+      // Fetch popular dishes (AC menu for delivery section)
+      const isDeliveryMode = (orderType === 'Delivery' || activeTab === 'Delivery');
+      const itemData = await menuApi.getItems(
+        restId, 
+        false, 
+        { orderType: isDeliveryMode ? 'delivery' : undefined }
+      );
+      const filteredDishes = isDeliveryMode
+        ? itemData.filter((i: any) => !String(i.ac_type || '').toLowerCase().includes('non'))
+        : itemData;
+
+      const formattedItems = filteredDishes.slice(0, 10).map((item: any, idx: number) => ({
         id: item.id,
         name: item.name,
         desc: item.description,
@@ -479,8 +506,12 @@ export default function Home() {
       }));
       setPopularDishes(formattedItems);
 
-      // Fetch categories
-      const catData = await menuApi.getCategories(restId);
+      // Fetch categories (AC categories for delivery section)
+      const catData = await menuApi.getCategories(
+        restId, 
+        false, 
+        { orderType: isDeliveryMode ? 'delivery' : undefined }
+      );
       const categoryImageMap: Record<string, any> = {
         'breakfast & dinner': require('../../../assets/images/categories/breakfast_dinner.jpg'),
         'dosa varieties': require('../../../assets/images/categories/dosa_varieties.jpg'),
@@ -573,7 +604,7 @@ export default function Home() {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchData();
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedOutlet]);
+  }, [selectedOutlet, orderType, activeTab]);
 
   const onRefresh = async () => {
     setRefreshing(true);
@@ -873,7 +904,7 @@ export default function Home() {
           activeOpacity={0.85}
         >
           <Ionicons name='search-outline' size={15} color='#6B7280' />
-          <Text style={styles.searchPlaceholder}>Search crispy dosa, soft idli, filter coffee...</Text>
+          <Text style={styles.searchPlaceholder}>Search menu (crispy dosa, soft idli, filter coffee...)</Text>
         </TouchableOpacity>
 
         {/* Banner Carousel */}

@@ -2,7 +2,7 @@ import React, { useState, useCallback } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
   Platform, StatusBar, Image, ActivityIndicator,
-  TextInput, Alert, Modal, RefreshControl
+  TextInput, Alert, Modal, RefreshControl, Linking
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
@@ -240,6 +240,7 @@ export default function Profile() {
     { id: 3, title: 'Order History', icon: 'receipt-outline', iconColor: '#00cc66', iconBg: '#e6ffe6', route: '/orders' },
     { id: 4, title: 'Favourite Orders', icon: 'heart-outline', iconColor: '#ff6699', iconBg: '#ffe6f0', route: '/favourites' },
     { id: 5, title: 'Rewards & Loyalty', icon: 'gift-outline', iconColor: '#9933ff', iconBg: '#f2e6ff', route: '/rewards' },
+    { id: 6, title: 'Privacy Policy', icon: 'shield-checkmark-outline', iconColor: '#2F882C', iconBg: '#eefbee', route: 'https://www.dataudipi.com/privacy-policy' },
   ] as const;
 
   // ── Profile picture URI ──
@@ -369,7 +370,13 @@ export default function Profile() {
             <TouchableOpacity
               key={item.id}
               style={styles.menuItem}
-              onPress={() => router.push(item.route as any)}
+              onPress={() => {
+                if (item.route.startsWith('http')) {
+                  Linking.openURL(item.route);
+                } else {
+                  router.push(item.route as any);
+                }
+              }}
             >
               <View style={styles.menuLeft}>
                 <View style={[styles.iconContainer, { backgroundColor: item.iconBg }]}>

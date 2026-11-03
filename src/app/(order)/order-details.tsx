@@ -9,13 +9,15 @@ import {
   ActivityIndicator,
   StatusBar,
   Alert,
+  Linking,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter, useLocalSearchParams } from 'expo-router';
-import { orderApi } from '../../services/apiService';
+import { orderApi, deliveryApi } from '../../services/apiService';
 import { getFullImageUrl } from '../../constants/api';
 import { useCartStore, useRestaurantStore, useOrderStore, useLiveOrderStore } from '../../store';
+import { purgeDeletedOrderLocally } from '../../store/sessionUtils';
 import { useDineInSessionStore } from '../../store/useDineInSessionStore';
 import BottomNavBar from '../../components/layout/BottomNavBar';
 import { formatOrderDate } from '../../utils/dateUtils';
@@ -64,11 +66,11 @@ export default function OrderDetailsScreen() {
     return Boolean(!initialData && rawId);
   });
 
-  useEffect(() => {
+  const [trackingData, setTrackingData] = useState<any>(null);
+
+  const fetchDetails = () => {
     const rawId = params.orderId || initialData?.dbOrderId || initialData?.dbId || initialData?.id;
-    if (!rawId) {
-      return;
-    }
+    if (!rawId) return;
 
     const resId = Number(params.restaurantId) || selectedOutlet?.restaurant_id || 1;
 
@@ -85,14 +87,35 @@ export default function OrderDetailsScreen() {
           if (Array.isArray(data.items) && data.items.length > 0) {
             setItems(data.items);
           }
+
+          if (mappedType === 'Delivery') {
+            deliveryApi.getOrderTracking(String(rawId))
+              .then((trackRes: any) => {
+                if (trackRes) setTrackingData(trackRes);
+              })
+              .catch(() => {});
+          }
         }
       })
-      .catch((err) => {
+      .catch(async (err) => {
+        const msg = String(err?.message || err || '').toLowerCase();
+        const isNotFound = err?.status === 404 || msg.includes('404') || msg.includes('not found');
+        if (isNotFound) {
+          await purgeDeletedOrderLocally(rawId || params.orderId || '');
+          Alert.alert("Order Not Available", "This order has been removed from the system.", [
+            { text: "OK", onPress: () => router.canGoBack() ? router.back() : router.replace('/(order)/orders') }
+          ]);
+          return;
+        }
         console.warn('[OrderDetails] Fetch error:', err?.message || err);
       })
       .finally(() => {
         setLoading(false);
       });
+  };
+
+  useEffect(() => {
+    fetchDetails();
   }, [params.orderId, params.restaurantId, initialData, selectedOutlet]);
 
   const handleBack = () => {
@@ -132,8 +155,9 @@ export default function OrderDetailsScreen() {
       return;
     }
     clearCart();
-    if (order?.order_type === 'Take Away') setOrderType('Take Away');
-    else if (order?.order_type === 'Delivery') setOrderType('Delivery');
+    const rawType = String(order?.order_type || '').toUpperCase().replace(/[\s_-]/g, '');
+    if (rawType.includes('DELIV')) setOrderType('Delivery');
+    else if (rawType.includes('TAKE') || rawType.includes('PICKUP') || rawType.includes('PARCEL')) setOrderType('Take Away');
     else setOrderType('Dine In');
 
     items.forEach((item: any) => {
@@ -303,7 +327,7 @@ export default function OrderDetailsScreen() {
         ].filter(Boolean);
         if (parts.length > 0) return parts.join(', ');
       }
-      return order?.address || order?.customer_address || 'Flat 402, Sunshine Residency, Koramangala 3rd Block, Bangalore';
+      return order?.address || order?.customer_address || 'Delivery Address';
     }
 
     if (order?.order_type === 'Take Away') {
@@ -461,6 +485,110 @@ export default function OrderDetailsScreen() {
           </View>
         </View>
 
+        {/* ── Delivery Partner & Rider (Third-Party) Section ── */}
+        {isDelivery && (
+          <View style={styles.deliveryPartnerCard}>
+            <View style={styles.partnerCardHeader}>
+              <View style={styles.partnerBadge}>
+                <Ionicons name="bicycle" size={16} color="#FF3400" />
+                <Text style={styles.partnerBadgeText}>
+                  {trackingData?.assignment?.delivery_partner || trackingData?.rider?.partner || 'Third-Party Delivery'}
+                </Text>
+              </View>
+            </View>
+
+            {trackingData?.rider?.name || trackingData?.assignment?.delivery_partner ? (
+              <View style={styles.riderDetailBody}>
+                <View style={styles.riderInfoRow}>
+                  <View style={styles.riderAvatar}>
+                    <Ionicons name="person" size={20} color="#4B5563" />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.riderNameText}>
+                      {trackingData.rider?.name || 'Rider Assigned'}
+                    </Text>
+                    <Text style={styles.riderSubText}>
+                      {trackingData.rider?.vehicle_type || 'Bike'}
+                      {trackingData.rider?.vehicle_number ? ` • ${trackingData.rider.vehicle_number}` : ''}
+                    </Text>
+                  </View>
+                  {trackingData.rider?.phone && (
+                    <TouchableOpacity
+                      style={styles.callRiderBtn}
+                      onPress={() => Linking.openURL(`tel:${trackingData.rider.phone}`)}
+                      activeOpacity={0.8}
+                    >
+                      <Ionicons name="call" size={16} color="#00a01d" />
+                      <Text style={styles.callRiderBtnText}>Call</Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
+
+                {/* Status & ETA Row */}
+                <View style={styles.riderMetaRow}>
+                  <View style={styles.metaPill}>
+                    <Text style={styles.metaPillLabel}>Status:</Text>
+                    <Text style={styles.metaPillValue}>
+                      {trackingData.assignment?.status === 'OUT_FOR_DELIVERY' || order?.status === 'OUT_FOR_DELIVERY'
+                        ? 'Out for Delivery'
+                        : (trackingData.assignment?.status || 'Assigned')}
+                    </Text>
+                  </View>
+
+                  <View style={styles.metaPill}>
+                    <Text style={styles.metaPillLabel}>ETA:</Text>
+                    <Text style={styles.metaPillValue}>
+                      {trackingData.assignment?.estimated_delivery_time || trackingData.rider?.eta || 'ETA unavailable'}
+                    </Text>
+                  </View>
+                </View>
+
+                {/* External Tracking URL if available */}
+                {Boolean(trackingData.assignment?.tracking_url || trackingData.rider?.tracking_url) && (
+                  <TouchableOpacity
+                    style={styles.externalTrackBtn}
+                    onPress={() => {
+                      const url = trackingData.assignment?.tracking_url || trackingData.rider?.tracking_url;
+                      if (url) Linking.openURL(url);
+                    }}
+                    activeOpacity={0.8}
+                  >
+                    <Ionicons name="open-outline" size={16} color="#2563EB" />
+                    <Text style={styles.externalTrackBtnText}>Track on Partner Live Map</Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+            ) : (
+              <View style={styles.unassignedBox}>
+                <Ionicons name="time-outline" size={20} color="#D97706" />
+                <Text style={styles.unassignedText}>
+                  Delivery partner details will be updated shortly.
+                </Text>
+              </View>
+            )}
+
+            {/* Google Maps View Action */}
+            <TouchableOpacity
+              style={styles.viewMapActionBtn}
+              onPress={() => {
+                const rawId = order?.id || params.orderId;
+                router.push({
+                  pathname: '/delivery-tracking',
+                  params: {
+                    orderId: displayOrderIdText,
+                    dbOrderId: String(rawId),
+                    cart: JSON.stringify(items || []),
+                  },
+                });
+              }}
+              activeOpacity={0.85}
+            >
+              <Ionicons name="map-outline" size={18} color="#FFFFFF" />
+              <Text style={styles.viewMapActionText}>Open Google Maps Live Tracking</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+
         {/* ── Action Buttons ── */}
         <View style={styles.actionButtonsRow}>
           {['PENDING', 'CONFIRMED'].includes(String(order?.status || '').toUpperCase()) && (
@@ -485,6 +613,7 @@ export default function OrderDetailsScreen() {
           </TouchableOpacity>
         </View>
       </ScrollView>
+
 
       {/* ── Bottom Nav Bar ── */}
       <BottomNavBar activeTab="orders" />
@@ -707,5 +836,173 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '700',
     color: '#EF4444',
+  },
+  deliveryPartnerCard: {
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1.5,
+    borderColor: '#E5E7EB',
+    borderRadius: 16,
+    padding: 16,
+    marginTop: 16,
+    marginBottom: 8,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  partnerCardHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  partnerBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: '#FFF5F2',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#FFD5CC',
+  },
+  partnerBadgeText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#FF3400',
+  },
+  adminAssignBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#F3F4F6',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 8,
+  },
+  adminAssignBtnText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#374151',
+  },
+  riderDetailBody: {
+    marginTop: 4,
+  },
+  riderInfoRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  riderAvatar: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#F3F4F6',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  riderNameText: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#111827',
+  },
+  riderSubText: {
+    fontSize: 12,
+    color: '#6B7280',
+    marginTop: 2,
+  },
+  callRiderBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#E8F8EE',
+    borderWidth: 1,
+    borderColor: '#B9F1CC',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 20,
+  },
+  callRiderBtnText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#00a01d',
+  },
+  riderMetaRow: {
+    flexDirection: 'row',
+    gap: 10,
+    marginTop: 12,
+    paddingTop: 10,
+    borderTopWidth: 1,
+    borderTopColor: '#F3F4F6',
+  },
+  metaPill: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#F9FAFB',
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+    borderRadius: 6,
+  },
+  metaPillLabel: {
+    fontSize: 11,
+    color: '#6B7280',
+    fontWeight: '500',
+  },
+  metaPillValue: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#111827',
+  },
+  externalTrackBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    backgroundColor: '#EFF6FF',
+    borderWidth: 1,
+    borderColor: '#BFDBFE',
+    paddingVertical: 10,
+    borderRadius: 10,
+    marginTop: 12,
+  },
+  externalTrackBtnText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#2563EB',
+  },
+  unassignedBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: '#FFFBEB',
+    padding: 12,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#FDE68A',
+  },
+  unassignedText: {
+    fontSize: 13,
+    color: '#92400E',
+    fontWeight: '500',
+    flex: 1,
+  },
+  viewMapActionBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    backgroundColor: '#FF3400',
+    paddingVertical: 12,
+    borderRadius: 12,
+    marginTop: 14,
+  },
+  viewMapActionText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '700',
   },
 });

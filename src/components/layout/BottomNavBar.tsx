@@ -5,14 +5,15 @@ import { Ionicons } from '@expo/vector-icons';
 import { useRouter, usePathname } from 'expo-router';
 import { BrandColors } from '../../constants/theme';
 
-export type BottomNavTab = 'home' | 'search' | 'orders' | 'profile';
+export type BottomNavTab = 'home' | 'search' | 'menu' | 'orders' | 'profile';
 
 interface BottomNavBarProps {
   activeTab?: BottomNavTab;
   onSearchPress?: () => void;
+  onMenuPress?: () => void;
 }
 
-export default function BottomNavBar({ activeTab, onSearchPress }: BottomNavBarProps) {
+export default function BottomNavBar({ activeTab, onSearchPress, onMenuPress }: BottomNavBarProps) {
   const router = useRouter();
   const insets = useSafeAreaInsets();
 
@@ -31,8 +32,10 @@ export default function BottomNavBar({ activeTab, onSearchPress }: BottomNavBarP
     }
   };
 
-  const handleSearch = () => {
-    if (onSearchPress) {
+  const handleMenu = () => {
+    if (onMenuPress) {
+      onMenuPress();
+    } else if (onSearchPress) {
       onSearchPress();
     } else if (!isCurrent('/menu')) {
       router.replace('/menu' as any);
@@ -51,8 +54,10 @@ export default function BottomNavBar({ activeTab, onSearchPress }: BottomNavBarP
     }
   };
 
+  const isMenuActive = activeTab === 'menu' || activeTab === 'search';
+
   const getTabColor = (tab: BottomNavTab) =>
-    activeTab === tab ? '#FF3400' : '#6B7280';
+    (activeTab === tab || (tab === 'menu' && isMenuActive)) ? '#FF3400' : '#6B7280';
 
   return (
     <View style={[styles.bottomNav, { paddingBottom: bottomPadding }]}>
@@ -74,21 +79,21 @@ export default function BottomNavBar({ activeTab, onSearchPress }: BottomNavBarP
         </Text>
       </TouchableOpacity>
 
-      {/* Search */}
+      {/* Menu */}
       <TouchableOpacity
         style={styles.navItem}
-        onPress={handleSearch}
+        onPress={handleMenu}
         activeOpacity={0.7}
       >
         <View style={styles.iconBox}>
           <Ionicons
-            name="search-outline"
+            name={isMenuActive ? 'restaurant' : 'restaurant-outline'}
             size={22}
-            color={getTabColor('search')}
+            color={getTabColor('menu')}
           />
         </View>
-        <Text style={[styles.navText, activeTab === 'search' && styles.navTextActive]}>
-          Search
+        <Text style={[styles.navText, isMenuActive && styles.navTextActive]}>
+          Menu
         </Text>
       </TouchableOpacity>
 

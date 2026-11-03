@@ -296,8 +296,8 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-end',
   },
   mascot: {
-    width: isSmallDevice ? 140 : Math.min(width * 0.46, 175),
-    height: isSmallDevice ? 140 : Math.min(width * 0.46, 175),
+    width: isSmallDevice ? 160 : Math.min(width * 0.52, 210),
+    height: isSmallDevice ? 160 : Math.min(width * 0.52, 210),
     marginBottom: 8,
   },
   loadingContainer: {

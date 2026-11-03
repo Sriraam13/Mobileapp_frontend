@@ -1,10 +1,12 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Image, StatusBar, Linking, BackHandler, ActivityIndicator, Alert, Modal } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Ionicons } from '@expo/vector-icons';
+import { Ionicons, MaterialIcons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { orderApi, deliveryApi, dineInSessionApi } from '../../services/apiService';
+import { getCookingMessage } from '../../utils/orderStatusMessages';
 import { useLiveOrderStore, useRestaurantStore, useDineInSessionStore } from '../../store';
+import { purgeDeletedOrderLocally } from '../../store/sessionUtils';
 import { getFullImageUrl } from '../../constants/api';
 import {
   getDeliveryProgressStep,
@@ -30,15 +32,19 @@ export default function TrackOrderScreen() {
     cart: string;
     orderType?: string;
     phone?: string;
+    billNo?: string;
   }>();
 
   const [orderDetails, setOrderDetails] = useState<any>(null);
+  const billNumber = orderDetails?.order?.bill_no || params.billNo || null;
   const [loading, setLoading] = useState(true);
   const [deliveryStatus, setDeliveryStatus] = useState<string>('');
   const [riderInfo, setRiderInfo] = useState<any>(null);
   const [assignmentStatus, setAssignmentStatus] = useState<string>('');
   const [trackingTimeline, setTrackingTimeline] = useState<any[]>([]);
   const [networkError, setNetworkError] = useState(false);
+  const [trackingData, setTrackingData] = useState<any>(null);
+  const [orderSummaryExpanded, setOrderSummaryExpanded] = useState(true);
 
   // One-time navigation guards
   const hasNavigatedRef = useRef(false);
@@ -406,6 +412,23 @@ export default function TrackOrderScreen() {
           }
           const isOrderDelivery = orderTypeNorm === 'DELIVERY' || params.orderType === 'Delivery';
           const isOrderTakeaway = orderTypeNorm === 'TAKEAWAY' || params.orderType === 'Take Away';
+
+          // Strictly isolate Delivery orders: redirect to dedicated delivery-tracking screen
+          if (isOrderDelivery && !hasNavigatedRef.current) {
+            hasNavigatedRef.current = true;
+            if (intervalId) clearInterval(intervalId);
+            router.replace({
+              pathname: '/delivery-tracking',
+              params: {
+                orderId: params.orderId || `ORD-${orderData.order.id.toString().padStart(6, '0')}`,
+                dbOrderId: fetchId.toString(),
+                totalAmount: orderData.order.total_amount?.toString() || '0.00',
+                paymentMethod: orderData.order.payment_method || 'UPI',
+                cart: JSON.stringify(orderData.items || []),
+              },
+            });
+            return;
+          }
           
           // Regression-safe order status
           lastOrderStatusRef.current = resolveOrderStatus(lastOrderStatusRef.current, rawOS);
@@ -418,6 +441,7 @@ export default function TrackOrderScreen() {
 
             // Tracking data: rider, assignment, timeline
             if (trackingData) {
+              setTrackingData(trackingData);
               const currentAssignment = trackingData.assignment || {};
               const currentAssignmentId = currentAssignment.id;
 
@@ -449,22 +473,8 @@ export default function TrackOrderScreen() {
               }
             }
 
-            // Navigate to live map ONCE when rider picks up
-            if (isLiveTrackingStatus(resolvedDS) && !hasNavigatedRef.current) {
-              hasNavigatedRef.current = true;
-              clearInterval(intervalId);
-              router.replace({
-                pathname: '/delivery-tracking',
-                params: {
-                  orderId: params.orderId || `ORD-${orderData.order.id.toString().padStart(6, '0')}`,
-                  dbOrderId: fetchId.toString(),
-                  cart: params.cart,
-                  totalAmount: orderData.order.total_amount?.toString() || '0',
-                  paymentMethod: orderData.order.payment_method || 'UPI',
-                },
-              });
-              return;
-            }
+            // Keep customer on Track Order screen per UI spec (navigate when user taps track action)
+            // if (isLiveTrackingStatus(resolvedDS) && !hasNavigatedRef.current) { ... }
 
             // Navigate to delivery-completed ONCE on DELIVERED
             if (isDeliveredStatus(resolvedDS) && !hasNavigatedRef.current) {
@@ -495,8 +505,11 @@ export default function TrackOrderScreen() {
             }
 
             // Non-delivery: handle completion redirect
-            const isCompleted = rawOS === 'SERVED' || rawOS === 'COMPLETED' || rawOS === 'DELIVERED';
-            const shouldRedirect = isOrderDineIn ? (isCompleted && paymentStatus === 'PAID') : isCompleted;
+            // When takeaway order is marked READY -> redirect to order-completed ("Pick Up!")
+            // When takeaway order is marked SERVED/COMPLETED -> redirect to order-completed ("Picked Up!")
+            const isTakeawayReadyOrCompleted = isOrderTakeaway && (rawOS === 'READY' || rawOS === 'SERVED' || rawOS === 'COMPLETED' || rawOS === 'DELIVERED');
+            const isDineInCompleted = isOrderDineIn && (rawOS === 'SERVED' || rawOS === 'COMPLETED' || rawOS === 'DELIVERED') && paymentStatus === 'PAID';
+            const shouldRedirect = isOrderTakeaway ? isTakeawayReadyOrCompleted : isDineInCompleted;
             if (shouldRedirect && !hasNavigatedRef.current) {
               hasNavigatedRef.current = true;
               clearInterval(intervalId);
@@ -507,25 +520,30 @@ export default function TrackOrderScreen() {
                   dbOrderId: fetchId.toString(),
                   tableNumber: orderData.order.table_number || params.tableNumber || (isOrderTakeaway ? 'Take Away' : 'Dine In'),
                   totalAmount: orderData.order.total_amount?.toString() || '0.00',
-                  paymentMethod: orderData.order.payment_method || 'Pay at Counter',
+                  paymentMethod: orderData.order.payment_method || 'UPI',
                   cartItems: JSON.stringify(orderData.items || []),
                   date: orderData.order.updated_at || orderData.order.created_at || new Date().toISOString(),
                   orderType: isOrderTakeaway ? 'Take Away' : 'Dine In',
                   phone: params.phone || '',
+                  orderStatus: rawOS,
+                  billNo: orderData.order.bill_no ? String(orderData.order.bill_no) : (params.billNo || ''),
                 },
               });
             }
           }
         }
       } catch (err: any) {
-        console.warn('Poll status:', err?.message || err);
-        if (err?.message?.includes("404") || err?.message?.includes("not found")) {
+        const msg = String(err?.message || err || '').toLowerCase();
+        const isNotFound = err?.status === 404 || msg.includes('404') || msg.includes('not found');
+        if (isNotFound) {
           if (intervalId) clearInterval(intervalId);
-          useLiveOrderStore.getState().clearLiveOrder();
-          Alert.alert("Order Not Found", "Your order could not be found on the server.", [
+          await purgeDeletedOrderLocally(fetchId || params.orderId || '');
+          Alert.alert("Order Not Found", "This order is no longer available in the system.", [
             { text: "OK", onPress: () => router.replace('/(main)/home') }
           ]);
+          return;
         } else {
+          console.warn('Poll status:', err?.message || err);
           setNetworkError(true);
         }
       } finally {
@@ -578,15 +596,15 @@ export default function TrackOrderScreen() {
     bannerSub = "Getting ingredients ready";
   } else if (rawStatus === 'PREPARING') {
     statusLevel = 3;
-    bannerTitle = "Chef is roasting your dosas!";
-    bannerSub = "Fresh ghee, golden and crispy";
-    alertTitle = "Leave now! Drive 8 min";
-    alertSub = "Arrive right as they come hot off the tawa";
+    bannerTitle = getCookingMessage(orderItemsList).title;
+    bannerSub = getCookingMessage(orderItemsList).sub;
+    alertTitle = "Being prepared";
+    alertSub = "We'll update you as soon as it's ready";
   } else if (rawStatus === 'ALMOST_READY') {
     statusLevel = 4;
     bannerTitle = "Almost done!";
     bannerSub = "Packing up your fresh food";
-    alertTitle = "Leave now! Drive 3 min";
+    alertTitle = "Almost ready";
     alertSub = "Your food is being packed";
   } else if (rawStatus === 'READY' || rawStatus === 'SERVED' || rawStatus === 'COMPLETED') {
     statusLevel = 5;
@@ -719,36 +737,156 @@ export default function TrackOrderScreen() {
   );
 
   if (isDelivery) {
-    // The order is a delivery. Show a "Finding Rider" / kitchen status screen.
-    // Once the backend assigns a rider (delivery_status transitions), the useEffect above
-    // will automatically navigate to delivery-tracking.tsx.
     const deliveryStatusRaw = (orderDetails?.order?.delivery_status || '').toUpperCase();
-    const isSearching = !deliveryStatusRaw || deliveryStatusRaw === 'RIDER_SEARCHING' || deliveryStatusRaw === 'PENDING';
+    const orderStatusRaw = (orderDetails?.order?.status || '').toUpperCase();
+    
+    // Calculate 4-step progress index (1: Confirmed, 2: Preparing, 3: Out for Delivery, 4: Delivered)
+    const rawStep = getDeliveryProgressStep(orderStatusRaw, deliveryStatusRaw);
+    let stepIndex = 1;
+    if (rawStep >= 4 || deliveryStatusRaw === 'DELIVERED') {
+      stepIndex = 4;
+    } else if (rawStep >= 3 || deliveryStatusRaw === 'OUT_FOR_DELIVERY' || deliveryStatusRaw === 'PICKED_UP') {
+      stepIndex = 3;
+    } else if (rawStep >= 1 || ['PREPARING', 'ALMOST_READY', 'READY'].includes(orderStatusRaw)) {
+      stepIndex = 2;
+    } else {
+      stepIndex = 1;
+    }
+
+    const rawIdDigits = String(orderDetails?.order?.id || params.dbOrderId || liveDbOrderId || params.orderId || '12345678').replace(/\D/g, '') || '12345678';
+    const displayOrderNumber = `DU${rawIdDigits}`;
+
+    const topStatusText = stepIndex === 4
+      ? 'Delivered'
+      : stepIndex === 3
+      ? 'Out for Delivery'
+      : stepIndex === 2
+      ? 'Preparing'
+      : 'Order Confirmed';
+
+    const partnerName = trackingData?.assignment?.delivery_partner || trackingData?.rider?.partner || riderInfo?.partner || 'Rapido';
+    const etaVal = trackingData?.assignment?.estimated_delivery_time || riderInfo?.eta || '20 mins';
+    const riderNameVal = riderInfo?.name || 'Not available (provided by admin)';
+    const riderPhoneVal = riderInfo?.phone
+      ? (riderInfo.phone.startsWith('+91') ? riderInfo.phone : `+91 ${riderInfo.phone}`)
+      : '+91 98765 43210';
+    const vehicleTypeVal = riderInfo?.vehicle_type || 'Bike';
+    const vehicleNumberVal = riderInfo?.vehicle_number || 'TN 09 AB 1234';
+    const assignmentStatusVal = deliveryStatusRaw === 'OUT_FOR_DELIVERY' || deliveryStatusRaw === 'PICKED_UP'
+      ? 'On the way to restaurant'
+      : (getLabelForAssignment(assignmentStatus) || 'On the way to restaurant');
+
+    const displayItems = orderItemsList.length > 0 ? orderItemsList : [
+      { id: 1, name: 'South Indian Meals', quantity: 3, price: 125, image_url: 'https://images.unsplash.com/photo-1610192244261-3f33de3f55e4?w=150' }
+    ];
+    const totalAmountVal = Number(orderDetails?.order?.total_amount || displayItems.reduce((acc: number, it: any) => acc + (Number(it.price || 0) * Number(it.quantity || it.qty || 1)), 0));
+
+    const fourSteps = [
+      { label: 'Order\nConfirmed', icon: 'checkmark', type: 'ion' },
+      { label: 'Preparing', icon: 'chef-hat', type: 'mc' },
+      { label: 'Out for\nDelivery', icon: 'moped', type: 'mc' },
+      { label: 'Delivered', icon: 'home-outline', type: 'ion' },
+    ];
 
     return (
-      <View style={styles.container}>
-        <StatusBar barStyle="dark-content" backgroundColor="#fafafa" />
-        <ScrollView contentContainerStyle={{ paddingBottom: 100, paddingTop: insets.top + 10 }} showsVerticalScrollIndicator={false}>
-
-          {/* Header */}
-          <View style={styles.headerBlock}>
-            <Text style={styles.orderIdText}>#{params.orderId}</Text>
-            <Text style={styles.pageTitle}>Order Status</Text>
+      <View style={styles.pixelContainer}>
+        <StatusBar barStyle="dark-content" backgroundColor="#ffffff" />
+        
+        {/* Top Header */}
+        <View style={[styles.pixelHeader, { paddingTop: insets.top + 8 }]}>
+          <TouchableOpacity onPress={handleGoBack} style={styles.pixelBackBtn} activeOpacity={0.7}>
+            <Ionicons name="arrow-back" size={24} color="#111827" />
+          </TouchableOpacity>
+          <View style={styles.pixelHeaderTitleBlock}>
+            <Text style={styles.pixelHeaderTitle}>Track Order</Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 2 }}>
+              <Text style={styles.pixelHeaderSubtitle}>Order #{displayOrderNumber}</Text>
+              {billNumber ? (
+                <View style={styles.deliveryBillBadge}>
+                  <Ionicons name="receipt" size={11} color="#16a34a" style={{ marginRight: 3 }} />
+                  <Text style={styles.deliveryBillBadgeText}>Bill #{billNumber}</Text>
+                </View>
+              ) : null}
+            </View>
           </View>
+          <View style={styles.pixelTopStatusPill}>
+            <MaterialCommunityIcons name="moped" size={16} color="#16A34A" />
+            <Text style={styles.pixelTopStatusText}>{topStatusText}</Text>
+          </View>
+        </View>
 
-          {/* Progress Tracker Box */}
-          <View style={styles.trackerBox}>
-            <View style={styles.stepsRow}>
-              {stepLabels.map((label, idx) => {
-                const step = idx + 1;
-                const iconName = stepIcons[idx] as any;
+        <ScrollView
+          contentContainerStyle={{ paddingBottom: 110, paddingHorizontal: 16 }}
+          showsVerticalScrollIndicator={false}
+        >
+          {/* 4-Step Stepper */}
+          <View style={styles.pixelStepperBox}>
+            <View style={styles.pixelStepperTrack}>
+              {/* Line 1-2 */}
+              <View style={[styles.pixelStepperLine, { left: '12%', right: '62%', backgroundColor: stepIndex >= 2 ? '#16A34A' : '#E5E7EB' }]} />
+              {/* Line 2-3 */}
+              <View style={[styles.pixelStepperLine, { left: '38%', right: '38%', backgroundColor: stepIndex > 3 ? '#16A34A' : stepIndex === 3 ? '#EA580C' : '#E5E7EB' }]} />
+              {/* Line 3-4 */}
+              <View style={[styles.pixelStepperLine, { left: '62%', right: '12%', backgroundColor: stepIndex >= 4 ? '#16A34A' : '#E5E7EB' }]} />
+
+              {fourSteps.map((st, idx) => {
+                const sNum = idx + 1;
+                
+                let circleBg = '#FFFFFF';
+                let circleBorder = '#D1D5DB';
+                let iconColor = '#9CA3AF';
+                let textColor = '#6B7280';
+                let textWeight: any = '600';
+
+                if (sNum === 1 && stepIndex >= 1) {
+                  circleBg = '#16A34A';
+                  circleBorder = '#16A34A';
+                  iconColor = '#FFFFFF';
+                  textColor = '#16A34A';
+                  textWeight = '700';
+                } else if (sNum === 2) {
+                  if (stepIndex >= 2) {
+                    circleBg = '#16A34A';
+                    circleBorder = '#16A34A';
+                    iconColor = '#FFFFFF';
+                    textColor = '#16A34A';
+                    textWeight = '700';
+                  }
+                } else if (sNum === 3) {
+                  if (stepIndex > 3) {
+                    circleBg = '#16A34A';
+                    circleBorder = '#16A34A';
+                    iconColor = '#FFFFFF';
+                    textColor = '#16A34A';
+                    textWeight = '700';
+                  } else if (stepIndex === 3) {
+                    circleBg = '#EA580C';
+                    circleBorder = '#EA580C';
+                    iconColor = '#FFFFFF';
+                    textColor = '#EA580C';
+                    textWeight = '700';
+                  }
+                } else if (sNum === 4) {
+                  if (stepIndex >= 4) {
+                    circleBg = '#16A34A';
+                    circleBorder = '#16A34A';
+                    iconColor = '#FFFFFF';
+                    textColor = '#16A34A';
+                    textWeight = '700';
+                  }
+                }
+
                 return (
-                  <View key={step} style={styles.stepItem}>
-                    <View style={[styles.stepCircle, getStepStyle(step)]}>
-                      <Ionicons name={iconName} size={16} color={getStepIconColor(step)} />
+                  <View key={st.label} style={styles.pixelStepColumn}>
+                    <View style={[styles.pixelStepCircle, { backgroundColor: circleBg, borderColor: circleBorder }]}>
+                      {st.type === 'mc' ? (
+                        <MaterialCommunityIcons name={st.icon as any} size={18} color={iconColor} />
+                      ) : (
+                        <Ionicons name={st.icon as any} size={16} color={iconColor} />
+                      )}
                     </View>
-                    <Text style={[styles.stepLabel, { color: getStepTextColor(step) }]}>
-                      {label.replace(' ', '\n')}
+                    <Text style={[styles.pixelStepLabel, { color: textColor, fontWeight: textWeight }]}>
+                      {st.label}
                     </Text>
                   </View>
                 );
@@ -756,117 +894,269 @@ export default function TrackOrderScreen() {
             </View>
           </View>
 
-          <View style={{ paddingHorizontal: 16 }}>
-            {/* Status Banner Card */}
-            <View style={styles.bannerCard}>
-              <View style={styles.bannerIconCircle}>
-                <Ionicons name="flame" size={20} color="#ff4500" />
-              </View>
-              <View style={{ marginLeft: 12, flex: 1 }}>
-                <Text style={styles.bannerTitle}>{bannerTitle}</Text>
-                <Text style={styles.bannerSub}>{bannerSub}</Text>
-              </View>
+          {/* Mint Green Status Banner Card */}
+          <View style={styles.pixelMintBanner}>
+            <View style={styles.pixelMintIconBox}>
+              <MaterialCommunityIcons name="moped" size={24} color="#16A34A" />
             </View>
-
-            {networkError && <Text style={{ color: '#777', fontSize: 12, marginBottom: 12 }}>Retrying...</Text>}
-
-            {deliveryStatusRaw === DELIVERY_STATUS.DELIVERY_FAILED && (
-              <View style={[styles.bannerCard, { borderColor: '#dc2626', backgroundColor: '#fef2f2' }]}>
-                <Ionicons name="alert-circle" size={24} color="#dc2626" />
-                <Text style={[styles.bannerTitle, { color: '#dc2626', marginLeft: 12 }]}>Delivery issue. Please contact support.</Text>
-              </View>
-            )}
-
-            {deliveryStatusRaw === DELIVERY_STATUS.CANCELLED && (
-              <View style={[styles.bannerCard, { borderColor: '#6b7280', backgroundColor: '#f3f4f6' }]}>
-                <Ionicons name="close-circle" size={24} color="#6b7280" />
-                <Text style={[styles.bannerTitle, { color: '#374151', marginLeft: 12 }]}>This order was cancelled.</Text>
-              </View>
-            )}
-
-            {riderInfo && getDeliveryProgressStep(orderDetails?.order?.status, deliveryStatusRaw) >= 3 && (
-              <View style={styles.bannerCard}>
-                <Ionicons name="bicycle" size={24} color="#00a01d" />
-                <View style={{ marginLeft: 12, flex: 1 }}>
-                  <Text style={styles.bannerTitle}>{riderInfo.name || 'Delivery Partner'}</Text>
-                  <Text style={styles.bannerSub}>{getLabelForAssignment(assignmentStatus) || 'Rider assigned'}</Text>
-                  <Text style={styles.bannerSub}>{riderInfo.vehicle_type || 'Bike'} {riderInfo.vehicle_number || ''}</Text>
-                </View>
-              </View>
-            )}
-
-            {/* Current contextual status */}
-            <View style={styles.prepBox}>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.prepBoxLabel}>Current status</Text>
-                <Text style={styles.prepBoxTime}>{getDeliveryContextText(deliveryStatusRaw)}</Text>
-              </View>
-              <Ionicons name="time-outline" size={24} color="#fff" />
+            <View style={styles.pixelMintContentBox}>
+              <Text style={styles.pixelMintTitle}>
+                {stepIndex >= 3 ? 'Your order is on the way!' : stepIndex === 2 ? 'Chef is preparing your order!' : 'Your order is confirmed!'}
+              </Text>
+              <Text style={styles.pixelMintSubtitle}>
+                {stepIndex >= 3 ? 'The delivery partner has picked up your order.' : stepIndex === 2 ? 'Cooking fresh dishes in the kitchen.' : 'We are packing and getting ready.'}
+              </Text>
             </View>
-
-            {/* Searching Rider Banner */}
-            {isSearching && (
-              <View style={[styles.bannerCard, { borderColor: '#00a01d', marginBottom: 20 }]}>
-                <View style={[styles.bannerIconCircle, { backgroundColor: '#e6f7ec' }]}>
-                  <Ionicons name="search" size={20} color="#00a01d" />
-                </View>
-                <View style={{ marginLeft: 12, flex: 1 }}>
-                  <Text style={[styles.bannerTitle, { color: '#00a01d' }]}>Finding your delivery partner</Text>
-                  <Text style={styles.bannerSub}>We&apos;re assigning the best rider to you</Text>
-                </View>
-              </View>
-            )}
-
-            {/* Alert Box */}
-            <View style={styles.alertBox}>
-              <Ionicons name="bicycle-outline" size={20} color="#000" />
-              <View style={{ marginLeft: 10 }}>
-                <Text style={styles.alertBoxTitle}>{alertTitle}</Text>
-                <Text style={styles.alertBoxSub}>{alertSub}</Text>
-              </View>
-            </View>
-
-            {/* Dish Prep Status */}
-            <Text style={styles.dishSectionTitle}>Dish preparation status</Text>
-            <View style={styles.dishList}>
-              {orderItemsList.map((item: any, idx: number) => renderItemStatus(item, idx))}
+            <View style={styles.pixelMintEtaPill}>
+              <Ionicons name="time-outline" size={13} color="#15803D" style={{ marginRight: 4 }} />
+              <Text style={styles.pixelMintEtaText}>ETA  {etaVal}</Text>
             </View>
           </View>
 
-        </ScrollView>
+          {/* Delivery Partner Main Card */}
+          <View style={styles.pixelPartnerCard}>
+            <View style={styles.pixelPartnerTopRow}>
+              <View>
+                <Text style={styles.pixelPartnerLabel}>Delivery Partner</Text>
+                <Text style={styles.pixelPartnerName}>{partnerName}</Text>
+              </View>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                <View style={styles.pixelAssignedPill}>
+                  <Text style={styles.pixelAssignedText}>Assigned</Text>
+                </View>
+              </View>
+            </View>
 
-        {/* Bottom Actions */}
-        <View style={[styles.bottomBar, { paddingBottom: insets.bottom || 16 }]}>
-          {['PENDING', 'CONFIRMED'].includes((orderDetails?.order?.status || '').toUpperCase()) && (
+            {/* Row 1: Rider Name */}
+            <View style={styles.pixelDetailRow}>
+              <View style={styles.pixelRowLeft}>
+                <Ionicons name="person" size={18} color="#6B7280" style={styles.pixelRowIcon} />
+                <Text style={styles.pixelRowLabel}>Rider Name</Text>
+              </View>
+              <Text style={styles.pixelRowValue} numberOfLines={1}>{riderNameVal}</Text>
+            </View>
+
+            {/* Row 2: Rider Phone */}
+            <View style={styles.pixelDetailRow}>
+              <View style={styles.pixelRowLeft}>
+                <Ionicons name="call" size={18} color="#6B7280" style={styles.pixelRowIcon} />
+                <Text style={styles.pixelRowLabel}>Rider Phone</Text>
+              </View>
+              <Text style={[styles.pixelRowValue, { fontWeight: '600', color: '#111827' }]}>{riderPhoneVal}</Text>
+              <TouchableOpacity
+                style={styles.pixelGreenCallBtn}
+                onPress={() => {
+                  const ph = riderInfo?.phone || '9876543210';
+                  Linking.openURL(`tel:${ph}`);
+                }}
+                activeOpacity={0.8}
+              >
+                <Ionicons name="call" size={16} color="#FFFFFF" />
+              </TouchableOpacity>
+            </View>
+
+            {/* Row 3: Vehicle Type */}
+            <View style={styles.pixelDetailRow}>
+              <View style={styles.pixelRowLeft}>
+                <MaterialIcons name="two-wheeler" size={18} color="#6B7280" style={styles.pixelRowIcon} />
+                <Text style={styles.pixelRowLabel}>Vehicle Type</Text>
+              </View>
+              <Text style={styles.pixelRowValue}>{vehicleTypeVal}</Text>
+            </View>
+
+            {/* Row 4: Vehicle Number */}
+            <View style={styles.pixelDetailRow}>
+              <View style={styles.pixelRowLeft}>
+                <MaterialCommunityIcons name="card-bulleted-outline" size={18} color="#6B7280" style={styles.pixelRowIcon} />
+                <Text style={styles.pixelRowLabel}>Vehicle Number</Text>
+              </View>
+              <Text style={styles.pixelRowValue}>{vehicleNumberVal}</Text>
+            </View>
+
+            {/* Row 5: Assignment Status */}
+            <View style={styles.pixelDetailRow}>
+              <View style={styles.pixelRowLeft}>
+                <Ionicons name="time-outline" size={18} color="#6B7280" style={styles.pixelRowIcon} />
+                <Text style={styles.pixelRowLabel}>Assignment Status</Text>
+              </View>
+              <Text style={styles.pixelRowValue}>{assignmentStatusVal}</Text>
+            </View>
+
+            {/* Row 6: Estimated Arrival (ETA) */}
+            <View style={[styles.pixelDetailRow, { borderBottomWidth: 0 }]}>
+              <View style={styles.pixelRowLeft}>
+                <Ionicons name="time-outline" size={18} color="#6B7280" style={styles.pixelRowIcon} />
+                <Text style={styles.pixelRowLabel}>Estimated Arrival (ETA)</Text>
+              </View>
+              <Text style={styles.pixelRowValue}>{etaVal}</Text>
+            </View>
+
+            {/* Track on Partner App Button */}
             <TouchableOpacity
-              style={[styles.callButton, { borderColor: '#FECACA', backgroundColor: '#FEF2F2', marginRight: 8 }]}
-              onPress={() => openCancelModal()}
+              style={styles.pixelTrackPartnerAppBtn}
+              onPress={() => {
+                const externalUrl = trackingData?.assignment?.tracking_url || riderInfo?.tracking_url;
+                if (externalUrl) {
+                  Linking.openURL(externalUrl);
+                } else {
+                  const dbId = params.dbOrderId || liveDbOrderId || orderDetails?.order?.id;
+                  router.push({
+                    pathname: '/delivery-tracking',
+                    params: {
+                      orderId: params.orderId || `ORD-${orderDetails?.order?.id || ''}`,
+                      dbOrderId: String(dbId || ''),
+                      cart: params.cart,
+                      totalAmount: orderDetails?.order?.total_amount?.toString() || '0',
+                      paymentMethod: orderDetails?.order?.payment_method || 'CASH',
+                    }
+                  });
+                }
+              }}
+              activeOpacity={0.8}
+            >
+              <Ionicons name="open-outline" size={18} color="#16A34A" />
+              <Text style={styles.pixelTrackPartnerAppText}>Track on Partner App</Text>
+              <Ionicons name="chevron-forward" size={16} color="#16A34A" />
+            </TouchableOpacity>
+          </View>
+
+          {/* Order Summary Collapsible Card */}
+          <View style={styles.pixelSummaryCard}>
+            <TouchableOpacity
+              style={styles.pixelSummaryHeader}
+              onPress={() => setOrderSummaryExpanded(prev => !prev)}
               activeOpacity={0.7}
             >
-              <Ionicons name="close-circle-outline" size={18} color="#DC2626" />
-              <Text style={[styles.callBtnText, { color: '#DC2626', fontWeight: '700', marginLeft: 4 }]}>Cancel</Text>
+              <View style={styles.pixelSummaryTitleRow}>
+                <Text style={styles.pixelSummaryTitle}>Order Summary</Text>
+                <Text style={styles.pixelSummaryCount}>({displayItems.length} Items)</Text>
+              </View>
+              <View style={styles.pixelSummaryPriceRow}>
+                <Text style={styles.pixelSummaryPriceText}>₹{totalAmountVal.toFixed(0)}</Text>
+                <Ionicons
+                  name={orderSummaryExpanded ? "chevron-up" : "chevron-down"}
+                  size={18}
+                  color="#EA580C"
+                  style={{ marginLeft: 4 }}
+                />
+              </View>
             </TouchableOpacity>
-          )}
-          <TouchableOpacity style={styles.callButton} onPress={() => Linking.openURL(`tel:${selectedOutlet?.phone || '1234567890'}`)}
-          >
-            <Ionicons name="call-outline" size={18} color="#000" />
-            <Text style={styles.callBtnText}>Call Restaurant</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={[styles.orderMoreBtn, { backgroundColor: '#ff4500' }]}
-            onPress={() => {
-              const dbId = params.dbOrderId || liveDbOrderId;
-              if (dbId) {
-                router.push({
-                  pathname: '/delivery-tracking',
-                  params: { orderId: params.orderId, dbOrderId: dbId, cart: params.cart }
-                });
-              }
-            }}
-          >
-            <Text style={styles.orderMoreText}>Track Order</Text>
-            <Ionicons name="navigate-outline" size={18} color="#fff" />
-          </TouchableOpacity>
-        </View>
+
+            {orderSummaryExpanded && (
+              <View style={styles.pixelSummaryBody}>
+                {displayItems.map((item: any, idx: number) => {
+                  const qty = Number(item.quantity || item.qty || 1);
+                  const price = Number(item.price || 0);
+                  const imgUri = getFullImageUrl(item.image_url || item.image, item.name);
+                  return (
+                    <View key={item.id || item.menu_item_id || idx} style={styles.pixelItemRow}>
+                      <Image
+                        source={{ uri: imgUri || "https://images.unsplash.com/photo-1610192244261-3f33de3f55e4?w=150" }}
+                        style={styles.pixelItemThumb}
+                      />
+                      <View style={{ flex: 1, marginLeft: 12 }}>
+                        <Text style={styles.pixelItemName} numberOfLines={1}>{item.name || 'South Indian Meals'}</Text>
+                        <Text style={styles.pixelItemSub}>{qty} × ₹{price.toFixed(0)}</Text>
+                      </View>
+                      <Text style={{ fontSize: 14, fontWeight: '700', color: '#111827', marginLeft: 8 }}>₹{(price * qty).toFixed(0)}</Text>
+                    </View>
+                  );
+                })}
+
+                {/* Split up Bill Summary */}
+                {(() => {
+                  const itemsSubtotal = displayItems.reduce((acc: number, it: any) => {
+                    return acc + (Number(it.price || 0) * Number(it.quantity || it.qty || 1));
+                  }, 0);
+                  const orderObj = orderDetails?.order;
+                  const subtotalVal = Number(orderObj?.subtotal || itemsSubtotal);
+                  const deliveryFeeVal = Number(orderObj?.delivery_fee || 0);
+                  const taxesVal = Number(orderObj?.gst_amount || 0);
+                  const discountVal = Number(orderObj?.discount_amount || 0);
+
+                  return (
+                    <View style={{ marginTop: 8, paddingTop: 6 }}>
+                      <View style={{ height: 1, backgroundColor: '#E5E7EB', marginBottom: 10 }} />
+                      <Text style={{ fontSize: 11, fontWeight: '800', color: '#9CA3AF', letterSpacing: 0.8, marginBottom: 8 }}>BILL SUMMARY</Text>
+
+                      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                        <Text style={{ fontSize: 13, color: '#4B5563', fontWeight: '500' }}>Item Total</Text>
+                        <Text style={{ fontSize: 13, color: '#111827', fontWeight: '600' }}>₹{subtotalVal.toFixed(0)}</Text>
+                      </View>
+
+                      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                        <Text style={{ fontSize: 13, color: '#4B5563', fontWeight: '500' }}>Delivery Fee</Text>
+                        {deliveryFeeVal > 0 ? (
+                          <Text style={{ fontSize: 13, color: '#111827', fontWeight: '600' }}>₹{deliveryFeeVal.toFixed(0)}</Text>
+                        ) : (
+                          <Text style={{ fontSize: 13, color: '#111827', fontWeight: '600' }}>
+                            <Text style={{ textDecorationLine: 'line-through', color: '#9CA3AF' }}>₹40</Text>
+                            <Text style={{ color: '#16A34A', fontWeight: '700' }}> FREE</Text>
+                          </Text>
+                        )}
+                      </View>
+
+                      {taxesVal > 0 && (
+                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                          <Text style={{ fontSize: 13, color: '#4B5563', fontWeight: '500' }}>Taxes & Restaurant Charges</Text>
+                          <Text style={{ fontSize: 13, color: '#111827', fontWeight: '600' }}>₹{taxesVal.toFixed(2)}</Text>
+                        </View>
+                      )}
+
+                      {discountVal > 0 && (
+                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                          <Text style={{ fontSize: 13, color: '#DC2626', fontWeight: '500' }}>Coupon / Discount</Text>
+                          <Text style={{ fontSize: 13, color: '#DC2626', fontWeight: '600' }}>- ₹{discountVal.toFixed(2)}</Text>
+                        </View>
+                      )}
+
+                      <View style={{ marginTop: 6, paddingTop: 8, borderTopWidth: 1, borderTopColor: '#E5E7EB', flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <Text style={{ fontSize: 14, fontWeight: '800', color: '#111827' }}>To Pay / Paid</Text>
+                        <Text style={{ fontSize: 16, fontWeight: '800', color: '#EA580C' }}>₹{totalAmountVal.toFixed(0)}</Text>
+                      </View>
+                    </View>
+                  );
+                })()}
+              </View>
+            )}
+          </View>
+
+          {/* Need help with your order? Card */}
+          <View style={styles.pixelHelpCard}>
+            <View style={styles.pixelHelpIconWrap}>
+              <Ionicons name="headset-outline" size={22} color="#EA580C" />
+            </View>
+            <View style={{ flex: 1, marginLeft: 12 }}>
+              <Text style={styles.pixelHelpTitle}>Need help with your order?</Text>
+              <Text style={styles.pixelHelpSub}>Our support team is here to help</Text>
+            </View>
+            <TouchableOpacity
+              style={styles.pixelChatBtn}
+              onPress={() => {
+                const phone = selectedOutlet?.phone || '1234567890';
+                Linking.openURL(`tel:${phone}`);
+              }}
+              activeOpacity={0.8}
+            >
+              <Text style={styles.pixelChatBtnText}>Chat</Text>
+            </TouchableOpacity>
+          </View>
+        </ScrollView>
+
+        {/* Bottom cancellation if order is PENDING/CONFIRMED */}
+        {['PENDING', 'CONFIRMED'].includes(orderStatusRaw) && (
+          <View style={[styles.pixelCancelBar, { paddingBottom: insets.bottom || 16 }]}>
+            <TouchableOpacity
+              style={styles.pixelCancelBtn}
+              onPress={() => openCancelModal()}
+              activeOpacity={0.8}
+            >
+              <Ionicons name="close-circle-outline" size={18} color="#DC2626" />
+              <Text style={styles.pixelCancelBtnText}>Cancel Order</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+
 
         {renderCancelModal()}
       </View>
@@ -977,6 +1267,13 @@ export default function TrackOrderScreen() {
                     <Text style={styles.dineInTopCardOrderIdLabel}>Order ID</Text>
                     <Text style={styles.dineInTopCardOrderIdValue}>{params.orderId}</Text>
                   </View>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                    {billNumber ? (
+                      <View style={styles.dineInBillBadge}>
+                        <Ionicons name="receipt-outline" size={11} color="#fff" style={{ marginRight: 4 }} />
+                        <Text style={styles.dineInBillBadgeText}>Bill #{billNumber}</Text>
+                      </View>
+                    ) : null}
                   {dineInStatusRaw === 'CANCELLED' ? (
                     <View style={[styles.dineInLiveBadge, { backgroundColor: '#dc2626' }]}>
                       <Ionicons name="close-circle" size={10} color="#fff" style={{ marginRight: 4 }} />
@@ -988,6 +1285,7 @@ export default function TrackOrderScreen() {
                       <Text style={styles.dineInLiveText}>Live</Text>
                     </View>
                   )}
+                  </View>
                 </View>
 
                 <View style={styles.dineInTopCardBottomRow}>
@@ -1179,24 +1477,60 @@ export default function TrackOrderScreen() {
                 <Text style={styles.dineInOrderSummaryTitle}>Your Order</Text>
                 
                 <View style={styles.dineInOrderItems}>
-                  {orderItemsList.map((item: any, idx: number) => (
-                    <View key={idx} style={styles.dineInOrderItemRow}>
-                      <Text style={styles.dineInOrderItemName} numberOfLines={1}>
-                        {item.quantity || item.qty || 1} x {item.name || item.title || 'Item'}
-                      </Text>
-                      <Text style={styles.dineInOrderItemPrice}>
-                        Rs. {item.price * (item.quantity || item.qty || 1)}
-                      </Text>
+                  {orderItemsList.map((item: any, idx: number) => {
+                    const qty = Number(item.quantity || item.qty || 1);
+                    const pr = Number(item.price || 0);
+                    return (
+                      <View key={idx} style={styles.dineInOrderItemRow}>
+                        <Text style={styles.dineInOrderItemName} numberOfLines={1}>
+                          {qty} x {item.name || item.title || 'Item'}
+                        </Text>
+                        <Text style={styles.dineInOrderItemPrice}>
+                          Rs. {pr * qty}
+                        </Text>
+                      </View>
+                    );
+                  })}
+                </View>
+
+                {/* Split up Bill Summary */}
+                {(() => {
+                  const subtotal = getDineInSubtotal();
+                  const orderObj = orderDetails?.order;
+                  const taxesVal = Number(orderObj?.gst_amount || 0);
+                  const discountVal = Number(orderObj?.discount_amount || 0);
+                  const finalTotal = subtotal + taxesVal - discountVal;
+
+                  return (
+                    <View style={{ marginTop: 10, paddingTop: 8, borderTopWidth: 1, borderTopColor: '#f1f5f9' }}>
+                      <Text style={{ fontSize: 11, fontWeight: '800', color: '#94a3b8', letterSpacing: 0.8, marginBottom: 8 }}>BILL SUMMARY</Text>
+
+                      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                        <Text style={{ fontSize: 13, color: '#64748b', fontWeight: '500' }}>Item Subtotal</Text>
+                        <Text style={{ fontSize: 13, color: '#1e293b', fontWeight: '600' }}>Rs. {subtotal}</Text>
+                      </View>
+
+                      {taxesVal > 0 && (
+                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                          <Text style={{ fontSize: 13, color: '#64748b', fontWeight: '500' }}>Taxes & GST</Text>
+                          <Text style={{ fontSize: 13, color: '#1e293b', fontWeight: '600' }}>Rs. {taxesVal.toFixed(2)}</Text>
+                        </View>
+                      )}
+
+                      {discountVal > 0 && (
+                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                          <Text style={{ fontSize: 13, color: '#ef4444', fontWeight: '500' }}>Discount</Text>
+                          <Text style={{ fontSize: 13, color: '#ef4444', fontWeight: '600' }}>- Rs. {discountVal.toFixed(2)}</Text>
+                        </View>
+                      )}
+
+                      <View style={{ marginTop: 6, paddingTop: 8, borderTopWidth: 1, borderTopColor: '#e2e8f0', flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <Text style={styles.dineInOrderTotalLabel}>Grand Total :</Text>
+                        <Text style={styles.dineInOrderTotalValue}>Rs. {finalTotal.toFixed(0)}</Text>
+                      </View>
                     </View>
-                  ))}
-                </View>
-
-                <View style={styles.dineInOrderSummaryDivider} />
-
-                <View style={styles.dineInOrderTotalRow}>
-                  <Text style={styles.dineInOrderTotalLabel}>Total :</Text>
-                  <Text style={styles.dineInOrderTotalValue}>Rs. {getDineInSubtotal()}</Text>
-                </View>
+                  );
+                })()}
               </View>
             )}
 
@@ -1320,8 +1654,19 @@ export default function TrackOrderScreen() {
         
         {/* Header */}
         <View style={styles.headerBlock}>
-           <Text style={styles.orderIdText}>#{params.orderId}</Text>
-           <Text style={styles.pageTitle}>Order Status</Text>
+          <View style={styles.takeawayHeaderRow}>
+            <View>
+              <Text style={styles.orderIdText}>#{params.orderId}</Text>
+              <Text style={styles.pageTitle}>Order Status</Text>
+            </View>
+            {billNumber ? (
+              <View style={styles.takeawayBillBadge}>
+                <Ionicons name="receipt" size={14} color="#ea580c" style={{ marginRight: 5 }} />
+                <Text style={styles.takeawayBillBadgeLabel}>BILL</Text>
+                <Text style={styles.takeawayBillBadgeValue}>#{billNumber}</Text>
+              </View>
+            ) : null}
+          </View>
         </View>
 
         {rawStatus === 'CANCELLED' ? (
@@ -1506,6 +1851,67 @@ const styles = StyleSheet.create({
   headerBlock: {
     paddingHorizontal: 20,
     marginBottom: 16,
+  },
+  takeawayHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+  },
+  takeawayBillBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#fff7ed',
+    borderWidth: 1.5,
+    borderColor: '#fed7aa',
+    paddingVertical: 5,
+    paddingHorizontal: 12,
+    borderRadius: 16,
+    shadowColor: '#ea580c',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 3,
+    elevation: 2,
+  },
+  takeawayBillBadgeLabel: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: '#ea580c',
+    letterSpacing: 0.8,
+    marginRight: 4,
+  },
+  takeawayBillBadgeValue: {
+    fontSize: 14,
+    fontWeight: '900',
+    color: '#9a3412',
+    letterSpacing: 0.3,
+  },
+  dineInBillBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.25)',
+    paddingVertical: 3,
+    paddingHorizontal: 8,
+    borderRadius: 10,
+  },
+  dineInBillBadgeText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#fff',
+  },
+  deliveryBillBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#f0fdf4',
+    borderWidth: 1,
+    borderColor: '#bbf7d0',
+    paddingVertical: 2,
+    paddingHorizontal: 8,
+    borderRadius: 10,
+  },
+  deliveryBillBadgeText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#16a34a',
   },
   orderIdText: {
     color: '#ff4500',
@@ -2247,5 +2653,513 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#B91C1C',
     lineHeight: 16,
+  },
+  tpDeliveryCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    padding: 16,
+    marginTop: 10,
+    marginBottom: 14,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  tpPartnerCardHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  tpPartnerBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: '#FFF5F2',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#FFD5CC',
+  },
+  tpPartnerBadgeText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#FF3400',
+  },
+  tpAdminAssignBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#F3F4F6',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 8,
+  },
+  tpAdminAssignBtnText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#374151',
+  },
+  tpRiderDetailBody: {
+    marginTop: 4,
+  },
+  tpRiderInfoRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  tpRiderAvatar: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#F3F4F6',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  tpRiderNameText: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#111827',
+  },
+  tpRiderSubText: {
+    fontSize: 12,
+    color: '#6B7280',
+    marginTop: 2,
+  },
+  tpCallRiderBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#E8F8EE',
+    borderWidth: 1,
+    borderColor: '#B9F1CC',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 20,
+  },
+  tpCallRiderBtnText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#00a01d',
+  },
+  tpRiderMetaRow: {
+    flexDirection: 'row',
+    gap: 10,
+    marginTop: 12,
+    paddingTop: 10,
+    borderTopWidth: 1,
+    borderTopColor: '#F3F4F6',
+  },
+  tpMetaPill: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#F9FAFB',
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+    borderRadius: 6,
+  },
+  tpMetaPillLabel: {
+    fontSize: 11,
+    color: '#6B7280',
+    fontWeight: '500',
+  },
+  tpMetaPillValue: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#111827',
+  },
+  tpExternalTrackBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    backgroundColor: '#EFF6FF',
+    borderWidth: 1,
+    borderColor: '#BFDBFE',
+    paddingVertical: 10,
+    borderRadius: 10,
+    marginTop: 12,
+  },
+  tpExternalTrackBtnText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#2563EB',
+  },
+  tpUnassignedBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: '#FFFBEB',
+    padding: 12,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#FDE68A',
+  },
+  tpUnassignedText: {
+    fontSize: 13,
+    color: '#92400E',
+    fontWeight: '500',
+    flex: 1,
+  },
+  tpViewMapActionBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    backgroundColor: '#FF3400',
+    paddingVertical: 12,
+    borderRadius: 12,
+    marginTop: 14,
+  },
+  tpViewMapActionText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  // Pixel-perfect reference styles
+  pixelContainer: {
+    flex: 1,
+    backgroundColor: '#FFFFFF',
+  },
+  pixelHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingBottom: 12,
+    backgroundColor: '#FFFFFF',
+  },
+  pixelBackBtn: {
+    padding: 6,
+    marginLeft: -6,
+    marginRight: 8,
+  },
+  pixelHeaderTitleBlock: {
+    flex: 1,
+  },
+  pixelHeaderTitle: {
+    fontSize: 20,
+    fontWeight: '800',
+    color: '#111827',
+  },
+  pixelHeaderSubtitle: {
+    fontSize: 13,
+    color: '#6B7280',
+    marginTop: 2,
+  },
+  pixelTopStatusPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#E8F8EE',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 20,
+  },
+  pixelTopStatusText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#16A34A',
+    marginLeft: 5,
+  },
+  pixelStepperBox: {
+    marginVertical: 18,
+  },
+  pixelStepperTrack: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    position: 'relative',
+  },
+  pixelStepperLine: {
+    position: 'absolute',
+    top: 16,
+    height: 2,
+    zIndex: 0,
+  },
+  pixelStepColumn: {
+    alignItems: 'center',
+    width: 75,
+    zIndex: 1,
+  },
+  pixelStepCircle: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    borderWidth: 2,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 6,
+  },
+  pixelStepLabel: {
+    fontSize: 11,
+    textAlign: 'center',
+    lineHeight: 14,
+  },
+  pixelMintBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F0FDF4',
+    borderWidth: 1,
+    borderColor: '#DCFCE7',
+    borderRadius: 14,
+    padding: 12,
+    marginBottom: 14,
+  },
+  pixelMintIconBox: {
+    width: 40,
+    height: 40,
+    borderRadius: 10,
+    backgroundColor: '#DCFCE7',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  pixelMintContentBox: {
+    flex: 1,
+    marginHorizontal: 10,
+  },
+  pixelMintTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#111827',
+  },
+  pixelMintSubtitle: {
+    fontSize: 12,
+    color: '#6B7280',
+    marginTop: 2,
+  },
+  pixelMintEtaPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#DCFCE7',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 10,
+  },
+  pixelMintEtaText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#15803D',
+  },
+  pixelPartnerCard: {
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 14,
+  },
+  pixelPartnerTopRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 14,
+    paddingBottom: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F3F4F6',
+  },
+  pixelPartnerLabel: {
+    fontSize: 12,
+    color: '#6B7280',
+  },
+  pixelPartnerName: {
+    fontSize: 18,
+    fontWeight: '800',
+    color: '#111827',
+    marginTop: 2,
+  },
+  pixelAssignedPill: {
+    backgroundColor: '#DCFCE7',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 8,
+  },
+  pixelAssignedText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#16A34A',
+  },
+  pixelAdminIconBtn: {
+    padding: 4,
+  },
+  pixelDetailRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F9FAFB',
+  },
+  pixelRowLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    width: 140,
+  },
+  pixelRowIcon: {
+    marginRight: 8,
+  },
+  pixelRowLabel: {
+    fontSize: 13,
+    color: '#6B7280',
+  },
+  pixelRowValue: {
+    fontSize: 13,
+    color: '#1F2937',
+    fontWeight: '500',
+    flex: 1,
+  },
+  pixelGreenCallBtn: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: '#00A01D',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: 8,
+  },
+  pixelTrackPartnerAppBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#F0FDF4',
+    borderWidth: 1,
+    borderColor: '#22C55E',
+    borderRadius: 12,
+    paddingVertical: 12,
+    marginTop: 14,
+  },
+  pixelTrackPartnerAppText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#16A34A',
+    marginHorizontal: 8,
+  },
+  pixelSummaryCard: {
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 14,
+  },
+  pixelSummaryHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  pixelSummaryTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  pixelSummaryTitle: {
+    fontSize: 15,
+    fontWeight: '800',
+    color: '#111827',
+  },
+  pixelSummaryCount: {
+    fontSize: 13,
+    color: '#6B7280',
+    marginLeft: 6,
+  },
+  pixelSummaryPriceRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  pixelSummaryPriceText: {
+    fontSize: 16,
+    fontWeight: '800',
+    color: '#FF3400',
+  },
+  pixelSummaryBody: {
+    marginTop: 14,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: '#F3F4F6',
+  },
+  pixelItemRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 6,
+  },
+  pixelItemThumb: {
+    width: 44,
+    height: 44,
+    borderRadius: 8,
+  },
+  pixelItemName: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#111827',
+  },
+  pixelItemSub: {
+    fontSize: 12,
+    color: '#6B7280',
+    marginTop: 2,
+  },
+  pixelHelpCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FFF7ED',
+    borderWidth: 1,
+    borderColor: '#FFEDD5',
+    borderRadius: 16,
+    padding: 14,
+    marginBottom: 14,
+  },
+  pixelHelpIconWrap: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#FFEDD5',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  pixelHelpTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#111827',
+  },
+  pixelHelpSub: {
+    fontSize: 12,
+    color: '#6B7280',
+    marginTop: 2,
+  },
+  pixelChatBtn: {
+    backgroundColor: '#FFEDD5',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 20,
+  },
+  pixelChatBtnText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#EA580C',
+  },
+  pixelCancelBar: {
+    paddingHorizontal: 16,
+    paddingTop: 10,
+    backgroundColor: '#FFFFFF',
+    borderTopWidth: 1,
+    borderTopColor: '#F3F4F6',
+  },
+  pixelCancelBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    backgroundColor: '#FEF2F2',
+    borderWidth: 1,
+    borderColor: '#FECACA',
+    paddingVertical: 12,
+    borderRadius: 12,
+  },
+  pixelCancelBtnText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#DC2626',
   },
 });

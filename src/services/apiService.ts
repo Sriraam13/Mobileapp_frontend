@@ -212,22 +212,28 @@ export const restaurantApi = {
  */
 export const menuApi = {
   /** GET /api/v1/public/menu/categories */
-  getCategories: (restaurantId: number, force = false) => {
+  getCategories: (restaurantId: number, force = false, options?: { orderType?: string; acType?: string }) => {
     if (!restaurantId) throw new Error("restaurantId is required");
+    const orderTypeParam = options?.orderType ? `&order_type=${encodeURIComponent(options.orderType)}` : '';
+    const acTypeParam = options?.acType ? `&ac_type=${encodeURIComponent(options.acType)}` : '';
+    const cacheKey = `categories_${restaurantId}_${options?.orderType || 'all'}_${options?.acType || 'all'}`;
     return cachedFetch(
-      `categories_${restaurantId}`,
-      () => fetchWithTimeout(`${API_BASE_URL}/api/v1/public/menu/categories?restaurant_id=${restaurantId}`),
+      cacheKey,
+      () => fetchWithTimeout(`${API_BASE_URL}/api/v1/public/menu/categories?restaurant_id=${restaurantId}${orderTypeParam}${acTypeParam}`),
       60000,
       force
     );
   },
 
   /** GET /api/v1/public/menu/items */
-  getItems: (restaurantId: number, force = false) => {
+  getItems: (restaurantId: number, force = false, options?: { orderType?: string; acType?: string }) => {
     if (!restaurantId) throw new Error("restaurantId is required");
+    const orderTypeParam = options?.orderType ? `&order_type=${encodeURIComponent(options.orderType)}` : '';
+    const acTypeParam = options?.acType ? `&ac_type=${encodeURIComponent(options.acType)}` : '';
+    const cacheKey = `items_${restaurantId}_${options?.orderType || 'all'}_${options?.acType || 'all'}`;
     return cachedFetch(
-      `items_${restaurantId}`,
-      () => fetchWithTimeout(`${API_BASE_URL}/api/v1/public/menu/items?restaurant_id=${restaurantId}`),
+      cacheKey,
+      () => fetchWithTimeout(`${API_BASE_URL}/api/v1/public/menu/items?restaurant_id=${restaurantId}${orderTypeParam}${acTypeParam}`),
       60000,
       force
     );
@@ -504,6 +510,40 @@ export const deliveryApi = {
     fetchWithTimeout(
       `${API_BASE_URL}/api/v1/public/orders/${encodeURIComponent(orderId)}/tracking`,
     ),
+
+  /** GET /api/v1/delivery/orders/{orderId}/assignment — fetch assigned partner/rider details */
+  getDeliveryAssignment: (orderId: string | number) =>
+    fetchWithTimeout(
+      `${API_BASE_URL}/api/v1/delivery/orders/${encodeURIComponent(String(orderId))}/assignment`,
+    ),
+
+  /** POST /api/v1/delivery/orders/{orderId}/assign-partner — assign third-party partner rider */
+  assignThirdPartyPartner: (
+    orderId: string | number,
+    payload: {
+      partner: string;
+      rider_name: string;
+      rider_phone: string;
+      vehicle_type?: string;
+      vehicle_number?: string;
+      eta?: string;
+      tracking_url?: string;
+      otp?: string;
+    }
+  ) =>
+    fetchWithTimeout(`${API_BASE_URL}/api/v1/delivery/orders/${encodeURIComponent(String(orderId))}/assign-partner`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    }),
+
+  /** POST /api/v1/delivery/orders/{orderId}/status — update delivery order status */
+  updateOrderStatus: (orderId: string | number, status: string) =>
+    fetchWithTimeout(`${API_BASE_URL}/api/v1/delivery/orders/${encodeURIComponent(String(orderId))}/status`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status }),
+    }),
 };
 
 /**

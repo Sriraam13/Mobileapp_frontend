@@ -5,6 +5,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRestaurantStore, useLiveOrderStore } from '../../store';
+import { purgeDeletedOrderLocally } from '../../store/sessionUtils';
 import { orderApi } from '../../services/apiService';
 import { parseDate, formatTime } from '../../utils/dateUtils';
 
@@ -78,14 +79,17 @@ export default function DeliverySuccessScreen() {
           setOrderDetails(data);
         }
       } catch (err: any) {
-        console.warn("Failed to fetch delivery order details", err?.message || err);
-        if (err?.message?.includes("404") || err?.message?.includes("not found")) {
+        const msg = String(err?.message || err || '').toLowerCase();
+        const isNotFound = err?.status === 404 || msg.includes('404') || msg.includes('not found');
+        if (isNotFound) {
           if (intervalId) clearInterval(intervalId);
-          useLiveOrderStore.getState().clearLiveOrder();
-          Alert.alert("Order Not Found", "Your order could not be found on the server.", [
+          await purgeDeletedOrderLocally(dbOrderId || params.orderId || '');
+          Alert.alert("Order Not Found", "This order is no longer available in the system.", [
             { text: "OK", onPress: () => router.replace('/(main)/home') }
           ]);
+          return;
         }
+        console.warn("Failed to fetch delivery order details", err?.message || err);
       }
     };
 
@@ -218,6 +222,8 @@ export default function DeliverySuccessScreen() {
         cart: params.cart,
         orderType: params.orderType,
         phone: params.phone,
+        totalAmount: params.total,
+        paymentMethod: params.paymentMethod,
       }
     });
   };
@@ -228,7 +234,8 @@ export default function DeliverySuccessScreen() {
   };
 
   const displayTotal = params.total || '0.00';
-  const displayPayment = params.paymentMethod || 'Cash';
+  const rawPayment = params.paymentMethod || orderDetails?.order?.payment_method || 'UPI';
+  const displayPayment = (!rawPayment || rawPayment.toLowerCase().includes('cash') || rawPayment.toLowerCase().includes('cod')) ? 'UPI' : rawPayment;
   const orderIdText = params.orderId ? params.orderId.replace('ORD-', 'UDP-') : 'UDP-868518';
 
   // Calculate ETA dynamically from order creation or fallback
@@ -294,7 +301,7 @@ export default function DeliverySuccessScreen() {
           </View>
         </View>
 
-        {/* Order Details Card */}
+        {/* Order Details & Bill Summary Card */}
         <View style={styles.card}>
            <View style={styles.detailRow}>
              <Text style={styles.detailLabel}>Items</Text>
@@ -304,10 +311,70 @@ export default function DeliverySuccessScreen() {
              <Text style={styles.detailLabel}>Table / Mode</Text>
              <Text style={styles.detailValue}>Delivery to Home</Text>
            </View>
-           <View style={[styles.detailRow, { marginBottom: 0 }]}>
-             <Text style={styles.detailLabel}>Amount Paid</Text>
-             <Text style={styles.detailAmount}>Rs. {displayTotal}</Text>
-           </View>
+
+           {/* Split-up Bill Summary Breakdown */}
+           {(() => {
+             const orderObj = orderDetails?.order;
+             const parsedCart = (() => {
+               try {
+                 if (params.cart && params.cart !== '[object Object]') {
+                   const c = typeof params.cart === 'string' ? JSON.parse(params.cart) : params.cart;
+                   if (Array.isArray(c)) return c;
+                 }
+               } catch (e) {}
+               return [];
+             })();
+             const itemsSubtotal = parsedCart.reduce((sum: number, it: any) => {
+               return sum + (Number(it.price || 0) * Number(it.quantity || 1));
+             }, 0);
+             const subtotalVal = Number(itemsSubtotal > 0 ? itemsSubtotal : (orderObj?.subtotal || params.total || 0));
+             const deliveryFeeVal = 0;
+             const taxesVal = Number(orderObj?.gst_amount || 0);
+             const discountVal = Number(orderObj?.discount_amount || 0);
+             const safeTotal = itemsSubtotal > 0 ? (itemsSubtotal + taxesVal - discountVal).toFixed(0) : Math.max(0, Number(orderObj?.total_amount || params.total || 0) - Number(orderObj?.delivery_fee || 0)).toFixed(0);
+
+             return (
+               <View style={{ marginTop: 8, paddingTop: 10, borderTopWidth: 1, borderTopColor: '#f3f4f6' }}>
+                 <Text style={{ fontSize: 11, fontWeight: '800', color: '#9CA3AF', letterSpacing: 0.8, marginBottom: 8 }}>BILL SUMMARY</Text>
+
+                 <View style={styles.detailRow}>
+                   <Text style={[styles.detailLabel, { fontSize: 13 }]}>Item Total</Text>
+                   <Text style={[styles.detailValue, { fontSize: 13, fontWeight: '600' }]}>Rs. {subtotalVal.toFixed(0)}</Text>
+                 </View>
+
+                 <View style={styles.detailRow}>
+                   <Text style={[styles.detailLabel, { fontSize: 13 }]}>Delivery Fee</Text>
+                   {deliveryFeeVal > 0 ? (
+                     <Text style={[styles.detailValue, { fontSize: 13, fontWeight: '600' }]}>Rs. {deliveryFeeVal.toFixed(0)}</Text>
+                   ) : (
+                     <Text style={[styles.detailValue, { fontSize: 13 }]}>
+                       <Text style={{ textDecorationLine: 'line-through', color: '#9CA3AF' }}>Rs. 40</Text>
+                       <Text style={{ color: '#00a01d', fontWeight: '700' }}> FREE</Text>
+                     </Text>
+                   )}
+                 </View>
+
+                 {taxesVal > 0 && (
+                   <View style={styles.detailRow}>
+                     <Text style={[styles.detailLabel, { fontSize: 13 }]}>Taxes & Charges</Text>
+                     <Text style={[styles.detailValue, { fontSize: 13, fontWeight: '600' }]}>Rs. {taxesVal.toFixed(2)}</Text>
+                   </View>
+                 )}
+
+                 {discountVal > 0 && (
+                   <View style={styles.detailRow}>
+                     <Text style={[styles.detailLabel, { fontSize: 13, color: '#ff4500' }]}>Discount</Text>
+                     <Text style={[styles.detailValue, { fontSize: 13, fontWeight: '600', color: '#ff4500' }]}>- Rs. {discountVal.toFixed(2)}</Text>
+                   </View>
+                 )}
+
+                 <View style={[styles.detailRow, { marginTop: 6, paddingTop: 8, borderTopWidth: 1, borderTopColor: '#f3f4f6', marginBottom: 0 }]}>
+                   <Text style={[styles.detailLabel, { fontWeight: '700', color: '#111827' }]}>Amount Paid</Text>
+                   <Text style={styles.detailAmount}>Rs. {safeTotal}</Text>
+                 </View>
+               </View>
+             );
+           })()}
         </View>
 
         {/* Restaurant Pill */}

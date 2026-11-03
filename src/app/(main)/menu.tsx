@@ -3,7 +3,7 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { Ionicons } from '@expo/vector-icons';
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { useRouter, useLocalSearchParams } from 'expo-router';
-import { useVoiceAgentStore, useAuthStore, useOrderStore, useCartStore, useLiveOrderStore, useDineInSessionStore, useRestaurantStore } from '../../store';
+import { useVoiceAgentStore, useAuthStore, useOrderStore, useCartStore, useLiveOrderStore, useDineInSessionStore, useRestaurantStore, useAddressStore } from '../../store';
 import { menuApi, orderApi, tableApi } from '../../services/apiService';
 import { getFullImageUrl } from '../../constants/api';
 import { BrandColors } from '../../constants/theme';
@@ -190,6 +190,7 @@ export default function App() {
   const getItemCount = useCartStore(s => s.getItemCount);
   const getSubtotal = useCartStore(s => s.getSubtotal);
   const clearCart = useCartStore(s => s.clearCart);
+  const selectedDeliveryAddress = useAddressStore(s => s.selectedDeliveryAddress);
   
   useEffect(() => {
     const onBackPress = () => {
@@ -455,9 +456,23 @@ export default function App() {
   const fetchMenu = async (forceRefresh = false) => {
       if (!restaurantId) return;
       try {
-            // Fetch items first so we know which categories are actually used
-            const itemData = await menuApi.getItems(restaurantId, forceRefresh);
-            const formattedItems = itemData.map((item: any) => ({
+            const isDelivery = (orderType === 'Delivery' || params.orderType === 'Delivery');
+            // Fetch items with order_type filter (AC menu for delivery)
+            const itemData = await menuApi.getItems(
+                restaurantId, 
+                forceRefresh, 
+                { orderType: isDelivery ? 'delivery' : undefined }
+            );
+
+            // Safety filter: In delivery section, strictly exclude non-AC items
+            const filteredItemData = isDelivery
+              ? itemData.filter((item: any) => {
+                  const ac = String(item.ac_type || '').toLowerCase();
+                  return !ac.includes('non');
+                })
+              : itemData;
+
+            const formattedItems = filteredItemData.map((item: any) => ({
                 id: item.id,
                 name: item.name,
                 desc: item.description,
@@ -465,11 +480,16 @@ export default function App() {
                 available: item.is_available,
                 image: getFullImageUrl(item.image_url, item.name),
                 category: item.category_id.toString(),
+                ac_type: item.ac_type,
             }));
             
             const activeCategoryIds = new Set(formattedItems.map((i: any) => i.category));
 
-            const catData = await menuApi.getCategories(restaurantId, forceRefresh);
+            const catData = await menuApi.getCategories(
+                restaurantId, 
+                forceRefresh, 
+                { orderType: isDelivery ? 'delivery' : undefined }
+            );
             
             const validRegions = new Set<string>();
             const rawCategoryMap = new Map<string, { id: string; label: string; region?: string }>();
@@ -542,7 +562,7 @@ export default function App() {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchMenu();
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [restaurantId]);
+  }, [restaurantId, orderType, selectedDeliveryAddress]);
 
   const onRefresh = async () => {
     setRefreshing(true);
@@ -618,6 +638,25 @@ export default function App() {
               <Text style={styles.tableCircleText}>{tableNumber.replace('T-', '')}</Text>
             </View>
           </View>
+        ) : null}
+
+        {/* Delivery Address Pill */}
+        {orderType === "Delivery" ? (
+          <TouchableOpacity 
+            style={styles.tableBadgeContainer} 
+            onPress={() => router.push('/(address)/my-addresses')}
+            activeOpacity={0.8}
+          >
+            <View style={styles.tableTextContainer}>
+              <Text style={styles.tableText} numberOfLines={1}>
+                {selectedDeliveryAddress ? selectedDeliveryAddress.split(',')[0] : 'Delivery Address'}
+              </Text>
+            </View>
+            <View style={styles.tableLine} />
+            <View style={styles.tableCircle}>
+              <Ionicons name="bicycle" size={13} color="#00a01d" />
+            </View>
+          </TouchableOpacity>
         ) : null}
       </View>
       

@@ -3,7 +3,8 @@ import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Platform, StatusB
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter, useNavigation } from 'expo-router';
-import { useAuthStore, useAddressStore } from '../../store';
+import { useAuthStore, useAddressStore, useRestaurantStore, useCartStore } from '../../store';
+import { findNearestOutlet } from '../../utils/deliveryArea';
 import { customerApi } from '../../services/apiService';
 import BottomNavBar from '../../components/layout/BottomNavBar';
 
@@ -13,7 +14,28 @@ export default function Profile() {
   const { customerId } = useAuthStore();
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const { addresses, setAddresses } = useAddressStore();
+  const { addresses, setAddresses, setSelectedDeliveryAddress } = useAddressStore();
+
+  const handleSelectDeliveryAddress = (item: any) => {
+    const addressStr = item.full_address || item.address;
+    setSelectedDeliveryAddress(addressStr, Number(item.id));
+    if (item.latitude && item.longitude) {
+      try {
+        const nearest = findNearestOutlet(Number(item.latitude), Number(item.longitude));
+        if (nearest && nearest.restaurant_id) {
+          useRestaurantStore.getState().setSelectedOutlet({
+            restaurant_id: nearest.restaurant_id,
+            id: nearest.restaurant_id,
+            name: nearest.name,
+            latitude: nearest.latitude,
+            longitude: nearest.longitude,
+          });
+        }
+      } catch (_) {}
+    }
+    useCartStore.getState().setOrderType('Delivery');
+    router.replace({ pathname: '/menu', params: { orderType: 'Delivery' } });
+  };
 
   const onRefresh = async () => {
     setRefreshing(true);
@@ -100,7 +122,12 @@ export default function Profile() {
           </View>
         ) : (
           addresses.map((item) => (
-            <View key={item.id} style={styles.addressCard}>
+            <TouchableOpacity 
+              key={item.id} 
+              style={styles.addressCard} 
+              activeOpacity={0.85}
+              onPress={() => handleSelectDeliveryAddress(item)}
+            >
               <View style={styles.addressHeader}>
                 <View style={[styles.iconContainer, { backgroundColor: item.iconBg }]}>
                   <Ionicons name={item.icon as any} size={20} color={item.iconColor} />
@@ -127,7 +154,11 @@ export default function Profile() {
                   <Text style={[styles.actionText, { color: '#ff4500' }]}>Delete</Text>
                 </TouchableOpacity>
               </View>
-            </View>
+              <View style={{ marginTop: 10, paddingTop: 10, borderTopWidth: 1, borderTopColor: '#f0f0f0', flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+                <Text style={{ fontSize: 12, fontWeight: '700', color: '#00a01d' }}>Deliver to this address</Text>
+                <Ionicons name="arrow-forward-circle" size={18} color="#00a01d" />
+              </View>
+            </TouchableOpacity>
           ))
         )}
 

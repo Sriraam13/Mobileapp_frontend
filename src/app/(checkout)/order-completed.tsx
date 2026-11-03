@@ -15,6 +15,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useCartStore, useOrderStore } from '../../store';
 import { orderApi } from '../../services/apiService';
+import { getFullImageUrl } from '../../constants/api';
 import { formatTime } from '../../utils/dateUtils';
 
 // ─── Component ────────────────────────────────────────────────────────────────
@@ -22,7 +23,7 @@ import { formatTime } from '../../utils/dateUtils';
 export default function OrderCompletedScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { clearCart, addItem } = useCartStore();
+  const { clearCart, addItem, setOrderType } = useCartStore();
   const { currentOrder } = useOrderStore();
 
   const params = useLocalSearchParams<{
@@ -39,6 +40,8 @@ export default function OrderCompletedScreen() {
     orderType?: string;
     subtotal?: string;
     customerName?: string;
+    orderStatus?: string;
+    billNo?: string;
   }>();
 
   // Guard: redirect if no order context
@@ -66,33 +69,53 @@ export default function OrderCompletedScreen() {
   })();
 
   const [orderItemsList, setOrderItemsList] = useState<any[]>(initialItems);
-  const [billNumber, setBillNumber] = useState<number | string | null>(null);
+  const [billNumber, setBillNumber] = useState<number | string | null>(params.billNo || null);
+  const [currentOrderStatus, setCurrentOrderStatus] = useState<string>(
+    (params.orderStatus || 'READY').toUpperCase()
+  );
 
   useEffect(() => {
     const fetchId = params.dbOrderId || (params.orderId ? params.orderId.replace(/\D/g, '') : null);
     if (!fetchId) return;
 
-    orderApi.getOrderDetails(fetchId)
-      .then((data: any) => {
-        if (data?.items && data.items.length > 0) {
-          setOrderItemsList(data.items);
-        }
-        if (data?.order?.bill_no) {
-          setBillNumber(data.order.bill_no);
-        }
-      })
-      .catch(() => {});
+    let isMounted = true;
+    const fetchDetails = () => {
+      orderApi.getOrderDetails(fetchId)
+        .then((data: any) => {
+          if (!isMounted) return;
+          if (data?.items && data.items.length > 0) {
+            setOrderItemsList(data.items);
+          }
+          if (data?.order?.bill_no) {
+            setBillNumber(data.order.bill_no);
+          }
+          if (data?.order?.status) {
+            setCurrentOrderStatus(data.order.status.toUpperCase());
+          }
+        })
+        .catch(() => {});
+    };
+
+    fetchDetails();
+
+    // Poll periodically while takeaway order is active to reflect status transitions (e.g. READY -> SERVED/COMPLETED)
+    const interval = setInterval(() => {
+      if (isMounted) {
+        fetchDetails();
+      }
+    }, 4000);
+
+    return () => {
+      isMounted = false;
+      clearInterval(interval);
+    };
   }, [params.dbOrderId, params.orderId]);
 
-  const isTakeAway =
-    (params.tableNumber?.toLowerCase().includes('takeaway') ||
-      params.tableNumber?.toLowerCase().includes('take away') ||
-      params.orderType?.toLowerCase() === 'take away') ?? false;
+  const normType = String(params.orderType || '').toLowerCase().replace(/[\s_-]/g, '');
+  const normTable = String(params.tableNumber || '').toLowerCase().replace(/[\s_-]/g, '');
 
-  const isDelivery =
-    params.tableNumber?.toLowerCase().includes('delivery') ||
-    params.orderType?.toLowerCase() === 'delivery';
-
+  const isDelivery = normType.includes('deliv') || normTable.includes('deliv');
+  const isTakeAway = !isDelivery && (normType.includes('take') || normType.includes('pickup') || normType.includes('parcel') || normTable.includes('take') || normTable.includes('pickup') || normTable.includes('parcel'));
   const isDineIn = !isTakeAway && !isDelivery;
 
   // ── Animation ──
@@ -129,15 +152,28 @@ export default function OrderCompletedScreen() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // ── Feedback state ──
-  const [rating, setRating] = useState(0);
+  // ── Recommendation & Feedback state ──
+  const [recommendation, setRecommendation] = useState<'RECOMMENDED' | 'NOT_RECOMMENDED' | null>(null);
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [feedbackDone, setFeedbackDone] = useState(false);
 
-  const TAGS = isDineIn
+  // Recommended sets 5 stars; Not Recommended sets 0 stars
+  const rating = recommendation === 'RECOMMENDED' ? 5 : recommendation === 'NOT_RECOMMENDED' ? 0 : null;
+
+  const POSITIVE_TAGS = isDineIn
     ? ['Fast service', 'Delicious food', 'Clean table', 'Great ambiance']
+    : isDelivery
+    ? ['On-time delivery', 'Hot & fresh food', 'Polite rider', 'Great packing']
     : ['Fast prep', 'Fresh food', 'Easy pickup', 'Great packing'];
+
+  const CRITIQUE_TAGS = isDineIn
+    ? ['Slow service', 'Cold food', 'Table not clean', 'Order delay']
+    : isDelivery
+    ? ['Late delivery', 'Cold food', 'Damaged packing', 'Missing items']
+    : ['Long wait', 'Cold food', 'Packing issue', 'Order mix-up'];
+
+  const TAGS = recommendation === 'NOT_RECOMMENDED' ? CRITIQUE_TAGS : POSITIVE_TAGS;
 
   const toggleTag = (tag: string) =>
     setSelectedTags(prev =>
@@ -145,8 +181,8 @@ export default function OrderCompletedScreen() {
     );
 
   const submitFeedback = async () => {
-    if (rating === 0) {
-      Alert.alert('Rate your experience', 'Please tap a star before submitting.');
+    if (recommendation === null) {
+      Alert.alert('Feedback Required', 'Please select Recommended or Not Recommended before submitting.');
       return;
     }
     setSubmitting(true);
@@ -154,9 +190,14 @@ export default function OrderCompletedScreen() {
       const apiTags = selectedTags.map(t =>
         t === 'Great packing' ? 'GREAT_PACKAGING' : t.toUpperCase().replace(/ /g, '_')
       );
+      // Recommended = 5 stars, Not Recommended = 0 stars
+      const starRating = recommendation === 'RECOMMENDED' ? 5 : 0;
       const res = await orderApi.submitFeedback(feedbackOrderId, {
-        rating,
-        feedback_tags: apiTags,
+        rating: starRating,
+        feedback_tags: [
+          recommendation,
+          ...apiTags
+        ],
       } as any);
       if (res?.success) {
         setFeedbackDone(true);
@@ -173,7 +214,21 @@ export default function OrderCompletedScreen() {
 
   const handleReorder = () => {
     clearCart();
-    orderItemsList.forEach((item: any) => addItem(item));
+    if (isTakeAway) setOrderType('Take Away');
+    else if (isDelivery) setOrderType('Delivery');
+    else setOrderType('Dine In');
+
+    orderItemsList.forEach((item: any) => {
+      const realItemId = item.menu_item_id || item.menuItemId || item.id;
+      addItem({
+        id: realItemId,
+        name: item.name || item.itemName || 'Item',
+        price: Number(item.price || item.unit_price || 0),
+        quantity: item.quantity || item.qty || 1,
+        image: getFullImageUrl(item.image || item.image_url, item.name || item.itemName),
+        category: item.category || 'General',
+      });
+    });
     Alert.alert('Reordered', 'Items have been added back to your cart.');
     router.dismissAll();
     router.replace((isDelivery ? '/delivery-checkout' : '/checkout') as any);
@@ -203,13 +258,30 @@ export default function OrderCompletedScreen() {
   const headerColor = '#16a34a';
   const accentColor = '#ff5a1f';
 
-  const headerIcon = isTakeAway ? 'bag-check-outline' : isDelivery ? 'bicycle-outline' : 'restaurant-outline';
-  const headerTitle = isTakeAway ? 'Picked Up!' : isDelivery ? 'Delivered!' : 'Order Served!';
-  const headerSubtitle = isTakeAway
-    ? `Order completed at ${completedTime}  •  ${params.paymentMethod ? `Paid (${params.paymentMethod})` : 'Paid'}${billNumber ? `  •  Bill #${billNumber}` : ''}  •  Total Rs. ${totalAmount.toFixed(0)}`
+  // For takeaway:
+  // When kitchen marks READY -> "Pick Up!" (customer collects order)
+  // When counter marks SERVED / COMPLETED -> "Picked Up!" (order handed over)
+  const isTakeawayReady = isTakeAway && currentOrderStatus === 'READY';
+
+  const headerIcon = isTakeAway
+    ? (isTakeawayReady ? 'bag-handle-outline' : 'bag-check-outline')
     : isDelivery
-    ? `Delivered at ${completedTime}  •  ${params.paymentMethod ? `Paid (${params.paymentMethod})` : 'Paid'}${billNumber ? `  •  Bill #${billNumber}` : ''}  •  Total Rs. ${totalAmount.toFixed(0)}`
-    : `Served at ${completedTime}  •  ${params.paymentMethod ? `Paid (${params.paymentMethod})` : 'Paid'}${billNumber ? `  •  Bill #${billNumber}` : ''}  •  Total Rs. ${totalAmount.toFixed(0)}`;
+    ? 'bicycle-outline'
+    : 'restaurant-outline';
+
+  const headerTitle = isTakeAway
+    ? (isTakeawayReady ? 'Pick Up!' : 'Picked Up!')
+    : isDelivery
+    ? 'Delivered!'
+    : 'Order Served!';
+
+  const headerSubtitle = isTakeAway
+    ? (isTakeawayReady
+        ? `Your order is ready at the counter  •  ${params.paymentMethod ? `Paid (${params.paymentMethod})` : 'Paid'}  •  Total Rs. ${totalAmount.toFixed(0)}`
+        : `Order completed at ${completedTime}  •  ${params.paymentMethod ? `Paid (${params.paymentMethod})` : 'Paid'}  •  Total Rs. ${totalAmount.toFixed(0)}`)
+    : isDelivery
+    ? `Delivered at ${completedTime}  •  ${params.paymentMethod ? `Paid (${params.paymentMethod})` : 'Paid'}  •  Total Rs. ${totalAmount.toFixed(0)}`
+    : `Served at ${completedTime}  •  ${params.paymentMethod ? `Paid (${params.paymentMethod})` : 'Paid'}  •  Total Rs. ${totalAmount.toFixed(0)}`;
 
   const feedbackQuestion = isDineIn
     ? 'How was your dine-in experience?'
@@ -237,6 +309,15 @@ export default function OrderCompletedScreen() {
         </View>
         <Text style={styles.headerTitle}>{headerTitle}</Text>
         <Text style={styles.headerSubtitle}>{headerSubtitle}</Text>
+
+        {/* Highlighted Bill Number Badge */}
+        {billNumber ? (
+          <View style={styles.billBadge}>
+            <Ionicons name="receipt" size={15} color="#15803d" />
+            <Text style={styles.billBadgeLabel}>BILL NUMBER</Text>
+            <Text style={styles.billBadgeValue}>#{billNumber}</Text>
+          </View>
+        ) : null}
       </Animated.View>
 
       <ScrollView
@@ -260,24 +341,79 @@ export default function OrderCompletedScreen() {
           <View style={styles.card}>
             <Text style={styles.feedbackQuestion}>{feedbackQuestion}</Text>
 
-            {/* Star Rating */}
-            <View style={styles.starsRow}>
-              {[1, 2, 3, 4, 5].map(star => (
-                <TouchableOpacity
-                  key={star}
-                  onPress={() => !feedbackDone && setRating(star)}
-                  activeOpacity={0.7}
-                  disabled={feedbackDone}
+            {/* Recommendation Buttons (Replaces 5-Star Rating: Recommended = 5 stars, Not Recommended = 0 stars) */}
+            <View style={styles.recommendRow}>
+              <TouchableOpacity
+                style={[
+                  styles.recommendBtn,
+                  recommendation === 'RECOMMENDED' && styles.recommendBtnActive,
+                ]}
+                onPress={() => {
+                  if (!feedbackDone) {
+                    setRecommendation('RECOMMENDED');
+                    setSelectedTags([]);
+                  }
+                }}
+                activeOpacity={0.8}
+                disabled={feedbackDone}
+              >
+                <Ionicons
+                  name={recommendation === 'RECOMMENDED' ? 'thumbs-up' : 'thumbs-up-outline'}
+                  size={20}
+                  color={recommendation === 'RECOMMENDED' ? '#16a34a' : '#6b7280'}
+                />
+                <Text
+                  numberOfLines={1}
+                  adjustsFontSizeToFit
+                  minimumFontScale={0.8}
+                  style={[
+                    styles.recommendText,
+                    recommendation === 'RECOMMENDED' && styles.recommendTextActive,
+                  ]}
                 >
-                  <Ionicons
-                    name={rating >= star ? 'star' : 'star-outline'}
-                    size={36}
-                    color="#f59e0b"
-                    style={{ marginHorizontal: 4 }}
-                  />
-                </TouchableOpacity>
-              ))}
+                  Recommended
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[
+                  styles.notRecommendBtn,
+                  recommendation === 'NOT_RECOMMENDED' && styles.notRecommendBtnActive,
+                ]}
+                onPress={() => {
+                  if (!feedbackDone) {
+                    setRecommendation('NOT_RECOMMENDED');
+                    setSelectedTags([]);
+                  }
+                }}
+                activeOpacity={0.8}
+                disabled={feedbackDone}
+              >
+                <Ionicons
+                  name={recommendation === 'NOT_RECOMMENDED' ? 'thumbs-down' : 'thumbs-down-outline'}
+                  size={20}
+                  color={recommendation === 'NOT_RECOMMENDED' ? '#dc2626' : '#6b7280'}
+                />
+                <Text
+                  numberOfLines={1}
+                  adjustsFontSizeToFit
+                  minimumFontScale={0.8}
+                  style={[
+                    styles.notRecommendText,
+                    recommendation === 'NOT_RECOMMENDED' && styles.notRecommendTextActive,
+                  ]}
+                >
+                  Not Recommended
+                </Text>
+              </TouchableOpacity>
             </View>
+
+            {/* Quick Tags Section Header */}
+            {recommendation && (
+              <Text style={styles.tagSectionTitle}>
+                {recommendation === 'RECOMMENDED' ? 'WHAT DID YOU LIKE MOST?' : 'WHAT CAN WE IMPROVE?'}
+              </Text>
+            )}
 
             {/* Quick Tags */}
             <View style={styles.tagsWrap}>
@@ -307,10 +443,10 @@ export default function OrderCompletedScreen() {
               </View>
             ) : (
               <TouchableOpacity
-                style={[styles.submitBtn, rating === 0 && styles.submitBtnDisabled]}
+                style={[styles.submitBtn, recommendation === null && styles.submitBtnDisabled]}
                 onPress={submitFeedback}
                 activeOpacity={0.8}
-                disabled={submitting}
+                disabled={submitting || recommendation === null}
               >
                 {submitting ? (
                   <ActivityIndicator color="#fff" size="small" />
@@ -477,10 +613,111 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginBottom: 16,
   },
-  starsRow: {
+  billBadge: {
     flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#ffffff',
+    paddingVertical: 7,
+    paddingHorizontal: 16,
+    borderRadius: 22,
+    marginTop: 14,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.12,
+    shadowRadius: 4,
+    elevation: 3,
+    gap: 7,
+  },
+  billBadgeLabel: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: '#15803d',
+    letterSpacing: 0.8,
+  },
+  billBadgeValue: {
+    fontSize: 16,
+    fontWeight: '900',
+    color: '#111827',
+    letterSpacing: 0.5,
+  },
+  recommendRow: {
+    flexDirection: 'row',
+    gap: 10,
     justifyContent: 'center',
-    marginBottom: 18,
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  recommendBtn: {
+    flex: 1,
+    height: 52,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 8,
+    borderRadius: 14,
+    backgroundColor: '#f9fafb',
+    borderWidth: 1.5,
+    borderColor: '#e5e7eb',
+    gap: 6,
+  },
+  recommendBtnActive: {
+    backgroundColor: '#f0fdf4',
+    borderColor: '#16a34a',
+    shadowColor: '#16a34a',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  notRecommendBtn: {
+    flex: 1,
+    height: 52,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 8,
+    borderRadius: 14,
+    backgroundColor: '#f9fafb',
+    borderWidth: 1.5,
+    borderColor: '#e5e7eb',
+    gap: 6,
+  },
+  notRecommendBtnActive: {
+    backgroundColor: '#fef2f2',
+    borderColor: '#ef4444',
+    shadowColor: '#ef4444',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  recommendText: {
+    fontSize: 12.5,
+    fontWeight: '600',
+    color: '#4b5563',
+    textAlign: 'center',
+  },
+  recommendTextActive: {
+    color: '#15803d',
+    fontWeight: '700',
+  },
+  notRecommendText: {
+    fontSize: 12.5,
+    fontWeight: '600',
+    color: '#4b5563',
+    textAlign: 'center',
+  },
+  notRecommendTextActive: {
+    color: '#b91c1c',
+    fontWeight: '700',
+  },
+  tagSectionTitle: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#888',
+    letterSpacing: 0.5,
+    textAlign: 'center',
+    marginBottom: 10,
   },
   tagsWrap: {
     flexDirection: 'row',

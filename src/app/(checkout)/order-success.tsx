@@ -7,6 +7,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { orderApi } from '../../services/apiService';
 import { getFullImageUrl } from '../../constants/api';
 import { useRestaurantStore, useLiveOrderStore } from '../../store';
+import { purgeDeletedOrderLocally } from '../../store/sessionUtils';
 import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from '../(order)/_MapComponents';
 import MapViewDirections from 'react-native-maps-directions';
 import * as Location from 'expo-location';
@@ -203,7 +204,8 @@ export default function OrderSuccessScreen() {
         if (data && data.order) {
           setOrderDetails(data);
           const status = data.order.status.toUpperCase();
-          if (status === 'SERVED' || status === 'COMPLETED') {
+          const isTakeaway = (data.order.order_type || params.orderType || '').toLowerCase().includes('take');
+          if ((isTakeaway && status === 'READY') || status === 'SERVED' || status === 'COMPLETED') {
             router.replace({
               pathname: '/order-completed',
               params: {
@@ -215,19 +217,24 @@ export default function OrderSuccessScreen() {
                 cartItems: JSON.stringify(data.items || []),
                 date: data.order.updated_at || data.order.created_at || new Date().toISOString(),
                 phone: params.phone || '',
+                orderStatus: status,
+                billNo: data.order.bill_no ? String(data.order.bill_no) : '',
               }
             });
           }
         }
       } catch (err: any) {
-        console.warn("Failed to fetch order details", err?.message || err);
-        if (err?.message?.includes("404") || err?.message?.includes("not found")) {
+        const msg = String(err?.message || err || '').toLowerCase();
+        const isNotFound = err?.status === 404 || msg.includes('404') || msg.includes('not found');
+        if (isNotFound) {
           if (intervalId) clearInterval(intervalId);
-          useLiveOrderStore.getState().clearLiveOrder();
-          Alert.alert("Order Not Found", "Your order could not be found on the server.", [
+          await purgeDeletedOrderLocally(dbOrderId || params.orderId || '');
+          Alert.alert("Order Not Found", "This order is no longer available in the system.", [
             { text: "OK", onPress: () => router.replace('/(main)/home') }
           ]);
+          return;
         }
+        console.warn("Failed to fetch order details", err?.message || err);
       } finally {
         setLoading(false);
       }
@@ -256,6 +263,7 @@ export default function OrderSuccessScreen() {
         cart: params.cart,
         orderType: params.orderType,
         phone: params.phone,
+        billNo: orderDetails?.order?.bill_no ? String(orderDetails.order.bill_no) : '',
       }
     });
   };
@@ -367,11 +375,54 @@ export default function OrderSuccessScreen() {
             ))}
           </View>
 
-          {/* Total Amount */}
-          <View style={styles.totalRow}>
-            <Text style={styles.totalLabel}>Total Amount</Text>
-            <Text style={styles.totalValue}>Rs. {displayTotal}</Text>
-          </View>
+          {/* Bill Summary Card */}
+          {(() => {
+            const itemsSubtotal = orderItemsList.reduce((acc: number, it: any) => {
+              return acc + (Number(it.price || 0) * Number(it.quantity || 1));
+            }, 0);
+            const orderObj = orderDetails?.order;
+            const subtotalVal = Number(params.subtotal || orderObj?.subtotal || itemsSubtotal);
+            const discountVal = Number(params.discountAmount || orderObj?.discount_amount || 0);
+            const taxesVal = Number(orderObj?.gst_amount || 0);
+            const deliveryFeeVal = Number(orderObj?.delivery_fee || 0);
+
+            return (
+              <View style={styles.billSummaryCard}>
+                <Text style={styles.billSummaryHeader}>BILL SUMMARY</Text>
+
+                <View style={styles.billSummaryRow}>
+                  <Text style={styles.billSummaryLabel}>Item Total</Text>
+                  <Text style={styles.billSummaryValue}>Rs. {subtotalVal.toFixed(0)}</Text>
+                </View>
+
+                {deliveryFeeVal > 0 && (
+                  <View style={styles.billSummaryRow}>
+                    <Text style={styles.billSummaryLabel}>Delivery Fee</Text>
+                    <Text style={styles.billSummaryValue}>Rs. {deliveryFeeVal.toFixed(0)}</Text>
+                  </View>
+                )}
+
+                {taxesVal > 0 && (
+                  <View style={styles.billSummaryRow}>
+                    <Text style={styles.billSummaryLabel}>Taxes & Charges</Text>
+                    <Text style={styles.billSummaryValue}>Rs. {taxesVal.toFixed(2)}</Text>
+                  </View>
+                )}
+
+                {discountVal > 0 && (
+                  <View style={styles.billSummaryRow}>
+                    <Text style={[styles.billSummaryLabel, { color: '#ff4500' }]}>Discount Applied</Text>
+                    <Text style={[styles.billSummaryValue, { color: '#ff4500' }]}>- Rs. {discountVal.toFixed(2)}</Text>
+                  </View>
+                )}
+
+                <View style={[styles.billSummaryRow, styles.billSummaryTotalRow]}>
+                  <Text style={styles.billSummaryTotalLabel}>Total Paid</Text>
+                  <Text style={styles.billSummaryTotalValue}>Rs. {displayTotal}</Text>
+                </View>
+              </View>
+            );
+          })()}
 
           {/* Map Location */}
           {!isDineIn && (() => {
@@ -674,6 +725,54 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: 'bold',
     color: '#000',
+  },
+  billSummaryCard: {
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: '#eee',
+    marginBottom: 20,
+  },
+  billSummaryHeader: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: '#9CA3AF',
+    letterSpacing: 0.8,
+    marginBottom: 10,
+  },
+  billSummaryRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  billSummaryLabel: {
+    fontSize: 13.5,
+    color: '#4B5563',
+    fontWeight: '500',
+  },
+  billSummaryValue: {
+    fontSize: 13.5,
+    color: '#111827',
+    fontWeight: '600',
+  },
+  billSummaryTotalRow: {
+    marginTop: 6,
+    paddingTop: 10,
+    borderTopWidth: 1,
+    borderTopColor: '#f3f4f6',
+    marginBottom: 0,
+  },
+  billSummaryTotalLabel: {
+    fontSize: 15,
+    fontWeight: '800',
+    color: '#111827',
+  },
+  billSummaryTotalValue: {
+    fontSize: 17,
+    fontWeight: '800',
+    color: '#ff4500',
   },
   mapContainer: {
     width: '100%',

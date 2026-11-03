@@ -6,6 +6,7 @@ import { Slot } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import VoiceAgentModal from '../components/VoiceAgentModal';
+import CustomAlertModal from '../components/ui/CustomAlertModal';
 
 interface Props {
   children: ReactNode;
@@ -66,6 +67,7 @@ export default function RootLayout() {
         <RootErrorBoundary>
           <Slot />
           <VoiceAgentModal />
+          <CustomAlertModal />
         </RootErrorBoundary>
       </SafeAreaProvider>
     </GestureHandlerRootView>
