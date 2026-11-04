@@ -102,6 +102,11 @@ export const getFullImageUrl = (url: string | null | undefined, dishName?: strin
     return getDishFallbackUrl(dishName);
   }
 
+  // If already a data URI (e.g. base64), local file URI, or blob URI, return directly
+  if (trimmed.startsWith('data:') || trimmed.startsWith('blob:') || trimmed.startsWith('file://')) {
+    return trimmed;
+  }
+
   // If already a complete cloud/CDN URL (e.g. Unsplash, S3, Cloudinary, HTTPS)
   if (trimmed.startsWith('https://') || trimmed.startsWith('http://')) {
     // If it points to local localhost from backend seeds, map it to IMAGE_BASE_URL
