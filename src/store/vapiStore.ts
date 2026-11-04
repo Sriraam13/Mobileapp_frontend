@@ -648,8 +648,7 @@ async function handleVapiToolCall(tool: any): Promise<{ toolCallId: string; resu
       case 'show_cart':
       case 'view_cart':
       case 'get_cart':
-      case 'cart_get':
-      case 'app_get_context': {
+      case 'cart_get': {
         await executeSingleAction({ action: 'show_cart' });
         const cartState = useCartStore.getState();
         const rawItems = Object.values(cartState.items);

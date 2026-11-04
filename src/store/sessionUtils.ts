@@ -1,3 +1,5 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { Platform } from 'react-native';
 import { useCartStore } from './useCartStore';
 import { useOrderStore } from './useOrderStore';
 import { useLiveOrderStore } from './useLiveOrderStore';
@@ -37,8 +39,6 @@ export const closeDineInSession = () => {
 };
 
 
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import { Platform } from 'react-native';
 
 /**
  * Automatically purges an order across all customer stores and local storage

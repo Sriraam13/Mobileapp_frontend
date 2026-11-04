@@ -145,6 +145,7 @@ export default function DeliveryTrackingScreen() {
   useEffect(() => {
     const rawEta = assignmentData?.estimated_delivery_time || riderInfo?.estimated_delivery_time || riderInfo?.eta || '';
     if (!rawEta) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setCountdownText('');
       return;
     }

@@ -331,8 +331,8 @@ export default function TrackOrderScreen() {
       if (isPollingRef.current) return;
       isPollingRef.current = true;
 
+      let fetchId: string | null = (params.dbOrderId as string) || (liveDbOrderId as string) || null;
       try {
-        let fetchId = params.dbOrderId || liveDbOrderId;
         if (!fetchId && params.orderId) {
           const match = params.orderId.match(/\d+/);
           if (match) fetchId = match[0];

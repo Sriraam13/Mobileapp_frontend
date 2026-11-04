@@ -40,7 +40,7 @@ export default function DeliveryCheckoutScreen() {
     ? getDistanceInKm(selectedAddressObj.latitude, selectedAddressObj.longitude, targetOutlet)
     : null;
   // Delivery fee is strictly Rs. 0 (Free Delivery)
-  const deliveryFee = 0;
+  const deliveryFee: number = 0;
   
   const baseTotal = subtotal + packagingCharges + gst - discountAmount + deliveryFee;
   const finalTotal = baseTotal + (selectedTip || 0);

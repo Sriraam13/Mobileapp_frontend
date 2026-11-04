@@ -344,4 +344,6 @@ const styles = StyleSheet.create({
   },
 });
 
+InteractiveGoogleMap.displayName = 'InteractiveGoogleMap';
+
 export default InteractiveGoogleMap;

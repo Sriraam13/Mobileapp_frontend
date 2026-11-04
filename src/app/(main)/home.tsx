@@ -280,20 +280,16 @@ export default function Home() {
   };
   const [activeTab, setActiveTab] = useState(getInitialTab());
 
-  // Sync activeTab to orderType when user taps tabs
-  useEffect(() => {
-    if (activeTab === 'Takeaway' && orderType !== 'Take Away') setOrderType('Take Away');
-    else if (activeTab === 'Dine-in' && orderType !== 'Dine In') setOrderType('Dine In');
-    else if (activeTab === 'Delivery' && orderType !== 'Delivery') setOrderType('Delivery');
-  }, [activeTab]);
-
   // Sync orderType to activeTab when changed externally (e.g. voice agent)
   useEffect(() => {
     if (orderType === 'Take Away' && activeTab !== 'Takeaway') {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setActiveTab('Takeaway');
     } else if (orderType === 'Dine In' && activeTab !== 'Dine-in') {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setActiveTab('Dine-in');
     } else if (orderType === 'Delivery' && activeTab !== 'Delivery') {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setActiveTab('Delivery');
     }
   }, [orderType]);
@@ -445,6 +441,7 @@ export default function Home() {
 
   useEffect(() => {
     if (params?.openScanner === 'true') {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       handleDineInPress();
     } else if (params?.autoPromptQR === 'true') {
       const timer = setTimeout(() => {
@@ -473,7 +470,7 @@ export default function Home() {
 
   const [refreshing, setRefreshing] = useState(false);
 
-  const fetchData = async () => {
+  const fetchData = async (isForceRefresh: boolean = false) => {
     try {
       // Retrieve selected restaurant ID
       let restId = selectedOutlet?.restaurant_id ? Number(selectedOutlet.restaurant_id) : 1;
@@ -487,7 +484,7 @@ export default function Home() {
       const isDeliveryMode = (orderType === 'Delivery' || activeTab === 'Delivery');
       const itemData = await menuApi.getItems(
         restId, 
-        false, 
+        isForceRefresh, 
         { orderType: isDeliveryMode ? 'delivery' : undefined }
       );
       const filteredDishes = isDeliveryMode
@@ -509,7 +506,7 @@ export default function Home() {
       // Fetch categories (AC categories for delivery section)
       const catData = await menuApi.getCategories(
         restId, 
-        false, 
+        isForceRefresh, 
         { orderType: isDeliveryMode ? 'delivery' : undefined }
       );
       const categoryImageMap: Record<string, any> = {
@@ -608,7 +605,7 @@ export default function Home() {
 
   const onRefresh = async () => {
     setRefreshing(true);
-    await fetchData();
+    await fetchData(true);
     setRefreshing(false);
   };
 
@@ -975,6 +972,7 @@ export default function Home() {
             style={[styles.tabBtn, activeTab === 'Dine-in' && styles.activeTabBtn]}
             onPress={() => {
               setActiveTab('Dine-in');
+              if (orderType !== 'Dine In') setOrderType('Dine In');
               if (!tableNumber) {
                 handleDineInPress();
               }
@@ -984,7 +982,10 @@ export default function Home() {
           </TouchableOpacity>
           <TouchableOpacity
             style={[styles.tabBtn, activeTab === 'Takeaway' && styles.activeTabBtn]}
-            onPress={() => setActiveTab('Takeaway')}
+            onPress={() => {
+              setActiveTab('Takeaway');
+              if (orderType !== 'Take Away') setOrderType('Take Away');
+            }}
           >
             <Text style={[styles.tabText, activeTab === 'Takeaway' && styles.activeTabText]}>Takeaway</Text>
           </TouchableOpacity>
@@ -1000,6 +1001,7 @@ export default function Home() {
                 return;
               }
               setActiveTab('Delivery');
+              if (orderType !== 'Delivery') setOrderType('Delivery');
               router.push('/(address)/add-address');
             }}
           >

@@ -59,6 +59,7 @@ export default function AdminRiderAssignmentModal({
 
   useEffect(() => {
     if (visible) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setErrorMsg(null);
       if (initialDetails) {
         const p = initialDetails.partner || 'Rapido';

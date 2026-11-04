@@ -78,9 +78,9 @@ export default function AddAddress() {
 
       // 2. Fetch fresh balanced GPS fix with a 5s timeout
       try {
-        const freshLocation = await Promise.race([
+        const freshLocation = await Promise.race<Location.LocationObject>([
           Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced }),
-          new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 5000))
+          new Promise<Location.LocationObject>((_, reject) => setTimeout(() => reject(new Error('timeout')), 5000))
         ]);
         if (freshLocation && freshLocation.coords) {
           location = freshLocation;
@@ -485,7 +485,9 @@ export default function AddAddress() {
                   let route = '';
                   let sublocality = '';
                   let locality = '';
+                  let premise = '';
                   result.address_components.forEach((comp: any) => {
+                    if (comp.types.includes('premise') || comp.types.includes('subpremise')) premise = comp.long_name;
                     if (comp.types.includes('street_number')) streetNumber = comp.long_name;
                     if (comp.types.includes('route')) route = comp.long_name;
                     if (comp.types.includes('sublocality') || comp.types.includes('sublocality_level_1')) sublocality = comp.long_name;

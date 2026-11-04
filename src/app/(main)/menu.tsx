@@ -259,6 +259,7 @@ export default function App() {
     const hasActiveDineIn = dineInSession.isActive && dineInSession.paymentStatus !== 'Paid' && (activeRounds.length > 0 || (dineInSession.totalAmount > 0 && !dineInSession.activeOrderId));
 
     if (isDeliveryMode && hasActiveDineIn) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setIsDineInConflictVisible(true);
       setOrderType('Dine In');
     }

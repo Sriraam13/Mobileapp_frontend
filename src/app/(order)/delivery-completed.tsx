@@ -52,7 +52,7 @@ export default function DeliveryCompletedScreen() {
   const displayOrderId = rawIdDigits ? `ORD-${rawIdDigits}` : (params.orderId || 'ORD-000000');
   const feedbackOrderId = params.dbOrderId || rawIdDigits || displayOrderId;
 
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(() => Boolean(params.dbOrderId || rawIdDigits));
   const [orderData, setOrderData] = useState<any>(null);
   const [trackingData, setTrackingData] = useState<any>(null);
   const [loyaltyPoints, setLoyaltyPoints] = useState<number | null>(null);
@@ -109,7 +109,6 @@ export default function DeliveryCompletedScreen() {
   useEffect(() => {
     const dbId = params.dbOrderId || rawIdDigits;
     if (!dbId) {
-      setLoading(false);
       return;
     }
 

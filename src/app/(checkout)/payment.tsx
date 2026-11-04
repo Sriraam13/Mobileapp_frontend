@@ -355,7 +355,7 @@ export default function PaymentScreen() {
           <Text style={styles.delMethodsTitle}>Select Payment Method</Text>
 
           <View style={styles.delMethodsList}>
-            <TouchableOpacity style={[styles.delMethodItem, selectedMethod === 'UPI' && styles.delMethodItemActive]} onPress={() => setSelectedMethod('UPI')} activeOpacity={0.8}>
+            <TouchableOpacity style={[styles.delMethodItem, selectedMethod === 'UPI' && styles.delMethodItemActive]} onPress={() => {}} activeOpacity={0.8}>
               <View style={styles.delMethodIcon}>
                 <Ionicons name="phone-portrait-outline" size={24} color="#ff3400" />
               </View>

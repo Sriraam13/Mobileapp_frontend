@@ -325,7 +325,7 @@ export default function CheckoutScreen() {
             <Ionicons name="cart-outline" size={48} color="#ff3400" />
           </View>
           <Text style={styles.emptyTitle}>Your Cart is Empty</Text>
-          <Text style={styles.emptySubtitle}>Looks like you haven't added anything to your cart yet.</Text>
+          <Text style={styles.emptySubtitle}>Looks like you haven&apos;t added anything to your cart yet.</Text>
           <TouchableOpacity 
             style={styles.browseMenuBtn}
             onPress={() => router.replace('/(main)/home')}
