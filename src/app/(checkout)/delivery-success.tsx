@@ -235,7 +235,8 @@ export default function DeliverySuccessScreen() {
 
   const displayTotal = params.total || '0.00';
   const rawPayment = params.paymentMethod || orderDetails?.order?.payment_method || 'UPI';
-  const displayPayment = (!rawPayment || rawPayment.toLowerCase().includes('cash') || rawPayment.toLowerCase().includes('cod')) ? 'UPI' : rawPayment;
+  const isCash = Boolean(rawPayment && (rawPayment.toLowerCase().includes('cash') || rawPayment.toLowerCase().includes('cod')));
+  const displayPayment = isCash ? 'Cash on Delivery' : rawPayment;
   const orderIdText = params.orderId ? params.orderId.replace('ORD-', 'UDP-') : 'UDP-868518';
 
   // Calculate ETA dynamically from order creation or fallback
@@ -269,7 +270,7 @@ export default function DeliverySuccessScreen() {
             <Ionicons name="checkmark" size={32} color="#00a01d" />
           </View>
           <Text style={styles.successTitle}>Order Placed Successfully!</Text>
-          <Text style={styles.successSubtitle}>{orderIdText} • Paid via {displayPayment}</Text>
+          <Text style={styles.successSubtitle}>{orderIdText} • {isCash ? 'Pay via Cash on Delivery' : `Paid via ${displayPayment}`}</Text>
         </View>
 
         {/* ETA Card */}
@@ -369,7 +370,7 @@ export default function DeliverySuccessScreen() {
                  )}
 
                  <View style={[styles.detailRow, { marginTop: 6, paddingTop: 8, borderTopWidth: 1, borderTopColor: '#f3f4f6', marginBottom: 0 }]}>
-                   <Text style={[styles.detailLabel, { fontWeight: '700', color: '#111827' }]}>Amount Paid</Text>
+                   <Text style={[styles.detailLabel, { fontWeight: '700', color: '#111827' }]}>{isCash ? 'To Pay (COD)' : 'Amount Paid'}</Text>
                    <Text style={styles.detailAmount}>Rs. {safeTotal}</Text>
                  </View>
                </View>

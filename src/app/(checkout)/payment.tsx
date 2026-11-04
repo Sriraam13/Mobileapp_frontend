@@ -23,7 +23,11 @@ import { resolveOutletLocation, getDistanceInKm, calculateDeliveryFee } from '..
 
 WebBrowser.maybeCompleteAuthSession();
 
-type PaymentMethod = 'UPI';
+type PaymentMethod = 'UPI' | 'Cash';
+
+function generateTempOrderId(): string {
+  return 'ORD-' + Math.floor(100000 + Math.random() * 900000);
+}
 
 export default function PaymentScreen() {
   const router = useRouter();
@@ -61,8 +65,8 @@ export default function PaymentScreen() {
   const { setCurrentOrder, addPastOrder } = useOrderStore();
   const { selectedDeliveryAddress, addresses, selectedAddressId } = useAddressStore();
 
-  // All orders (Dine In, Take Away, Delivery) are digital-only via UPI / Online payment
-  const selectedMethod: PaymentMethod = 'UPI';
+  // Delivery orders support both Cash on Delivery (for easy testing) and UPI / Online payment
+  const [selectedMethod, setSelectedMethod] = useState<PaymentMethod>(orderType === 'Delivery' ? 'Cash' : 'UPI');
   const [loading, setLoading] = useState(false);
   const [paymentFailedReason, setPaymentFailedReason] = useState('');
 
@@ -157,7 +161,7 @@ export default function PaymentScreen() {
           discount_code: discountCode || null,
           total_amount: totalVal
         };
-        let generatedOrderId = `ORD-${Math.floor(100000 + Math.random() * 900000)}`;
+        let generatedOrderId = generateTempOrderId();
         let dbOrderId = '';
         try {
           const resultData = await orderApi.createOrder(orderData);
@@ -223,6 +227,131 @@ export default function PaymentScreen() {
   }, [razorpayStatus]);
 
   const handleConfirm = async () => {
+    if (selectedMethod === 'Cash') {
+      try {
+        setLoading(true);
+        setPaymentMethod('Cash');
+
+        let restId = 1;
+        if (selectedOutlet?.restaurant_id) {
+          restId = Number(selectedOutlet.restaurant_id);
+        }
+
+        const formattedCart = Object.values(items).map(item => ({
+          id: Number(item.id || (item as any).menu_item_id),
+          name: item.name,
+          image: item.image,
+          quantity: Number(item.quantity || 1),
+          price: Number(item.price || 0),
+          title: item.name,
+          itemName: item.name,
+          image_url: item.image,
+          note: item.note || ''
+        }));
+
+        const backendOrderType = 'DELIVERY';
+
+        const { selectedDeliveryAddress, selectedAddressId, addresses } = useAddressStore.getState();
+        const effectiveAddressId = params.addressId ? String(params.addressId) : (selectedAddressId ? String(selectedAddressId) : '');
+        const selectedAddressObj = addresses.find(a => String(a.id) === effectiveAddressId) || addresses.find(a => a.id == selectedAddressId) || addresses[0];
+        const targetAddressId = effectiveAddressId || (selectedAddressObj?.id ? String(selectedAddressObj.id) : null);
+        const effectiveFullAddr = (params.deliveryAddress as string) || selectedDeliveryAddress || selectedAddressObj?.full_address || selectedAddressObj?.address || '';
+
+        const deliverySnapshot = selectedAddressObj ? {
+          full_address: effectiveFullAddr || selectedAddressObj.full_address || selectedAddressObj.address,
+          latitude: selectedAddressObj.latitude,
+          longitude: selectedAddressObj.longitude,
+          flat_house_no: selectedAddressObj.flat_house_no,
+          landmark: selectedAddressObj.landmark,
+          contact_name: selectedAddressObj.contact_name,
+          contact_phone: selectedAddressObj.contact_phone || userPhone,
+          delivery_instructions: selectedAddressObj.delivery_instructions || (params.instructions as string) || ''
+        } : (effectiveFullAddr ? {
+          full_address: effectiveFullAddr,
+          contact_phone: userPhone,
+        } : null);
+
+        const orderData = {
+          restaurant_id: restId,
+          table_number: null,
+          order_type: backendOrderType,
+          delivery_address: effectiveFullAddr || null,
+          delivery_address_id: targetAddressId ? Number(targetAddressId) : null,
+          delivery_address_snapshot: deliverySnapshot,
+          customer_latitude: selectedAddressObj?.latitude,
+          customer_longitude: selectedAddressObj?.longitude,
+          delivery_instructions: (params.instructions as string) || selectedAddressObj?.delivery_instructions || null,
+          delivery_fee: deliveryFee,
+          packaging_fee: 0,
+          tip_amount: tipAmount,
+          payment_method: 'Cash',
+          phone: userPhone,
+          cart: formattedCart,
+          subtotal,
+          gst,
+          service_charge: serviceCharge,
+          discount_amount: discountAmount,
+          discount_code: discountCode || null,
+          total_amount: totalVal
+        };
+
+        let generatedOrderId = generateTempOrderId();
+        let dbOrderId = '';
+        try {
+          const resultData = await orderApi.createOrder(orderData);
+          if (resultData && (resultData.success || resultData.orderId || resultData.dbOrderId)) {
+            if (resultData.orderId) generatedOrderId = resultData.orderId;
+            if (resultData.dbOrderId) dbOrderId = resultData.dbOrderId.toString();
+          }
+        } catch (e: any) {
+          console.error('Failed to post COD order', e);
+          const errorMsg = e?.message || 'Failed to place order. Please try again.';
+          Alert.alert('Order Placement Failed', errorMsg);
+          setLoading(false);
+          return;
+        }
+
+        setLoading(false);
+        setPaymentSuccess('COD');
+
+        const finalOrder = {
+          orderId: generatedOrderId,
+          dbOrderId,
+          total: totalVal.toString(),
+          paymentMethod: 'Cash on Delivery',
+          phone: userPhone,
+          tableNumber: '',
+          itemCount: getItemCount().toString(),
+          cart: JSON.stringify(formattedCart),
+          orderType: 'Delivery',
+          subtotal: subtotal.toString(),
+          discountAmount: discountAmount.toString(),
+          discountCode: discountCode || ''
+        };
+
+        setCurrentOrder(finalOrder as any);
+        addPastOrder({
+          orderId: generatedOrderId,
+          dbOrderId,
+          date: new Date().toISOString(),
+          total: totalVal,
+          itemsCount: getItemCount(),
+          status: 'Preparing',
+          customer_phone: userPhone || '',
+          order_type: 'Delivery',
+        });
+        setLiveOrder('Delivery', generatedOrderId, dbOrderId, 'Preparing');
+        clearCart();
+        router.replace({ pathname: '/delivery-success', params: finalOrder });
+        return;
+      } catch (err: any) {
+        setLoading(false);
+        console.error('Error placing COD order:', err);
+        Alert.alert('Order Error', err?.message || 'Something went wrong while placing your COD order.');
+        return;
+      }
+    }
+
     setLoading(true);
     setPaymentMethod('UPI');
 
@@ -355,7 +484,35 @@ export default function PaymentScreen() {
           <Text style={styles.delMethodsTitle}>Select Payment Method</Text>
 
           <View style={styles.delMethodsList}>
-            <TouchableOpacity style={[styles.delMethodItem, selectedMethod === 'UPI' && styles.delMethodItemActive]} onPress={() => {}} activeOpacity={0.8}>
+            {/* Cash on Delivery Card */}
+            <TouchableOpacity
+              style={[styles.delMethodItem, selectedMethod === 'Cash' && styles.delMethodItemActive]}
+              onPress={() => setSelectedMethod('Cash')}
+              activeOpacity={0.8}
+            >
+              <View style={styles.delMethodIcon}>
+                <Ionicons name="cash-outline" size={24} color="#00a01d" />
+              </View>
+              <View style={{ flex: 1 }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                  <Text style={styles.delMethodName}>Cash on Delivery (COD)</Text>
+                  <View style={styles.testBadge}>
+                    <Text style={styles.testBadgeText}>TESTING</Text>
+                  </View>
+                </View>
+                <Text style={styles.delMethodDesc}>Pay in cash when your delivery order arrives</Text>
+              </View>
+              <View style={[styles.radioCircle, selectedMethod === 'Cash' ? styles.radioSelected : styles.radioUnselected]}>
+                {selectedMethod === 'Cash' && <Ionicons name="checkmark" size={14} color="#fff" />}
+              </View>
+            </TouchableOpacity>
+
+            {/* UPI / Online Payment Card */}
+            <TouchableOpacity
+              style={[styles.delMethodItem, selectedMethod === 'UPI' && styles.delMethodItemActive]}
+              onPress={() => setSelectedMethod('UPI')}
+              activeOpacity={0.8}
+            >
               <View style={styles.delMethodIcon}>
                 <Ionicons name="phone-portrait-outline" size={24} color="#ff3400" />
               </View>
@@ -373,12 +530,18 @@ export default function PaymentScreen() {
         <View style={styles.delFooter}>
           <View style={styles.delSecureWrap}>
             <Ionicons name="shield-checkmark" size={14} color="#00a01d" />
-            <Text style={styles.delSecureText}>100% Safe & Secure Order Processing</Text>
+            <Text style={styles.delSecureText}>
+              {selectedMethod === 'Cash'
+                ? 'No upfront payment needed • Pay on delivery'
+                : '100% Safe & Secure Order Processing'}
+            </Text>
           </View>
           <TouchableOpacity style={[styles.delPayBtn, loading && styles.btnDisabled]} onPress={handleConfirm} disabled={loading}>
             <Text style={styles.delPayBtnText}>
               {loading
                 ? 'Processing Order...'
+                : selectedMethod === 'Cash'
+                ? `Confirm Order (Rs. ${totalVal.toFixed(0)}) via COD`
                 : `Pay Rs. ${totalVal.toFixed(0)} via UPI / Online`}
             </Text>
           </TouchableOpacity>
