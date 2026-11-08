@@ -18,16 +18,17 @@ export interface OutletLocation {
   latitude: number;
   longitude: number;
   restaurant_id?: number;
+  phone?: string;
 }
 
 export const KNOWN_OUTLET_LOCATIONS: Record<string | number, OutletLocation> = {
-  1: { name: 'Data Udipi — Mugalivakkam', latitude: 13.0210, longitude: 80.1614, restaurant_id: 1 },
-  2: { name: 'Data Udipi — MGR Nagar', latitude: 13.0350, longitude: 80.1970, restaurant_id: 2 },
-  3: { name: 'Data Udipi - Banglore', latitude: 12.8399, longitude: 77.6770, restaurant_id: 25 },
-  25: { name: 'Data Udipi - Banglore', latitude: 12.8399, longitude: 77.6770, restaurant_id: 25 },
-  mugalivakkam: { name: 'Data Udipi — Mugalivakkam', latitude: 13.0210, longitude: 80.1614, restaurant_id: 1 },
-  mgrnagar: { name: 'Data Udipi — MGR Nagar', latitude: 13.0350, longitude: 80.1970, restaurant_id: 2 },
-  banglore: { name: 'Data Udipi - Banglore', latitude: 12.8399, longitude: 77.6770, restaurant_id: 25 },
+  1: { name: 'Data Udipi — Mugalivakkam', latitude: 13.0210, longitude: 80.1614, restaurant_id: 1, phone: '+91 95970 66563' },
+  2: { name: 'Data Udipi — MGR Nagar', latitude: 13.0350, longitude: 80.1970, restaurant_id: 2, phone: '+91 44 4852 4782' },
+  3: { name: 'Data Udipi - Banglore', latitude: 12.8399, longitude: 77.6770, restaurant_id: 25, phone: '' },
+  25: { name: 'Data Udipi - Banglore', latitude: 12.8399, longitude: 77.6770, restaurant_id: 25, phone: '' },
+  mugalivakkam: { name: 'Data Udipi — Mugalivakkam', latitude: 13.0210, longitude: 80.1614, restaurant_id: 1, phone: '+91 95970 66563' },
+  mgrnagar: { name: 'Data Udipi — MGR Nagar', latitude: 13.0350, longitude: 80.1970, restaurant_id: 2, phone: '+91 44 4852 4782' },
+  banglore: { name: 'Data Udipi - Banglore', latitude: 12.8399, longitude: 77.6770, restaurant_id: 25, phone: '' },
 };
 
 export const ALL_BRANCHES: OutletLocation[] = [
@@ -44,11 +45,19 @@ export function resolveOutletLocation(outlet?: any): OutletLocation {
     const lat = Number(outlet.lat ?? outlet.latitude);
     const lng = Number(outlet.lng ?? outlet.longitude);
     if (!isNaN(lat) && !isNaN(lng) && lat !== 0 && lng !== 0) {
+      const restId = outlet.restaurant_id ? Number(outlet.restaurant_id) : (outlet.id ? Number(outlet.id) : undefined);
+      const nameLower = (outlet.name || '').toLowerCase();
+      let phone = outlet.phone;
+      if (!phone) {
+        if (restId === 2 || nameLower.includes('mgr')) phone = '+91 44 4852 4782';
+        else if (restId === 1 || nameLower.includes('muga')) phone = '+91 95970 66563';
+      }
       return {
         name: outlet.name || 'Data Udipi',
         latitude: lat,
         longitude: lng,
-        restaurant_id: outlet.restaurant_id ? Number(outlet.restaurant_id) : (outlet.id ? Number(outlet.id) : undefined),
+        restaurant_id: restId,
+        phone,
       };
     }
 

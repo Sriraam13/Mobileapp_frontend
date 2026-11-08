@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { View, Text, StyleSheet, ScrollView, TextInput, TouchableOpacity, Image, ImageBackground, Platform, StatusBar, Alert, Modal, ActivityIndicator, Dimensions, RefreshControl } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TextInput, TouchableOpacity, Image, ImageBackground, Platform, StatusBar, Alert, Modal, ActivityIndicator, Dimensions, RefreshControl, Linking } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useRouter, useLocalSearchParams } from 'expo-router';
@@ -297,6 +297,15 @@ export default function Home() {
   const [categories, setCategories] = useState<any[]>([]);
   const [selectedBranchName, setSelectedBranchName] = useState('Koramangala, Bangalore');
   const [searchText, setSearchText] = useState('');
+
+  const branchPhone = React.useMemo(() => {
+    if (selectedOutlet?.phone) return selectedOutlet.phone;
+    const nameLower = (selectedOutlet?.name || selectedBranchName || '').toLowerCase();
+    const restId = Number(selectedOutlet?.restaurant_id || selectedOutlet?.id || 0);
+    if (restId === 2 || nameLower.includes('mgr')) return '+91 44 4852 4782';
+    if (restId === 1 || nameLower.includes('muga')) return '+91 95970 66563';
+    return selectedOutlet?.phone || '';
+  }, [selectedOutlet, selectedBranchName]);
 
   const [tableNumber, setTableNumber] = useState<string | null>(null);
   const [tableStatus, setTableStatus] = useState<string | null>(null);
@@ -886,6 +895,16 @@ export default function Home() {
               <Text style={styles.locationText}>{selectedBranchName}</Text>
               <Ionicons name='chevron-down' size={12} color='#111827' />
             </TouchableOpacity>
+            {!!branchPhone && (
+              <TouchableOpacity
+                style={styles.headerPhoneRow}
+                onPress={() => Linking.openURL(`tel:${branchPhone.replace(/\s+/g, '')}`)}
+                activeOpacity={0.7}
+              >
+                <Ionicons name='call' size={11} color='#4B5563' />
+                <Text style={styles.headerPhoneText}>{branchPhone}</Text>
+              </TouchableOpacity>
+            )}
           </View>
           <TouchableOpacity style={styles.profileBtn} onPress={() => router.push('/profile')}>
             <View style={styles.profileImgContainer}>
@@ -1767,6 +1786,17 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '700',
     color: '#111827',
+  },
+  headerPhoneRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 2,
+    gap: 4,
+  },
+  headerPhoneText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#4B5563',
   },
   searchBar: {
     flexDirection: 'row',

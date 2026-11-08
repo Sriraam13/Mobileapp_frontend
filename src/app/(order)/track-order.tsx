@@ -1130,14 +1130,14 @@ export default function TrackOrderScreen() {
               <Text style={styles.pixelHelpTitle}>Need help with your order?</Text>
               <Text style={styles.pixelHelpSub}>Our support team is here to help</Text>
             </View>
-            <TouchableOpacity
-              style={styles.pixelChatBtn}
-              onPress={() => {
-                const phone = selectedOutlet?.phone || '1234567890';
-                Linking.openURL(`tel:${phone}`);
-              }}
-              activeOpacity={0.8}
-            >
+              <TouchableOpacity
+                style={styles.pixelChatBtn}
+                onPress={() => {
+                  const phone = selectedOutlet?.phone || ((selectedOutlet?.name || '').toLowerCase().includes('mgr') ? '+91 44 4852 4782' : '+91 95970 66563');
+                  Linking.openURL(`tel:${phone.replace(/\s+/g, '')}`);
+                }}
+                activeOpacity={0.8}
+              >
               <Text style={styles.pixelChatBtnText}>Chat</Text>
             </TouchableOpacity>
           </View>
@@ -1588,7 +1588,10 @@ export default function TrackOrderScreen() {
             </View>
           ) : (
             <>
-              <TouchableOpacity style={styles.dineInCallStaffBtn} onPress={() => Linking.openURL(`tel:${selectedOutlet?.phone || '1234567890'}`)}>
+              <TouchableOpacity style={styles.dineInCallStaffBtn} onPress={() => {
+                const phone = selectedOutlet?.phone || ((selectedOutlet?.name || '').toLowerCase().includes('mgr') ? '+91 44 4852 4782' : '+91 95970 66563');
+                Linking.openURL(`tel:${phone.replace(/\s+/g, '')}`);
+              }}>
                 <Ionicons name="call-outline" size={16} color="#000" />
                 <Text style={styles.dineInCallStaffText}>Call Staff</Text>
               </TouchableOpacity>
@@ -1825,7 +1828,10 @@ export default function TrackOrderScreen() {
               </TouchableOpacity>
             )}
 
-            <TouchableOpacity style={styles.callButton} onPress={() => Linking.openURL(`tel:${selectedOutlet?.phone || '1234567890'}`)}>
+            <TouchableOpacity style={styles.callButton} onPress={() => {
+              const phone = selectedOutlet?.phone || ((selectedOutlet?.name || '').toLowerCase().includes('mgr') ? '+91 44 4852 4782' : '+91 95970 66563');
+              Linking.openURL(`tel:${phone.replace(/\s+/g, '')}`);
+            }}>
               <Ionicons name="call-outline" size={18} color="#000" />
               <Text style={styles.callBtnText}>Call Restaurant</Text>
             </TouchableOpacity>

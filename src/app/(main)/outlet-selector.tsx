@@ -13,6 +13,7 @@ const FALLBACK_OUTLETS = [
     restaurant_id: 1,
     name: "Data Udipi — Mugalivakkam",
     address: "Mount-Poonamallee Road, Mugalivakkam, Chennai 600125",
+    phone: "+91 95970 66563",
     lat: 13.0210,
     lng: 80.1614,
     open: true,
@@ -23,6 +24,7 @@ const FALLBACK_OUTLETS = [
     restaurant_id: 2,
     name: "Data Udipi — MGR Nagar",
     address: "Anna Main Road, MGR Nagar, Chennai 600078",
+    phone: "+91 44 4852 4782",
     lat: 13.0350,
     lng: 80.1970,
     open: true,
@@ -33,6 +35,7 @@ const FALLBACK_OUTLETS = [
     restaurant_id: 25,
     name: "Data Udipi- Banglore",
     address: "Ganga block 1st cross, Electronic City, Survey No.33, 12th Cross Rd, Bettadasanapura, Karnataka 560100",
+    phone: "",
     lat: 12.8399,
     lng: 77.6770,
     open: true,
@@ -71,11 +74,22 @@ export default function OutletSelectorScreen() {
           const rLat = r.latitude != null ? Number(r.latitude) : null;
           const rLng = r.longitude != null ? Number(r.longitude) : null;
 
+          const rNameLower = (r.name || '').toLowerCase();
+          let outletPhone = r.phone || fallback?.phone || '';
+          if (!outletPhone) {
+            if (r.id === 2 || rNameLower.includes('mgr')) {
+              outletPhone = '+91 44 4852 4782';
+            } else if (r.id === 1 || rNameLower.includes('muga')) {
+              outletPhone = '+91 95970 66563';
+            }
+          }
+
           return {
             id: r.id.toString(),
             restaurant_id: r.id,
             name: r.name,
-            address: r.address || '',
+            address: r.address || fallback?.address || '',
+            phone: outletPhone,
             lat: (rLat && !isNaN(rLat)) ? rLat : (fallback?.lat ?? 13.0210),
             lng: (rLng && !isNaN(rLng)) ? rLng : (fallback?.lng ?? 80.1614),
             open: fallback?.open ?? true,
@@ -180,6 +194,12 @@ export default function OutletSelectorScreen() {
               <View style={styles.cardBody}>
                 <Text style={styles.outletName}>{o.name}</Text>
                 <Text style={styles.outletAddr}>{o.address}</Text>
+                {!!o.phone && (
+                  <View style={styles.phoneRow}>
+                    <Ionicons name="call" size={12} color="#4B5563" />
+                    <Text style={styles.phoneText}>{o.phone}</Text>
+                  </View>
+                )}
                 <View style={styles.metaRow}>
                   {o.dist !== null && <Text style={styles.metaDist}>📍 {o.dist.toFixed(1)} km away</Text>}
                   <Text style={styles.metaOpen}>{o.comingSoon ? '● Coming Soon' : (o.open ? '● Open now' : '● Closed')}</Text>
@@ -318,6 +338,17 @@ const styles = StyleSheet.create({
     color: '#8A8A8A',
     marginBottom: 8,
     lineHeight: 18,
+  },
+  phoneRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginBottom: 8,
+  },
+  phoneText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#374151',
   },
   metaRow: {
     flexDirection: 'row',

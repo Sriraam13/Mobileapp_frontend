@@ -54,6 +54,7 @@ export default function InvoiceScreen() {
   const [downloading, setDownloading] = useState(false);
   const branchName = selectedOutlet?.name || 'Data Udipi — Mugalivakkam';
   const branchAddress = selectedOutlet?.address || 'Mount-Poonamallee Road, Mugalivakkam, Chennai 600125';
+  const branchPhone = selectedOutlet?.phone || ((branchName || '').toLowerCase().includes('mgr') ? '+91 44 4852 4782' : '+91 95970 66563');
   const [orderData, setOrderData] = useState<any>(null);
   const [loadingOrder, setLoadingOrder] = useState(Boolean(params.dbOrderId));
 
@@ -430,6 +431,7 @@ export default function InvoiceScreen() {
             ${logoBase64 ? `<img src="${logoBase64}" class="brand-logo-img" alt="Data Udipi" />` : ''}
             <div class="outlet-name">${cleanBranchTitle}</div>
             <div class="outlet-address">${branchAddress}</div>
+            <div class="outlet-phone">Tel: ${branchPhone}</div>
             <div class="company-details">Data Udipi Limited • Regd. Office: Chennai</div>
             <div class="company-gstin">GSTIN: 29AAACT1836J1ZC</div>
           </div>
@@ -582,6 +584,7 @@ export default function InvoiceScreen() {
           <View style={styles.companyInfo}>
             <Text style={styles.companyName}>Data Udipi Limited</Text>
             <Text style={styles.companyText}>Place Of Supply : {branchName} - {branchAddress}.</Text>
+            <Text style={styles.companyText}>Tel : {branchPhone}</Text>
             <Text style={styles.companyText}>Regd. Office: Chennai.</Text>
             <Text style={styles.companyText}>GSTIN NO: 29AAACT1836J1ZC</Text>
           </View>
