@@ -1060,6 +1060,37 @@ async function handleVapiToolCall(tool: any): Promise<{ toolCallId: string; resu
         return { toolCallId, result: JSON.stringify(result) };
       }
 
+      case 'catering_set_event_details':
+      case 'catering_fill_event_details': {
+        const result = await executeSingleAction({
+          action: 'catering_set_event_details',
+          payload: fnArgs,
+        });
+        const vapi = getVapi();
+        if (vapi?.say) vapi.say(result.message, false, false, true);
+        return { toolCallId, result: JSON.stringify(result) };
+      }
+
+      case 'catering_navigate_step': {
+        const result = await executeSingleAction({
+          action: 'catering_navigate_step',
+          payload: fnArgs,
+        });
+        const vapi = getVapi();
+        if (vapi?.say) vapi.say(result.message, false, false, true);
+        return { toolCallId, result: JSON.stringify(result) };
+      }
+
+      case 'catering_customise_item': {
+        const result = await executeSingleAction({
+          action: 'catering_customise_item',
+          payload: fnArgs,
+        });
+        const vapi = getVapi();
+        if (vapi?.say) vapi.say(result.message, false, false, true);
+        return { toolCallId, result: JSON.stringify(result) };
+      }
+
       case 'catering_choose_package':
       case 'catering_select_package': {
         const pkgCode = fnArgs.package_code || fnArgs.code || '';

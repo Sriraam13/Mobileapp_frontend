@@ -589,7 +589,94 @@ Each tool is a **function** that Vapi calls during conversation.
 
 ---
 
-### 16. `app_confirm_action`
+### 16. `catering_set_event_details`
+
+**Purpose:** Populate the Step 1 Event Details form (`catering-event-details`) in real time (order type, event name, date, time, occasion, guest count, service type, delivery address) and optionally proceed to package selection.
+
+**Frontend/Backend:** Frontend (Zustand cateringSessionStore + Expo Router)
+
+**Parameters:**
+| Parameter            | Type    | Required | Description                                                    |
+|----------------------|---------|----------|----------------------------------------------------------------|
+| event_name           | string  | Yes      | Name of the event (e.g., "Priya Birthday Party", "Anand Wedding Reception") |
+| date                 | string  | Yes      | Date of event (e.g., "15 Dec 2026", "Tomorrow")                 |
+| time                 | string  | Yes      | Serving time (e.g., "1:00 PM", "7:30 PM")                      |
+| occasion             | string  | Yes      | Occasion (e.g., "Birthday", "Wedding", "Housewarming")         |
+| guest_count          | integer | Yes      | Number of guests (minimum 50)                                  |
+| address              | string  | Yes      | Delivery address or venue location                             |
+| service_type         | string  | No       | "Delivery Only" (default) or "Full Service"                   |
+| order_type           | string  | No       | "Catering Order" (default) or "Party Order"                    |
+| proceed_to_packages  | boolean | No       | Whether to navigate immediately to package selection (default: true) |
+
+**Example call:**
+```json
+{
+  "event_name": "Rohan Birthday Party",
+  "date": "20 Dec 2026",
+  "time": "1:00 PM",
+  "occasion": "Birthday",
+  "guest_count": 75,
+  "service_type": "Delivery Only",
+  "address": "123 Anna Nagar, Chennai",
+  "proceed_to_packages": true
+}
+```
+
+---
+
+### 17. `catering_customise_item`
+
+**Purpose:** Add, remove, or swap dishes in the catering menu on Step 3 (`catering-customise-menu`) before proceeding to quote and payment.
+
+**Frontend/Backend:** Frontend (Expo Router + DeviceEventEmitter)
+
+**Parameters:**
+| Parameter     | Type   | Required | Description                                              |
+|---------------|--------|----------|----------------------------------------------------------|
+| action_type   | string | Yes      | One of: `ADD`, `REMOVE`, `REPLACE`                       |
+| item_name     | string | Cond.    | Name of item to remove or replace (required for REMOVE/REPLACE) |
+| new_item_name | string | Cond.    | Replacement dish name (optional for REPLACE)             |
+
+**Example call — Remove dish:**
+```json
+{
+  "action_type": "REMOVE",
+  "item_name": "Gulab Jamun"
+}
+```
+
+**Example call — Swap dish:**
+```json
+{
+  "action_type": "REPLACE",
+  "item_name": "Idli",
+  "new_item_name": "Poori Masala"
+}
+```
+
+---
+
+### 18. `catering_navigate_step`
+
+**Purpose:** Directly navigate between any of the 6 steps of the bulk catering flow.
+
+**Frontend/Backend:** Frontend (Expo Router)
+
+**Parameters:**
+| Parameter | Type   | Required | Description                                                         |
+|-----------|--------|----------|---------------------------------------------------------------------|
+| step      | string | Yes      | One of: `event_details`, `packages`, `customise_menu`, `extras`, `review_quote`, `payment`, `orders`, `hub` |
+
+**Example call:**
+```json
+{
+  "step": "customise_menu"
+}
+```
+
+---
+
+### 19. `app_confirm_action`
 
 **Purpose:** Signals that the LLM has requested confirmation from the user.
 The LLM handles the conversation turn; this tool is used for tracking state.

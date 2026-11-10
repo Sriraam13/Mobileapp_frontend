@@ -3,7 +3,7 @@ import React, { useState, useEffect } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
   SafeAreaView, Platform, StatusBar, ActivityIndicator,
-  Modal, Alert
+  Modal, Alert, DeviceEventEmitter
 } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
@@ -103,6 +103,36 @@ export default function CustomiseMenu() {
     fetchCustomizations();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Listen for voice agent catering customizations
+  useEffect(() => {
+    const sub = DeviceEventEmitter.addListener('catering_customise_item', (data: any) => {
+      console.log('[CustomiseMenu] Voice customization event received:', data);
+      const actionType = String(data.action_type || 'ADD').toUpperCase();
+      const itemName = String(data.item_name || '').toLowerCase().trim();
+
+      if (actionType === 'REMOVE' && itemName) {
+        for (const cat of categories) {
+          const matched = cat.items.find(i => i.name.toLowerCase().includes(itemName));
+          if (matched) {
+            applyRemove(matched);
+            break;
+          }
+        }
+      } else if (actionType === 'REPLACE' && itemName) {
+        for (const cat of categories) {
+          const matched = cat.items.find(i => i.name.toLowerCase().includes(itemName));
+          if (matched) {
+            openSwapModal(matched);
+            break;
+          }
+        }
+      } else if (actionType === 'ADD') {
+        openAddModal();
+      }
+    });
+    return () => sub.remove();
+  }, [categories, customizations]);
 
   const openSwapModal = async (item: PackageItem) => {
     setSwapTarget(item);

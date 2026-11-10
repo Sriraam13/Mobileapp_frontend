@@ -561,14 +561,123 @@ export async function executeSingleAction(act: UIAction): Promise<ActionResult> 
         return { success: true, action, message: 'Opened Bulk Catering.' };
       }
 
+      case 'catering_set_event_details': {
+        const payload = act.payload || {};
+        const { useCateringSessionStore } = require('../store/useCateringSessionStore');
+        const store = useCateringSessionStore.getState();
+
+        const orderType = payload.order_type || payload.orderType || store.orderType || 'Catering Order';
+        const eventName = payload.event_name || payload.eventName || store.eventName || '';
+        const date = payload.date || store.date || '';
+        const time = payload.time || payload.serving_time || store.time || '';
+        const occasion = payload.occasion || store.occasion || '';
+        const guestCount = String(payload.guest_count || payload.guestCount || store.guestCount || '50');
+        const serviceType = payload.service_type || payload.serviceType || store.serviceType || 'Delivery Only';
+        const address = payload.address || payload.delivery_address || store.address || '';
+
+        store.setEventDetails({
+          orderType: orderType === 'Party Order' ? 'Party Order' : 'Catering Order',
+          eventName,
+          date,
+          time,
+          occasion,
+          guestCount,
+          serviceType,
+          address,
+        });
+
+        const proceed = payload.proceed_to_packages !== false;
+        if (proceed && eventName && date && time && occasion && address) {
+          navigateScreen('/(main)/catering-choose-package', {
+            eventName,
+            date,
+            time,
+            occasion,
+            guestCount,
+            serviceType,
+            address,
+          });
+          return {
+            success: true,
+            action,
+            message: `Event details saved for ${eventName} on ${date} (${guestCount} guests). Moving to package selection.`,
+            data: { eventName, date, time, occasion, guestCount, serviceType, address, navigatedTo: 'packages' }
+          };
+        } else {
+          navigateScreen('/(main)/catering-event-details');
+          return {
+            success: true,
+            action,
+            message: `Entered event details on screen: ${eventName || 'Event'}, ${date || 'Date'}, ${guestCount} guests, ${address || 'Address'}.`,
+            data: { eventName, date, time, occasion, guestCount, serviceType, address, navigatedTo: 'event_details' }
+          };
+        }
+      }
+
       case 'catering_choose_package': {
-        const params = act.payload?.params || {};
+        const params = act.payload?.params || act.payload || {};
         navigateScreen('/(main)/catering-choose-package', params);
         return {
           success: true,
           action,
           message: 'Opened Catering Package Selection.',
           data: params
+        };
+      }
+
+      case 'catering_customise_item': {
+        const payload = act.payload || {};
+        const actionType = String(payload.action_type || 'ADD').toUpperCase();
+        const itemName = payload.item_name || '';
+        const newItemName = payload.new_item_name || '';
+
+        navigateScreen('/(main)/catering-customise-menu');
+        DeviceEventEmitter.emit('catering_customise_item', {
+          action_type: actionType,
+          item_name: itemName,
+          new_item_name: newItemName,
+        });
+
+        return {
+          success: true,
+          action,
+          message: `${actionType === 'REPLACE' ? `Swapped ${itemName} with ${newItemName}` : actionType === 'REMOVE' ? `Removed ${itemName}` : `Added ${itemName}`} in catering menu.`,
+          data: payload,
+        };
+      }
+
+      case 'catering_navigate_step': {
+        const step = String(act.payload?.step || (act as any).step || '').toLowerCase();
+        const stepMap: Record<string, string> = {
+          'event_details': '/(main)/catering-event-details',
+          'details': '/(main)/catering-event-details',
+          'step1': '/(main)/catering-event-details',
+          'packages': '/(main)/catering-choose-package',
+          'choose_package': '/(main)/catering-choose-package',
+          'step2': '/(main)/catering-choose-package',
+          'customise_menu': '/(main)/catering-customise-menu',
+          'customise': '/(main)/catering-customise-menu',
+          'step3': '/(main)/catering-customise-menu',
+          'extras': '/(main)/catering-add-extras',
+          'add_extras': '/(main)/catering-add-extras',
+          'step4': '/(main)/catering-add-extras',
+          'review_quote': '/(main)/catering-review-quote',
+          'quote': '/(main)/catering-review-quote',
+          'step5': '/(main)/catering-review-quote',
+          'payment': '/(main)/catering-advance-payment',
+          'step6': '/(main)/catering-advance-payment',
+          'orders': '/(main)/catering-order-details',
+          'order_details': '/(main)/catering-order-details',
+          'hub': '/(main)/bulk-catering',
+          'bulk': '/(main)/bulk-catering',
+        };
+        const targetRoute = stepMap[step] || '/(main)/catering-event-details';
+        navigateScreen(targetRoute, act.payload?.params || {});
+        return {
+          success: true,
+          action,
+          message: `Navigated to catering step: ${step || 'event_details'}.`,
+          data: { route: targetRoute, step }
         };
       }
 

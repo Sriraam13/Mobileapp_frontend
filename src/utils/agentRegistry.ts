@@ -66,15 +66,25 @@ export const SCREEN_REGISTRY: Record<string, string> = {
   '/bulk-catering': '/(main)/bulk-catering',
   '/(main)/bulk-catering': '/(main)/bulk-catering',
   '/catering-choose-package': '/(main)/catering-choose-package',
+  '/(main)/catering-choose-package': '/(main)/catering-choose-package',
   '/catering-event-details': '/(main)/catering-event-details',
+  '/(main)/catering-event-details': '/(main)/catering-event-details',
   '/catering-customise-menu': '/(main)/catering-customise-menu',
+  '/(main)/catering-customise-menu': '/(main)/catering-customise-menu',
   '/catering-add-extras': '/(main)/catering-add-extras',
+  '/(main)/catering-add-extras': '/(main)/catering-add-extras',
   '/catering-review-quote': '/(main)/catering-review-quote',
+  '/(main)/catering-review-quote': '/(main)/catering-review-quote',
   '/catering-advance-payment': '/(main)/catering-advance-payment',
+  '/(main)/catering-advance-payment': '/(main)/catering-advance-payment',
   '/catering-balance-payment': '/(main)/catering-balance-payment',
+  '/(main)/catering-balance-payment': '/(main)/catering-balance-payment',
   '/catering-razorpay-checkout': '/(main)/catering-razorpay-checkout',
+  '/(main)/catering-razorpay-checkout': '/(main)/catering-razorpay-checkout',
   '/catering-order-success': '/(main)/catering-order-success',
+  '/(main)/catering-order-success': '/(main)/catering-order-success',
   '/catering-order-details': '/(main)/catering-order-details',
+  '/(main)/catering-order-details': '/(main)/catering-order-details',
 };
 
 // ─── Natural language alias → canonical route ─────────────────────────────
@@ -323,6 +333,9 @@ export const SUPPORTED_ACTIONS = new Set([
   // Catering
   'open_catering',
   'catering_choose_package',
+  'catering_set_event_details',
+  'catering_customise_item',
+  'catering_navigate_step',
 
   // Category
   'open_category',
@@ -352,6 +365,10 @@ export const SUPPORTED_VAPI_TOOLS = new Set([
   'pay_later',
   'catering_choose_package',
   'catering_select_package',
+  'catering_set_event_details',
+  'catering_fill_event_details',
+  'catering_customise_item',
+  'catering_navigate_step',
   'set_order_type',
   'select_order_mode',
   'switch_order_type',
@@ -425,8 +442,9 @@ export function resolveRoute(input: string): string | null {
   const raw = input.trim();
   if (!raw) return null;
 
-  // Direct match in SCREEN_REGISTRY
+  // Direct match in SCREEN_REGISTRY or already canonical route like /(main)/...
   if (SCREEN_REGISTRY[raw]) return SCREEN_REGISTRY[raw];
+  if (raw.startsWith('/(')) return raw;
 
   const normalized = raw.toLowerCase().replace(/^[/#]+/, '').trim();
   const withSlash = '/' + normalized;
