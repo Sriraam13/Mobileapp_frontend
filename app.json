@@ -39,8 +39,7 @@
         "android.permission.ACCESS_FINE_LOCATION",
         "android.permission.ACCESS_COARSE_LOCATION"
       ],
-      "package": "com.dataudipi.app",
-      "versionCode": 3
+      "package": "com.dataudipi.app"
     },
     "web": {
       "output": "single",
