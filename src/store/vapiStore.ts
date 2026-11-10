@@ -30,8 +30,13 @@ import { useLiveOrderStore } from '../store/useLiveOrderStore';
 import { useAddressStore } from '../store/useAddressStore';
 import { useCartStore } from './useCartStore';
 
-// Cache executed toolCallIds to avoid duplicate execution
+// Cache executed toolCallIds and debounce actions to avoid duplicate execution
 const executedToolCallIds = new Set<string>();
+let lastExecutedActionFingerprint = '';
+let lastExecutedActionTime = 0;
+let lastNotifiedRoute = '';
+let lastNotifiedRouteTime = 0;
+let lastSpeechIntentTime = 0;
 
 function extractToolCalls(message: any): any[] {
   if (!message) return [];
@@ -692,11 +697,6 @@ async function handleVapiToolCall(tool: any): Promise<{ toolCallId: string; resu
           speechSummary = `You have ${cartCount} items in your cart: ${itemNames}, totaling ${subtotal} rupees. I have opened your cart on screen.`;
         }
 
-        const vapi = getVapi();
-        if (vapi?.say) {
-          vapi.say(speechSummary, false, false, true);
-        }
-
         return {
           toolCallId,
           result: JSON.stringify({
@@ -714,12 +714,6 @@ async function handleVapiToolCall(tool: any): Promise<{ toolCallId: string; resu
         console.log(`[VapiStore] ADD_TO_CART REQUEST:`, fnArgs);
         const res = await resolveAndAddToCart(fnArgs);
         console.log(`[VapiStore] ADD_TO_CART RESULT:`, res);
-        if (res.success) {
-          const vapi = getVapi();
-          if (vapi?.say) {
-            vapi.say(res.message, false, false, true);
-          }
-        }
         return { toolCallId, result: JSON.stringify(res) };
       }
 
@@ -729,21 +723,11 @@ async function handleVapiToolCall(tool: any): Promise<{ toolCallId: string; resu
           menu_item_id: fnArgs.item_id,
           payload: fnArgs.item_name ? { item_name: fnArgs.item_name } : undefined,
         } as any);
-        if (result.success) {
-          const vapi = getVapi();
-          if (vapi?.say) {
-            vapi.say(result.message, false, false, true);
-          }
-        }
         return { toolCallId, result: JSON.stringify(result) };
       }
 
       case 'clear_cart': {
         const result = await executeSingleAction({ action: 'clear_cart' });
-        const vapi = getVapi();
-        if (vapi?.say) {
-          vapi.say('I have cleared your cart.', false, false, true);
-        }
         return { toolCallId, result: JSON.stringify(result) };
       }
 
@@ -763,12 +747,6 @@ async function handleVapiToolCall(tool: any): Promise<{ toolCallId: string; resu
           console.log(`[VapiStore] CART_UPDATE (ADD) REQUEST:`, fnArgs);
           const res = await resolveAndAddToCart(fnArgs);
           console.log(`[VapiStore] CART_UPDATE (ADD) RESULT:`, res);
-          if (res.success) {
-            const vapi = getVapi();
-            if (vapi?.say) {
-              vapi.say(res.message, false, false, true);
-            }
-          }
           return { toolCallId, result: JSON.stringify(res) };
         }
 
@@ -791,11 +769,6 @@ async function handleVapiToolCall(tool: any): Promise<{ toolCallId: string; resu
           } else {
             const itemNames = itemsList.map(i => `${i.quantity}x ${i.name}`).join(', ');
             speechSummary = `You have ${cartCount} items in your cart: ${itemNames}, totaling ${subtotal} rupees. I have opened your cart on screen.`;
-          }
-
-          const vapi = getVapi();
-          if (vapi?.say) {
-            vapi.say(speechSummary, false, false, true);
           }
 
           return {
@@ -1017,8 +990,6 @@ async function handleVapiToolCall(tool: any): Promise<{ toolCallId: string; resu
           category_name: catName,
         });
         const speech = `I have opened the ${catName || 'menu'} category on your screen.`;
-        const vapi = getVapi();
-        if (vapi?.say) vapi.say(speech, false, false, true);
         return {
           toolCallId,
           result: JSON.stringify({ success: true, message: speech, categoryName: catName }),
@@ -1040,15 +1011,9 @@ async function handleVapiToolCall(tool: any): Promise<{ toolCallId: string; resu
 
         if (rawAction.includes('bill') || rawAction.includes('settle')) {
           const result = await executeSingleAction({ action: 'dine_in_pay_bill' });
-          const speech = result.message || 'Opened your meal bill payment screen.';
-          const vapi = getVapi();
-          if (vapi?.say) vapi.say(speech, false, false, true);
           return { toolCallId, result: JSON.stringify(result) };
         } else {
           const result = await executeSingleAction({ action: 'dine_in_pay_later' });
-          const speech = 'Switched your order to Dine In with Pay Later selected at checkout. You can pay after your meal.';
-          const vapi = getVapi();
-          if (vapi?.say) vapi.say(speech, false, false, true);
           return { toolCallId, result: JSON.stringify(result) };
         }
       }
@@ -1066,8 +1031,6 @@ async function handleVapiToolCall(tool: any): Promise<{ toolCallId: string; resu
           action: 'catering_set_event_details',
           payload: fnArgs,
         });
-        const vapi = getVapi();
-        if (vapi?.say) vapi.say(result.message, false, false, true);
         return { toolCallId, result: JSON.stringify(result) };
       }
 
@@ -1076,8 +1039,6 @@ async function handleVapiToolCall(tool: any): Promise<{ toolCallId: string; resu
           action: 'catering_navigate_step',
           payload: fnArgs,
         });
-        const vapi = getVapi();
-        if (vapi?.say) vapi.say(result.message, false, false, true);
         return { toolCallId, result: JSON.stringify(result) };
       }
 
@@ -1086,8 +1047,6 @@ async function handleVapiToolCall(tool: any): Promise<{ toolCallId: string; resu
           action: 'catering_customise_item',
           payload: fnArgs,
         });
-        const vapi = getVapi();
-        if (vapi?.say) vapi.say(result.message, false, false, true);
         return { toolCallId, result: JSON.stringify(result) };
       }
 
@@ -1106,8 +1065,6 @@ async function handleVapiToolCall(tool: any): Promise<{ toolCallId: string; resu
         const speech = pkgName
           ? `I have opened catering package selection for ${pkgName} on your screen.`
           : `I have opened the catering packages on your screen. You can select from Grand Breakfast, Variety Feast, Regular Lunch, and more.`;
-        const vapi = getVapi();
-        if (vapi?.say) vapi.say(speech, false, false, true);
         return { toolCallId, result: JSON.stringify({ success: true, message: speech, ...params }) };
       }
 
@@ -1333,6 +1290,20 @@ export const useVapiStore = create<VapiState>((set, get) => ({
   },
 
   notifyRouteChanged: (route: string) => {
+    if (!route) return;
+    const cleanRoute = route.replace(/^\/\([^)]+\)/, '') || route;
+    const now = Date.now();
+    // Don't repeat identical route notification within 3.5 seconds
+    if (cleanRoute === lastNotifiedRoute && (now - lastNotifiedRouteTime) < 3500) {
+      return;
+    }
+    // Also throttle all route notifications to at least 2000ms apart
+    if ((now - lastNotifiedRouteTime) < 2000) {
+      return;
+    }
+    lastNotifiedRoute = cleanRoute;
+    lastNotifiedRouteTime = now;
+
     const vapi = getVapi();
     if (vapi && get().isConnected) {
       try {
@@ -1340,7 +1311,7 @@ export const useVapiStore = create<VapiState>((set, get) => ({
           type: 'add-message',
           message: {
             role: 'system',
-            content: `[System Update] The user has navigated to screen: ${route}`
+            content: `[System Update] The user has navigated to screen: ${cleanRoute}`
           }
         });
       } catch (e) {
@@ -1443,64 +1414,53 @@ export const useVapiStore = create<VapiState>((set, get) => ({
       console.log(`[VapiStore] Incoming Vapi message: "${message.type || 'unknown'}"`);
 
       // ── Tool Call Extraction & Execution ──────────────────────────────────────
-      const toolCalls = extractToolCalls(message);
-      if (toolCalls && toolCalls.length > 0) {
-        console.log(`[VapiStore] Processing ${toolCalls.length} tool call(s) from message type "${message.type}"...`);
+      const isToolCallsMessage =
+        message.type === 'tool-calls' ||
+        message.type === 'tool_calls' ||
+        message.type === 'function-call';
 
-        const sendToolResult = (result: { toolCallId: string; result: string } | null) => {
-          if (!result || !result.toolCallId) return;
-          try {
-            // 1. Send system message to explicitly update LLM conversation memory
-            try {
-              const parsed = JSON.parse(result.result);
-              (vapi as any).send({
-                type: 'add-message',
-                message: {
-                  role: 'system',
-                  content: `[Confirmed System Action] ${parsed.message || result.result}`,
-                },
-              });
-            } catch {}
+      if (isToolCallsMessage) {
+        const toolCalls = extractToolCalls(message);
+        if (toolCalls && toolCalls.length > 0) {
+          console.log(`[VapiStore] Processing ${toolCalls.length} tool call(s) from message type "${message.type}"...`);
 
-            // 2. Also send tool-call result message
-            (vapi as any).send({
-              type: 'add-message',
-              message: {
-                role: 'tool',
-                tool_call_id: result.toolCallId,
-                content: result.result,
-              },
-            });
-          } catch (e) {
-            console.warn('[VapiStore] Result feedback via vapi.send notice:', e);
-          }
-        };
+          const pending = toolCalls.filter((tool: any) => {
+            const toolCallId = tool.id || tool.toolCallId || '';
+            const fnName = tool.function?.name || tool.name || '';
+            const rawArgs = tool.function?.arguments ?? tool.arguments ?? '';
+            const argsStr = typeof rawArgs === 'string' ? rawArgs : JSON.stringify(rawArgs);
+            const fingerprint = `${fnName}:${argsStr}`;
+            const now = Date.now();
 
-        const pending = toolCalls.filter((tool: any) => {
-          const toolCallId = tool.id || tool.toolCallId;
-          if (toolCallId && executedToolCallIds.has(toolCallId)) {
-            console.log(`[VapiStore] Skipping already executed toolCallId: ${toolCallId}`);
-            return false;
-          }
-          if (toolCallId) {
-            executedToolCallIds.add(toolCallId);
-            setTimeout(() => executedToolCallIds.delete(toolCallId), 120000);
-          }
-          return true;
-        });
-
-        // Run tool calls concurrently and stream each result back the moment it
-        // resolves, instead of making the assistant wait for the slowest one.
-        await Promise.all(
-          pending.map(async (tool: any) => {
-            try {
-              const res = await handleVapiToolCall(tool);
-              sendToolResult(res);
-            } catch (e) {
-              console.error('[VapiStore] Tool execution failed:', e);
+            if (toolCallId && executedToolCallIds.has(toolCallId)) {
+              console.log(`[VapiStore] Skipping already executed toolCallId: ${toolCallId}`);
+              return false;
             }
-          })
-        );
+            if (fingerprint === lastExecutedActionFingerprint && (now - lastExecutedActionTime) < 2500) {
+              console.log(`[VapiStore] Debouncing duplicate tool execution: ${fingerprint}`);
+              return false;
+            }
+
+            if (toolCallId) {
+              executedToolCallIds.add(toolCallId);
+              setTimeout(() => executedToolCallIds.delete(toolCallId), 120000);
+            }
+            lastExecutedActionFingerprint = fingerprint;
+            lastExecutedActionTime = now;
+            return true;
+          });
+
+          // Run tool calls concurrently
+          await Promise.all(
+            pending.map(async (tool: any) => {
+              try {
+                await handleVapiToolCall(tool);
+              } catch (e) {
+                console.error('[VapiStore] Tool execution failed:', e);
+              }
+            })
+          );
+        }
       }
 
       // ── Transcript handling: real-time partial + merged final ────────────────
@@ -1509,167 +1469,171 @@ export const useVapiStore = create<VapiState>((set, get) => ({
         const text: string = message.transcript || '';
         const role: string = message.role || 'user';
 
-        if (role === 'user' && text) {
-          const lower = text.toLowerCase().trim();
+        if (message.transcriptType === 'partial') {
+          if (role === 'user') {
+            set({ partialUserTranscript: text });
+          } else {
+            set({ partialAgentTranscript: text });
+          }
+        } else if (message.transcriptType === 'final') {
+          // Process speech intent detection only on FINAL, confirmed user transcripts
+          if (role === 'user' && text) {
+            const lower = text.toLowerCase().trim();
+            const now = Date.now();
 
-          // 1. Order Mode Switches (Takeaway / Dine In / Delivery)
-          if (
-            /\b(switch|change|set|make|select|turn|go|put)\b.*\b(takeaway|take away|take out|parcel|pickup)\b/i.test(lower) ||
-            /^(switch to |change to )?(takeaway|take away)(\s*(please|mode|option))?$/i.test(lower)
-          ) {
-            if (useCartStore.getState().orderType !== 'Take Away') {
-              console.log('[VapiStore] Speech detected intent: switch to takeaway');
-              useCartStore.getState().setOrderType('Take Away');
-              try {
-                (vapi as any).send({
-                  type: 'add-message',
-                  message: {
-                    role: 'system',
-                    content: '[System Update] The user switched order mode to Take Away. App UI has been updated to Takeaway.'
-                  }
-                });
-              } catch {}
-            }
-          } else if (
-            /\b(switch|change|set|make|select|turn|go|put)\b.*\b(dine in|dine-in|dinein|table)\b/i.test(lower) ||
-            /^(switch to |change to )?(dine in|dine-in)(\s*(please|mode|option))?$/i.test(lower)
-          ) {
-            if (useCartStore.getState().orderType !== 'Dine In') {
-              console.log('[VapiStore] Speech detected intent: switch to dine in');
-              useCartStore.getState().setOrderType('Dine In');
-              try {
-                (vapi as any).send({
-                  type: 'add-message',
-                  message: {
-                    role: 'system',
-                    content: '[System Update] The user switched order mode to Dine In. App UI has been updated to Dine-in.'
-                  }
-                });
-              } catch {}
-            }
-          } else if (
-            /\b(switch|change|set|make|select|turn|go|put)\b.*\b(delivery|deliver|home delivery)\b/i.test(lower) ||
-            /^(switch to |change to )?(delivery)(\s*(please|mode|option))?$/i.test(lower)
-          ) {
-            if (useCartStore.getState().orderType !== 'Delivery') {
-              console.log('[VapiStore] Speech detected intent: switch to delivery');
-              useCartStore.getState().setOrderType('Delivery');
-              try {
-                (vapi as any).send({
-                  type: 'add-message',
-                  message: {
-                    role: 'system',
-                    content: '[System Update] The user switched order mode to Delivery. App UI has been updated to Delivery.'
-                  }
-                });
-              } catch {}
-            }
-          }
-          // 1.5 Dine-In Pay Later ("pay later", "dine in pay later", "switch to pay later")
-          else if (
-            /\b(pay later|pay-later|paylater)\b/i.test(lower) ||
-            /\b(switch to pay later|order pay later|dine in pay later)\b/i.test(lower)
-          ) {
-            console.log('[VapiStore] Speech detected intent: switch to pay later dine in');
-            executeSingleAction({ action: 'dine_in_pay_later' });
-          }
-          // 1.6 Dine-In Pay Bill ("pay bill", "pay the bill", "pay my bill", "settle bill", "complete meal")
-          else if (
-            /\b(pay bill|pay the bill|pay my bill|settle bill|paybill|complete meal)\b/i.test(lower)
-          ) {
-            console.log('[VapiStore] Speech detected intent: dine in pay bill');
-            executeSingleAction({ action: 'dine_in_pay_bill' });
-          }
-          // 1.7 Menu Categories ("go to rice varieties", "show dosa varieties", "starters", "breakfast", etc.)
-          else if (
-            /\b(rice varieties|rice varities|dosa varieties|dosa varities|hot beverages|evening snacks|breakfast & dinner|tandoori starters|tandoori breads|tandoori side dishes)\b/i.test(lower) ||
-            /\b(show|open|view|see|go to|take me to|display)\b.*\b(rice varieties|rice varities|rice|dosa varieties|dosa varities|dosa|beverages|coffee|tea|snacks|soups|starters|tandoori|noodles|salads|breakfast|lunch|dinner)\b/i.test(lower)
-          ) {
-            let catName = 'Rice Varieties';
-            if (/rice/i.test(lower)) catName = 'Rice Varieties';
-            else if (/dosa/i.test(lower)) catName = 'Dosa Varieties';
-            else if (/snack/i.test(lower)) catName = 'Evening Snacks';
-            else if (/beverage|coffee|tea/i.test(lower)) catName = 'Hot Beverages';
-            else if (/soup/i.test(lower)) catName = 'Soups';
-            else if (/starter|tandoori/i.test(lower)) catName = 'Tandoori Starters';
-            else if (/noodle/i.test(lower)) catName = 'Noodles';
-            else if (/salad/i.test(lower)) catName = 'Salad';
-            else if (/breakfast/i.test(lower)) catName = 'Breakfast & Dinner';
-            else if (/lunch/i.test(lower)) catName = 'Lunch';
+            if (now - lastSpeechIntentTime >= 2000) {
+              // 1. Order Mode Switches (Takeaway / Dine In / Delivery)
+              if (
+                /\b(switch|change|set|make|select|turn|go|put)\b.*\b(takeaway|take away|take out|parcel|pickup)\b/i.test(lower) ||
+                /^(switch to |change to )?(takeaway|take away)(\s*(please|mode|option))?$/i.test(lower)
+              ) {
+                if (useCartStore.getState().orderType !== 'Take Away') {
+                  lastSpeechIntentTime = now;
+                  console.log('[VapiStore] Speech detected intent: switch to takeaway');
+                  useCartStore.getState().setOrderType('Take Away');
+                }
+              } else if (
+                /\b(switch|change|set|make|select|turn|go|put)\b.*\b(dine in|dine-in|dinein|table)\b/i.test(lower) ||
+                /^(switch to |change to )?(dine in|dine-in)(\s*(please|mode|option))?$/i.test(lower)
+              ) {
+                if (useCartStore.getState().orderType !== 'Dine In') {
+                  lastSpeechIntentTime = now;
+                  console.log('[VapiStore] Speech detected intent: switch to dine in');
+                  useCartStore.getState().setOrderType('Dine In');
+                }
+              } else if (
+                /\b(switch|change|set|make|select|turn|go|put)\b.*\b(delivery|deliver|home delivery)\b/i.test(lower) ||
+                /^(switch to |change to )?(delivery)(\s*(please|mode|option))?$/i.test(lower)
+              ) {
+                if (useCartStore.getState().orderType !== 'Delivery') {
+                  lastSpeechIntentTime = now;
+                  console.log('[VapiStore] Speech detected intent: switch to delivery');
+                  useCartStore.getState().setOrderType('Delivery');
+                }
+              }
+              // 1.5 Dine-In Pay Later ("pay later", "dine in pay later", "switch to pay later")
+              else if (
+                /\b(pay later|pay-later|paylater)\b/i.test(lower) ||
+                /\b(switch to pay later|order pay later|dine in pay later)\b/i.test(lower)
+              ) {
+                lastSpeechIntentTime = now;
+                console.log('[VapiStore] Speech detected intent: switch to pay later dine in');
+                executeSingleAction({ action: 'dine_in_pay_later' });
+              }
+              // 1.6 Dine-In Pay Bill ("pay bill", "pay the bill", "pay my bill", "settle bill", "complete meal")
+              else if (
+                /\b(pay bill|pay the bill|pay my bill|settle bill|paybill|complete meal)\b/i.test(lower)
+              ) {
+                lastSpeechIntentTime = now;
+                console.log('[VapiStore] Speech detected intent: dine in pay bill');
+                executeSingleAction({ action: 'dine_in_pay_bill' });
+              }
+              // 1.7 Menu Categories ("go to rice varieties", "show dosa varieties", "starters", "breakfast", "show categories", etc.)
+              else if (
+                /\b(rice varieties|rice varities|dosa varieties|dosa varities|hot beverages|evening snacks|breakfast & dinner|tandoori starters|tandoori breads|tandoori side dishes)\b/i.test(lower) ||
+                /\b(show|open|view|see|go to|take me to|display)\b.*\b(rice varieties|rice varities|rice|dosa varieties|dosa varities|dosa|beverages|coffee|tea|snacks|soups|starters|tandoori|noodles|salads|breakfast|lunch|dinner|categories|category)\b/i.test(lower) ||
+                /\b(categories|category names|show categories|all categories)\b/i.test(lower)
+              ) {
+                lastSpeechIntentTime = now;
+                let catName = 'Rice Varieties';
+                if (/snack/i.test(lower)) catName = 'Evening Snacks';
+                else if (/rice/i.test(lower)) catName = 'Rice Varieties';
+                else if (/dosa/i.test(lower)) catName = 'Dosa Varieties';
+                else if (/beverage|coffee|tea/i.test(lower)) catName = 'Hot Beverages';
+                else if (/soup/i.test(lower)) catName = 'Soups';
+                else if (/starter|tandoori/i.test(lower)) catName = 'Tandoori Starters';
+                else if (/noodle/i.test(lower)) catName = 'Noodles';
+                else if (/salad/i.test(lower)) catName = 'Salad';
+                else if (/breakfast/i.test(lower)) catName = 'Breakfast & Dinner';
+                else if (/lunch/i.test(lower)) catName = 'Lunch';
+                else if (/categories|category/i.test(lower)) catName = '';
 
-            console.log('[VapiStore] Speech detected intent: open category', catName);
-            executeSingleAction({ action: 'open_category', category_name: catName });
-          }
-          // 1.8 Catering Packages ("catering packages", "choose catering package", "order catering package")
-          else if (
-            /\b(catering package|catering packages|choose catering|order catering package|bulk catering packages)\b/i.test(lower)
-          ) {
-            console.log('[VapiStore] Speech detected intent: catering packages');
-            executeSingleAction({ action: 'catering_choose_package' });
-          }
-          // 1.9 Bulk Catering ("catering", "bulk catering", "event catering")
-          else if (
-            /\b(show|open|view|see|go to|take me to)\b.*\b(catering|bulk catering|event catering)\b/i.test(lower) ||
-            /^(catering|bulk catering)$/i.test(lower)
-          ) {
-            console.log('[VapiStore] Speech detected intent: open bulk catering');
-            navigateScreen('/(main)/bulk-catering');
-          }
-          // 2. Menu Navigation ("show all the menus", "show menu", "open menu", "view menu")
-          else if (
-            /\b(show|open|view|see|go to|take me to|display)\b.*\b(menu|menus|all the menu|all menus|items)\b/i.test(lower) ||
-            /\b(all the menus|show menu|browse menu|food menu)\b/i.test(lower) ||
-            /^(menu|the menu|show all the menus)$/i.test(lower)
-          ) {
-            console.log('[VapiStore] Speech detected intent: show all menus');
-            navigateScreen('/menu');
-          }
-          // 3. Profile Navigation ("open profile", "show profile", "my account")
-          else if (
-            /\b(show|open|view|go to|take me to)\b.*\b(profile|account|my profile|my account)\b/i.test(lower) ||
-            /^(profile|my profile|my account)$/i.test(lower)
-          ) {
-            console.log('[VapiStore] Speech detected intent: open profile');
-            navigateScreen('/profile');
-          }
-          // 4. Rewards / Loyalty Points ("loyalty points", "rewards", "my points")
-          else if (
-            /\b(reward|rewards|loyalty|loyalty point|loyalty points|my points|points balance)\b/i.test(lower) ||
-            /^(rewards|loyalty points)$/i.test(lower)
-          ) {
-            console.log('[VapiStore] Speech detected intent: open rewards');
-            navigateScreen('/rewards');
-          }
-          // 5. Addresses ("show addresses", "my address", "select address")
-          else if (
-            /\b(address|addresses|delivery address|saved address)\b/i.test(lower)
-          ) {
-            console.log('[VapiStore] Speech detected intent: address handling');
-            if (/\b(home)\b/i.test(lower)) {
-              executeSingleAction({ action: 'select_address', payload: { address: 'home' } } as any);
-            } else if (/\b(work|office)\b/i.test(lower)) {
-              executeSingleAction({ action: 'select_address', payload: { address: 'work' } } as any);
-            } else {
-              navigateScreen('/(address)/my-addresses');
+                console.log('[VapiStore] Speech detected intent: open category', catName || 'all');
+                if (catName) {
+                  executeSingleAction({ action: 'open_category', category_name: catName });
+                } else {
+                  navigateScreen('/menu');
+                }
+              }
+              // 1.8 Catering Packages ("catering packages", "choose catering package", "order catering package")
+              else if (
+                /\b(catering package|catering packages|choose catering|order catering package|bulk catering packages)\b/i.test(lower)
+              ) {
+                lastSpeechIntentTime = now;
+                console.log('[VapiStore] Speech detected intent: catering packages');
+                executeSingleAction({ action: 'catering_choose_package' });
+              }
+              // 1.9 Bulk Catering ("catering", "bulk catering", "event catering")
+              else if (
+                /\b(show|open|view|see|go to|take me to)\b.*\b(catering|bulk catering|event catering)\b/i.test(lower) ||
+                /^(catering|bulk catering)$/i.test(lower)
+              ) {
+                lastSpeechIntentTime = now;
+                console.log('[VapiStore] Speech detected intent: open bulk catering');
+                navigateScreen('/(main)/bulk-catering');
+              }
+              // 2. Menu Navigation ("show all the menus", "show menu", "open menu", "view menu")
+              else if (
+                /\b(show|open|view|see|go to|take me to|display)\b.*\b(menu|menus|all the menu|all menus|items)\b/i.test(lower) ||
+                /\b(all the menus|show menu|browse menu|food menu)\b/i.test(lower) ||
+                /^(menu|the menu|show all the menus)$/i.test(lower)
+              ) {
+                lastSpeechIntentTime = now;
+                console.log('[VapiStore] Speech detected intent: show all menus');
+                navigateScreen('/menu');
+              }
+              // 3. Profile Navigation ("open profile", "show profile", "my account")
+              else if (
+                /\b(show|open|view|go to|take me to)\b.*\b(profile|account|my profile|my account)\b/i.test(lower) ||
+                /^(profile|my profile|my account)$/i.test(lower)
+              ) {
+                lastSpeechIntentTime = now;
+                console.log('[VapiStore] Speech detected intent: open profile');
+                navigateScreen('/profile');
+              }
+              // 4. Rewards / Loyalty Points ("loyalty points", "rewards", "my points")
+              else if (
+                /\b(reward|rewards|loyalty|loyalty point|loyalty points|my points|points balance)\b/i.test(lower) ||
+                /^(rewards|loyalty points)$/i.test(lower)
+              ) {
+                lastSpeechIntentTime = now;
+                console.log('[VapiStore] Speech detected intent: open rewards');
+                navigateScreen('/rewards');
+              }
+              // 5. Addresses ("show addresses", "my address", "select address")
+              else if (
+                /\b(address|addresses|delivery address|saved address)\b/i.test(lower)
+              ) {
+                lastSpeechIntentTime = now;
+                console.log('[VapiStore] Speech detected intent: address handling');
+                if (/\b(home)\b/i.test(lower)) {
+                  executeSingleAction({ action: 'select_address', payload: { address: 'home' } } as any);
+                } else if (/\b(work|office)\b/i.test(lower)) {
+                  executeSingleAction({ action: 'select_address', payload: { address: 'work' } } as any);
+                } else {
+                  navigateScreen('/(address)/my-addresses');
+                }
+              }
+              // 6. Orders / History ("show orders", "order history", "past orders")
+              else if (
+                /\b(show|open|view|my|past)\b.*\b(orders|order history)\b/i.test(lower) ||
+                /^(orders|my orders|order history)$/i.test(lower)
+              ) {
+                lastSpeechIntentTime = now;
+                console.log('[VapiStore] Speech detected intent: open orders');
+                navigateScreen('/(order)/orders');
+              }
+              // 7. Cart / Checkout ("show cart", "view cart", "open cart", "checkout")
+              else if (
+                /\b(show|open|view|go to|take me to)\b.*\b(cart|basket|checkout)\b/i.test(lower) ||
+                /^(cart|view cart|open cart|checkout)$/i.test(lower)
+              ) {
+                lastSpeechIntentTime = now;
+                console.log('[VapiStore] Speech detected intent: open cart');
+                navigateScreen('/(checkout)/checkout');
+              }
             }
           }
-          // 6. Orders / History ("show orders", "order history", "past orders")
-          else if (
-            /\b(show|open|view|my|past)\b.*\b(orders|order history)\b/i.test(lower) ||
-            /^(orders|my orders|order history)$/i.test(lower)
-          ) {
-            console.log('[VapiStore] Speech detected intent: open orders');
-            navigateScreen('/(order)/orders');
-          }
-          // 7. Cart / Checkout ("show cart", "view cart", "open cart", "checkout")
-          else if (
-            /\b(show|open|view|go to|take me to)\b.*\b(cart|basket|checkout)\b/i.test(lower) ||
-            /^(cart|view cart|open cart|checkout)$/i.test(lower)
-          ) {
-            console.log('[VapiStore] Speech detected intent: open cart');
-            navigateScreen('/(checkout)/checkout');
-          }
-        }
 
         if (message.transcriptType === 'partial') {
           if (role === 'user') {
