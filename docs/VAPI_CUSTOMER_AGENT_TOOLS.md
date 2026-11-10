@@ -496,9 +496,9 @@ Each tool is a **function** that Vapi calls during conversation.
 
 ### 12. `catering_get_data`
 
-**Purpose:** Retrieve catering packages or customer catering order details.
+**Purpose:** Retrieve available catering packages (names, prices, items) or customer catering order details & balances.
 
-**Frontend/Backend:** Backend (PostgreSQL read)
+**Frontend/Backend:** Backend (PostgreSQL read from `CateringOrderMenu` / `CateringOrder`)
 
 **Parameters:**
 | Parameter          | Type    | Required | Description                                              |
@@ -506,19 +506,90 @@ Each tool is a **function** that Vapi calls during conversation.
 | data_type          | string  | Yes      | One of: `packages`, `customer_orders`, `single_order`   |
 | catering_order_id  | integer | Cond.    | Required when data_type = `single_order`                 |
 
-**Example — Get packages:**
+**Example — Get all available packages:**
 ```json
 { "data_type": "packages" }
 ```
 
-**Example — Get customer's catering orders:**
+**Example — Get customer's catering orders & balances:**
 ```json
 { "data_type": "customer_orders" }
 ```
 
 ---
 
-### 13. `app_confirm_action`
+### 13. `open_category`
+
+**Purpose:** Navigate to `/menu` and filter immediately to a specific food category (e.g. Rice Varieties, Dosa Varieties, Soups, Breakfast, etc.).
+
+**Frontend/Backend:** Frontend (Expo Router)
+
+**Parameters:**
+| Parameter     | Type   | Required | Description                                                    |
+|---------------|--------|----------|----------------------------------------------------------------|
+| category_name | string | Yes      | The name of the category (e.g. "Rice Varieties", "Dosa Varieties", "Hot Beverages", "Breakfast & Dinner", "Lunch", "Soups", "Tandoori Starters", "Noodles") |
+
+**Example call:**
+```json
+{ "category_name": "Rice Varieties" }
+```
+
+**Expected result:**
+```json
+{ "success": true, "action": "open_category", "message": "Opened menu category: Rice Varieties.", "data": { "categoryName": "Rice Varieties" } }
+```
+
+---
+
+### 14. `dine_in_action`
+
+**Purpose:** Execute Dine-In specific workflows: Pay Later order placement, Pay Bill meal settlement, or Order More food.
+
+**Frontend/Backend:** Frontend (Expo Router + DineInSessionStore)
+
+**Parameters:**
+| Parameter   | Type   | Required | Description                                                   |
+|-------------|--------|----------|---------------------------------------------------------------|
+| action_type | string | Yes      | One of: `pay_later`, `pay_bill`, `order_more`                 |
+
+**Flow Details:**
+- `pay_later`: Sets order mode to "Dine In" and opens checkout screen with Pay Later pre-selected. Customer places order and pays after dining.
+- `pay_bill`: For an active table dining session, opens the meal completion and bill payment screen.
+- `order_more`: Navigates to `/menu` in Dine In mode for the table.
+
+**Example call — Pay Later:**
+```json
+{ "action_type": "pay_later" }
+```
+
+**Example call — Pay Bill:**
+```json
+{ "action_type": "pay_bill" }
+```
+
+---
+
+### 15. `catering_choose_package`
+
+**Purpose:** Open the catering package selection screen (`catering-choose-package`) and optionally pre-select a package.
+
+**Frontend/Backend:** Frontend (Expo Router)
+
+**Parameters:**
+| Parameter    | Type    | Required | Description                                           |
+|--------------|---------|----------|-------------------------------------------------------|
+| package_code | string  | No       | Code of package to select (e.g. "MENU 3", "V-RICE MENU 3") |
+| package_name | string  | No       | Display name (e.g. "Grand Breakfast", "Regular Lunch") |
+| guest_count  | integer | No       | Estimated number of guests (default: 50)             |
+
+**Example call:**
+```json
+{ "package_code": "MENU 3", "guest_count": 50 }
+```
+
+---
+
+### 16. `app_confirm_action`
 
 **Purpose:** Signals that the LLM has requested confirmation from the user.
 The LLM handles the conversation turn; this tool is used for tracking state.

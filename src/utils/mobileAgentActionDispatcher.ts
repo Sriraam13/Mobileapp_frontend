@@ -474,11 +474,77 @@ export async function executeSingleAction(act: UIAction): Promise<ActionResult> 
         return { success: true, action, message: 'Opened Menu.' };
       }
 
+      // ── Category Navigation ──────────────────────────────────────────────────
+
+      case 'open_category': {
+        const catName = act.category_name || (act as any).category || act.payload?.categoryName || act.payload?.category_name || '';
+        const params: Record<string, any> = {};
+        if (catName) params.categoryName = catName;
+        navigateScreen('/menu', params);
+        return {
+          success: true,
+          action,
+          message: `Opened menu category: ${catName || 'All'}.`,
+          data: { categoryName: catName }
+        };
+      }
+
+      // ── Dine-In Actions ──────────────────────────────────────────────────────
+
+      case 'dine_in_pay_later': {
+        useCartStore.getState().setOrderType('Dine In');
+        navigateScreen('/(checkout)/checkout', { payLater: 'true' });
+        return {
+          success: true,
+          action,
+          message: 'Switched to Dine In mode with Pay Later selected at checkout.',
+        };
+      }
+
+      case 'dine_in_pay_bill': {
+        try {
+          const { useDineInSessionStore } = require('../store/useDineInSessionStore');
+          const dineSession = useDineInSessionStore.getState();
+          if (dineSession.isActive && dineSession.activeOrderId) {
+            navigateScreen('/(checkout)/payment', {
+              isDineInSettlement: 'true',
+              orderId: dineSession.activeOrderId,
+              dbOrderId: dineSession.activeDbOrderId ? String(dineSession.activeDbOrderId) : '',
+              tableNumber: dineSession.tableNumber || 'T-01',
+              totalAmount: String(dineSession.totalAmount || 0),
+            });
+            return {
+              success: true,
+              action,
+              message: `Opened Dine-In settlement bill payment for Table ${dineSession.tableNumber || 'your table'}.`,
+              data: { tableNumber: dineSession.tableNumber, totalAmount: dineSession.totalAmount }
+            };
+          }
+        } catch {}
+        navigateScreen('/(checkout)/checkout', { payLater: 'true' });
+        return {
+          success: true,
+          action,
+          message: 'Opened your cart and bill screen.',
+        };
+      }
+
       // ── Catering ─────────────────────────────────────────────────────────────
 
       case 'open_catering': {
         navigateScreen('/(main)/bulk-catering');
         return { success: true, action, message: 'Opened Bulk Catering.' };
+      }
+
+      case 'catering_choose_package': {
+        const params = act.payload?.params || {};
+        navigateScreen('/(main)/catering-choose-package', params);
+        return {
+          success: true,
+          action,
+          message: 'Opened Catering Package Selection.',
+          data: params
+        };
       }
 
       // ── Outlet ───────────────────────────────────────────────────────────────

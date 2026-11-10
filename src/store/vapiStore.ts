@@ -506,10 +506,18 @@ async function handleVapiToolCall(tool: any): Promise<{ toolCallId: string; resu
         }
 
         console.log(`[VapiStore] Resolved route: "${resolved}", executing navigation...`);
+        const navParams: Record<string, any> = { ...(fnArgs.params || {}) };
+        if (fnArgs.category || fnArgs.category_name) {
+          navParams.categoryName = fnArgs.category || fnArgs.category_name;
+        }
+        if (fnArgs.payLater !== undefined || fnArgs.pay_later !== undefined) {
+          navParams.payLater = String(fnArgs.payLater ?? fnArgs.pay_later);
+        }
+
         const result = await executeSingleAction({
           action: 'navigate',
           route: resolved,
-          payload: { params: fnArgs.params || {} },
+          payload: { params: navParams },
         });
 
         console.log(`[VapiStore] Navigation result:`, result);
@@ -985,11 +993,78 @@ async function handleVapiToolCall(tool: any): Promise<{ toolCallId: string; resu
         return { toolCallId, result: JSON.stringify({ success: !data.error, ...data }) };
       }
 
+      // ── Menu Category Navigation ─────────────────────────────────────────────
+
+      case 'open_category':
+      case 'menu_filter_category':
+      case 'filter_category': {
+        const catName = fnArgs.category_name || fnArgs.category || fnArgs.name || fnArgs.query || '';
+        const result = await executeSingleAction({
+          action: 'open_category',
+          category_name: catName,
+        });
+        const speech = `I have opened the ${catName || 'menu'} category on your screen.`;
+        const vapi = getVapi();
+        if (vapi?.say) vapi.say(speech, false, false, true);
+        return {
+          toolCallId,
+          result: JSON.stringify({ success: true, message: speech, categoryName: catName }),
+        };
+      }
+
+      // ── Dine-In Workflows (Pay Later & Pay Bill) ──────────────────────────────
+
+      case 'dine_in_action':
+      case 'dine_in_pay_later':
+      case 'dine_in_pay_bill':
+      case 'pay_bill':
+      case 'pay_later': {
+        const rawAction = String(
+          fnArgs.action_type ||
+          fnArgs.action ||
+          (fnName === 'pay_bill' || fnName === 'dine_in_pay_bill' ? 'pay_bill' : 'pay_later')
+        ).toLowerCase();
+
+        if (rawAction.includes('bill') || rawAction.includes('settle')) {
+          const result = await executeSingleAction({ action: 'dine_in_pay_bill' });
+          const speech = result.message || 'Opened your meal bill payment screen.';
+          const vapi = getVapi();
+          if (vapi?.say) vapi.say(speech, false, false, true);
+          return { toolCallId, result: JSON.stringify(result) };
+        } else {
+          const result = await executeSingleAction({ action: 'dine_in_pay_later' });
+          const speech = 'Switched your order to Dine In with Pay Later selected at checkout. You can pay after your meal.';
+          const vapi = getVapi();
+          if (vapi?.say) vapi.say(speech, false, false, true);
+          return { toolCallId, result: JSON.stringify(result) };
+        }
+      }
+
       // ── Catering ──────────────────────────────────────────────────────────────
 
       case 'open_catering': {
         const result = await executeSingleAction({ action: 'open_catering' });
         return { toolCallId, result: JSON.stringify(result) };
+      }
+
+      case 'catering_choose_package':
+      case 'catering_select_package': {
+        const pkgCode = fnArgs.package_code || fnArgs.code || '';
+        const pkgName = fnArgs.package_name || fnArgs.name || '';
+        const guestCount = fnArgs.guest_count || fnArgs.pax || 50;
+        const params: Record<string, any> = {};
+        if (pkgCode) params.selectedPackage = pkgCode;
+        if (guestCount) params.guestCount = String(guestCount);
+        const result = await executeSingleAction({
+          action: 'catering_choose_package',
+          payload: { params },
+        });
+        const speech = pkgName
+          ? `I have opened catering package selection for ${pkgName} on your screen.`
+          : `I have opened the catering packages on your screen. You can select from Grand Breakfast, Variety Feast, Regular Lunch, and more.`;
+        const vapi = getVapi();
+        if (vapi?.say) vapi.say(speech, false, false, true);
+        return { toolCallId, result: JSON.stringify({ success: true, message: speech, ...params }) };
       }
 
       case 'select_outlet':
@@ -1010,6 +1085,12 @@ async function handleVapiToolCall(tool: any): Promise<{ toolCallId: string; resu
           restaurant_id: restaurant.selectedOutlet?.restaurant_id,
           catering_order_id: fnArgs.catering_order_id,
         });
+
+        if (subType === 'packages' && data.packages && data.packages.length > 0) {
+          const sample = data.packages.slice(0, 4).map((p: any) => `${p.name} at ${p.price_per_person} rupees per person`).join(', ');
+          data.summary = `We offer ${data.packages.length} catering packages, including ${sample}. Would you like to view package details or choose one?`;
+        }
+
         return { toolCallId, result: JSON.stringify({ success: !data.error, ...data }) };
       }
 
@@ -1439,6 +1520,56 @@ export const useVapiStore = create<VapiState>((set, get) => ({
                 });
               } catch {}
             }
+          }
+          // 1.5 Dine-In Pay Later ("pay later", "dine in pay later", "switch to pay later")
+          else if (
+            /\b(pay later|pay-later|paylater)\b/i.test(lower) ||
+            /\b(switch to pay later|order pay later|dine in pay later)\b/i.test(lower)
+          ) {
+            console.log('[VapiStore] Speech detected intent: switch to pay later dine in');
+            executeSingleAction({ action: 'dine_in_pay_later' });
+          }
+          // 1.6 Dine-In Pay Bill ("pay bill", "pay the bill", "pay my bill", "settle bill", "complete meal")
+          else if (
+            /\b(pay bill|pay the bill|pay my bill|settle bill|paybill|complete meal)\b/i.test(lower)
+          ) {
+            console.log('[VapiStore] Speech detected intent: dine in pay bill');
+            executeSingleAction({ action: 'dine_in_pay_bill' });
+          }
+          // 1.7 Menu Categories ("go to rice varieties", "show dosa varieties", "starters", "breakfast", etc.)
+          else if (
+            /\b(rice varieties|rice varities|dosa varieties|dosa varities|hot beverages|evening snacks|breakfast & dinner|tandoori starters|tandoori breads|tandoori side dishes)\b/i.test(lower) ||
+            /\b(show|open|view|see|go to|take me to|display)\b.*\b(rice varieties|rice varities|rice|dosa varieties|dosa varities|dosa|beverages|coffee|tea|snacks|soups|starters|tandoori|noodles|salads|breakfast|lunch|dinner)\b/i.test(lower)
+          ) {
+            let catName = 'Rice Varieties';
+            if (/rice/i.test(lower)) catName = 'Rice Varieties';
+            else if (/dosa/i.test(lower)) catName = 'Dosa Varieties';
+            else if (/snack/i.test(lower)) catName = 'Evening Snacks';
+            else if (/beverage|coffee|tea/i.test(lower)) catName = 'Hot Beverages';
+            else if (/soup/i.test(lower)) catName = 'Soups';
+            else if (/starter|tandoori/i.test(lower)) catName = 'Tandoori Starters';
+            else if (/noodle/i.test(lower)) catName = 'Noodles';
+            else if (/salad/i.test(lower)) catName = 'Salad';
+            else if (/breakfast/i.test(lower)) catName = 'Breakfast & Dinner';
+            else if (/lunch/i.test(lower)) catName = 'Lunch';
+
+            console.log('[VapiStore] Speech detected intent: open category', catName);
+            executeSingleAction({ action: 'open_category', category_name: catName });
+          }
+          // 1.8 Catering Packages ("catering packages", "choose catering package", "order catering package")
+          else if (
+            /\b(catering package|catering packages|choose catering|order catering package|bulk catering packages)\b/i.test(lower)
+          ) {
+            console.log('[VapiStore] Speech detected intent: catering packages');
+            executeSingleAction({ action: 'catering_choose_package' });
+          }
+          // 1.9 Bulk Catering ("catering", "bulk catering", "event catering")
+          else if (
+            /\b(show|open|view|see|go to|take me to)\b.*\b(catering|bulk catering|event catering)\b/i.test(lower) ||
+            /^(catering|bulk catering)$/i.test(lower)
+          ) {
+            console.log('[VapiStore] Speech detected intent: open bulk catering');
+            navigateScreen('/(main)/bulk-catering');
           }
           // 2. Menu Navigation ("show all the menus", "show menu", "open menu", "view menu")
           else if (

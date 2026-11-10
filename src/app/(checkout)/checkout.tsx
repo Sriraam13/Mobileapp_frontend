@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Image, Platform, StatusBar, Alert, ActivityIndicator, Modal } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
+import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useCartStore } from '../../store/useCartStore';
 import { useAddressStore } from '../../store/useAddressStore';
 import { useAuthStore } from '../../store/useAuthStore';
@@ -37,8 +37,17 @@ export default function CheckoutScreen() {
   const { selectedOutlet } = useRestaurantStore();
   const { phone } = useAuthStore();
   const dineInSession = useDineInSessionStore();
-  const [dineInPayLater, setDineInPayLater] = useState(true);
+  const params = useLocalSearchParams<{ payLater?: string }>();
+  const [dineInPayLater, setDineInPayLater] = useState(params.payLater === 'false' ? false : true);
   const [submitting, setSubmitting] = useState(false);
+
+  useEffect(() => {
+    if (params.payLater === 'false') {
+      setDineInPayLater(false);
+    } else if (params.payLater === 'true') {
+      setDineInPayLater(true);
+    }
+  }, [params.payLater]);
 
   const cartItems = Object.values(items).filter(item => item && item.quantity > 0);
   const itemCount = getItemCount();
