@@ -29,7 +29,7 @@ const getApiUrl = () => {
     return 'http://localhost:8001';
   }
 
-  return 'http://10.214.75.246:8001';
+  return 'https://dev-api.dataudipi.com';
 };
 
 export const API_BASE_URL = getApiUrl();

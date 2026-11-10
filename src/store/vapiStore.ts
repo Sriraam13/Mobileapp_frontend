@@ -92,7 +92,9 @@ const isWebRTCSupported = () => {
     NativeModules &&
     (NativeModules.WebRTCModule ||
       NativeModules.DailyWebRTC ||
-      NativeModules.RNWebRTC)
+      NativeModules.DailyNativeUtils ||
+      NativeModules.RNWebRTC ||
+      (NativeModules as any).Daily)
   );
 };
 
