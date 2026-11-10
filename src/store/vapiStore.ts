@@ -605,12 +605,25 @@ async function handleVapiToolCall(tool: any): Promise<{ toolCallId: string; resu
 
         const isShowAll = !rawQuery || /^(all|all menus?|menu|everything|items)$/i.test(rawQuery || '');
 
-        // Navigate screen to /menu so the user immediately sees the menu on screen!
-        executeSingleAction({
-          action: 'navigate',
-          route: '/menu',
-          payload: { params: { search: isShowAll ? '' : (rawQuery || rawCategory || '') } }
-        }).catch(() => {});
+        // If a category was requested, filter directly to that category tab without clogging search query
+        const detectedCat = rawCategory || (
+          rawQuery && /\b(rice|dosa|snack|beverage|coffee|tea|soup|starter|tandoori|noodle|salad|breakfast|lunch)\b/i.test(rawQuery)
+            ? rawQuery
+            : undefined
+        );
+
+        if (detectedCat) {
+          executeSingleAction({
+            action: 'open_category',
+            category_name: detectedCat,
+          }).catch(() => {});
+        } else {
+          executeSingleAction({
+            action: 'navigate',
+            route: '/menu',
+            payload: { params: { search: isShowAll ? '' : (rawQuery || '') } }
+          }).catch(() => {});
+        }
 
         const normalizedArgs: Record<string, any> = {};
         if (rawQuery && !isShowAll) normalizedArgs.query = rawQuery;

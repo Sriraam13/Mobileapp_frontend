@@ -477,15 +477,40 @@ export async function executeSingleAction(act: UIAction): Promise<ActionResult> 
       // ── Category Navigation ──────────────────────────────────────────────────
 
       case 'open_category': {
-        const catName = act.category_name || (act as any).category || act.payload?.categoryName || act.payload?.category_name || '';
-        const params: Record<string, any> = {};
-        if (catName) params.categoryName = catName;
-        navigateScreen('/menu', params);
+        const rawName = String(
+          act.category_name ||
+          (act as any).category ||
+          act.payload?.categoryName ||
+          act.payload?.category_name ||
+          ''
+        ).trim();
+
+        let catName = 'Rice Varieties';
+        const lower = rawName.toLowerCase();
+        if (lower.includes('rice')) catName = 'Rice Varieties';
+        else if (lower.includes('dosa')) catName = 'Dosa Varieties';
+        else if (lower.includes('snack')) catName = 'Evening Snacks';
+        else if (lower.includes('beverage') || lower.includes('coffee') || lower.includes('tea')) catName = 'Hot Beverages';
+        else if (lower.includes('soup')) catName = 'Soups';
+        else if (lower.includes('starter') || lower.includes('tandoori')) catName = 'Tandoori Starters';
+        else if (lower.includes('noodle')) catName = 'Noodles';
+        else if (lower.includes('salad')) catName = 'Salad';
+        else if (lower.includes('breakfast')) catName = 'Breakfast & Dinner';
+        else if (lower.includes('lunch')) catName = 'Lunch';
+        else if (rawName) catName = rawName;
+
+        try {
+          useVoiceAgentStore.getState().hideAgent();
+        } catch {}
+
+        DeviceEventEmitter.emit('open_category', { categoryName: catName });
+        navigateScreen('/menu', { categoryName: catName, search: '' });
+
         return {
           success: true,
           action,
-          message: `Opened menu category: ${catName || 'All'}.`,
-          data: { categoryName: catName }
+          message: `Opened menu category: ${catName}.`,
+          data: { categoryName: catName },
         };
       }
 

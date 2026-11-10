@@ -1,4 +1,4 @@
-import { View, Text, StyleSheet, TextInput, ScrollView, TouchableOpacity, FlatList, Platform, StatusBar, Image, Modal, BackHandler, Alert, ActivityIndicator, RefreshControl } from 'react-native';
+import { View, Text, StyleSheet, TextInput, ScrollView, TouchableOpacity, FlatList, Platform, StatusBar, Image, Modal, BackHandler, Alert, ActivityIndicator, RefreshControl, DeviceEventEmitter } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
@@ -245,10 +245,25 @@ export default function App() {
     if (params.categoryName || params.categoryId) {
       const newCat = (params.categoryName as string) || (params.categoryId as string);
       setActiveCat(newCat);
+      setSearchQuery("");
       setActiveRegion("All Regions");
     }
    
   }, [params.orderType, params.tableNumber, params.search, params.categoryName, params.categoryId, setOrderType, setTableNumber]);
+
+  // Listen for real-time open_category events from voice assistant
+  useEffect(() => {
+    const sub = DeviceEventEmitter.addListener('open_category', (data: any) => {
+      console.log('[Menu] Event received open_category:', data);
+      const catName = data?.categoryName || data?.category || data;
+      if (catName) {
+        setActiveCat(catName);
+        setSearchQuery('');
+        setActiveRegion('All Regions');
+      }
+    });
+    return () => sub.remove();
+  }, []);
 
   // Check if active dine-in session conflicts with delivery mode
   useEffect(() => {
