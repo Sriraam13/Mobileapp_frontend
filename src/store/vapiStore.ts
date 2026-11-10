@@ -1635,13 +1635,6 @@ export const useVapiStore = create<VapiState>((set, get) => ({
             }
           }
 
-        if (message.transcriptType === 'partial') {
-          if (role === 'user') {
-            set({ partialUserTranscript: text });
-          } else {
-            set({ partialAgentTranscript: text });
-          }
-        } else if (message.transcriptType === 'final') {
           set((state) => {
             if (!text.trim()) return state;
 
