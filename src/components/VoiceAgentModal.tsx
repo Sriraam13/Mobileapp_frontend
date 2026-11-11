@@ -295,6 +295,9 @@ export default function VoiceAgentModal() {
   };
 
   const closeModal = () => {
+    if (isConnecting && !isConnected) {
+      stopCall();
+    }
     hideAgent();
   };
 

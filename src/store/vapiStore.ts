@@ -93,6 +93,14 @@ function extractToolCalls(message: any): any[] {
 let VapiClass: any = null;
 let vapiInstance: any = null;
 let listenersSetup = false;
+let connectionWatchdog: NodeJS.Timeout | null = null;
+
+function clearConnectionWatchdog() {
+  if (connectionWatchdog) {
+    clearTimeout(connectionWatchdog);
+    connectionWatchdog = null;
+  }
+}
 
 const isWebRTCSupported = () => {
   if (Platform.OS === 'web') return false;
@@ -1470,16 +1478,46 @@ export const useVapiStore = create<VapiState>((set, get) => ({
       },
     };
 
+    // Clean up any stale or half-open native call before starting a new one
+    if ((vapi as any).started) {
+      try {
+        vapi.stop();
+        await new Promise((resolve) => setTimeout(resolve, 200));
+      } catch {}
+    }
+
+    // 15-second connection watchdog: if call never reaches connected or error state, auto-reset
+    clearConnectionWatchdog();
+    connectionWatchdog = setTimeout(() => {
+      const state = useVapiStore.getState();
+      if (state.isConnecting && !state.isConnected) {
+        console.warn('[VapiStore] Voice agent connection timed out (15s watchdog). Resetting state.');
+        try {
+          getVapi()?.stop();
+        } catch {}
+        set({ isConnecting: false, isConnected: false });
+      }
+    }, 15000);
+
     try {
-      vapi.start(assistantId, overrides);
+      await vapi.start(assistantId, overrides);
     } catch (e) {
-      console.warn('[VapiStore] startCall error:', e);
-      set({ isConnecting: false });
+      console.warn('[VapiStore] startCall with overrides failed, retrying clean:', e);
+      try {
+        await vapi.start(assistantId, { firstMessage: dynamicFirstMessage, maxDurationSeconds: 3600 });
+      } catch (retryErr) {
+        console.error('[VapiStore] startCall fallback error:', retryErr);
+        clearConnectionWatchdog();
+        set({ isConnecting: false });
+      }
     }
   },
 
   stopCall: () => {
-    getVapi()?.stop();
+    clearConnectionWatchdog();
+    try {
+      getVapi()?.stop();
+    } catch {}
     set({
       isConnected: false,
       isConnecting: false,
@@ -1588,6 +1626,7 @@ export const useVapiStore = create<VapiState>((set, get) => ({
     listenersSetup = true;
 
     vapi.on('call-start', () => {
+      clearConnectionWatchdog();
       set({ isConnected: true, isConnecting: false });
       lastSyncContent = '';
 
@@ -1710,12 +1749,19 @@ CRITICAL BEHAVIOR & KNOWLEDGE GUIDELINES:
     });
 
     vapi.on('call-end', () => {
+      clearConnectionWatchdog();
       set({
         isConnected: false,
         isConnecting: false,
         partialUserTranscript: '',
         partialAgentTranscript: '',
       });
+    });
+
+    vapi.on('call-start-failed', (err: any) => {
+      console.error('[VapiStore] Call start failed:', err);
+      clearConnectionWatchdog();
+      set({ isConnected: false, isConnecting: false });
     });
 
     vapi.on('message', async (message: any) => {
@@ -2164,6 +2210,7 @@ CRITICAL BEHAVIOR & KNOWLEDGE GUIDELINES:
     });
 
     vapi.on('error', (e: any) => {
+      clearConnectionWatchdog();
       const errStr = typeof e === 'string' ? e : JSON.stringify(e || {});
       const isCleanMeetingEnd =
         e?.errorMsg === 'Meeting has ended' ||
