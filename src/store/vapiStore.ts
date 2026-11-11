@@ -130,6 +130,26 @@ const getVapi = () => {
   return vapiInstance;
 };
 
+export function speakAgentFeedback(message: string) {
+  try {
+    const vapi = getVapi();
+    if (!vapi) return;
+    if (typeof (vapi as any).say === 'function') {
+      (vapi as any).say(message, false);
+      return;
+    }
+    if (typeof (vapi as any).send === 'function') {
+      (vapi as any).send({
+        type: 'say',
+        message,
+        endCallAfterSpoken: false,
+      });
+    }
+  } catch (err) {
+    console.warn('[VapiStore] Failed to speak agent feedback:', err);
+  }
+}
+
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 interface ChatMessage {
@@ -420,6 +440,8 @@ async function resolveAndAddToCart(fnArgs: any): Promise<{ success: boolean; cod
 
   const cartTotalCount = useCartStore.getState().getItemCount();
   const subtotal = useCartStore.getState().getSubtotal();
+  const feedbackMsg = `Added ${qty}x ${bestMatch.name} at ${bestMatch.price} rupees to cart. You now have ${cartTotalCount} items in cart totaling ${subtotal} rupees.`;
+  speakAgentFeedback(`Added ${qty} ${bestMatch.name} to your cart.`);
 
   return {
     success: true,
@@ -428,7 +450,7 @@ async function resolveAndAddToCart(fnArgs: any): Promise<{ success: boolean; cod
     item_name: bestMatch.name,
     quantity: qty,
     price: bestMatch.price,
-    message: `Added ${qty}x ${bestMatch.name} at ${bestMatch.price} rupees to cart. You now have ${cartTotalCount} items in cart totaling ${subtotal} rupees.`,
+    message: feedbackMsg,
     data: {
       item_id: bestMatch.id,
       name: bestMatch.name,
@@ -1437,13 +1459,50 @@ export const useVapiStore = create<VapiState>((set, get) => ({
           message: {
             role: 'system',
             content: `[Current App Context] Order Type: ${initialContext.cart.orderType}. Outlet: ${initialContext.restaurant.selectedOutletName || 'None'}. Cart Items: ${initialContext.cart.itemCount}.
-CRITICAL BEHAVIOR GUIDELINES:
-1. When user asks about food categories, regional cuisines, or dishes:
+CRITICAL BEHAVIOR & KNOWLEDGE GUIDELINES:
+1. Spoken Announcements: ALWAYS verbally announce what you are opening, switching, or adding. Never navigate or execute silently!
+2. When user asks about food categories, regional cuisines, or dishes:
    - Call "open_category" (category_name) or "switch_region" ("North Indian" or "South Indian").
    - NEVER call "open_cart" or "show_cart" when user mentions a category or dish.
-2. Only call "open_cart" when the user explicitly commands to view or open their cart ("show cart", "view cart", "checkout").
-3. Supported North Indian Categories: Tandoori Starters, Tandoori Breads (Roti, Naan, Kulcha), Tandoori Side Dishes, Noodles, Salad, Raitha, Rice Varieties (Fried Rice, Biryani, Pulao).
-4. Supported South Indian Categories: Dosa Varieties, Breakfast & Dinner (Idli, Poori, Pongal), Evening Snacks (Vada, Samosa), Hot Beverages (Filter Coffee, Tea), Lunch (Meals, Thali), Rice Varieties (Sambar Rice, Curd Rice), Soups.`
+3. Cart Rules:
+   - If user asks to see cart and cart has 0 items, NEVER navigate to cart. Say: "Your cart is currently empty. Feel free to explore our menu!"
+   - When "add_to_cart" succeeds, ALWAYS confirm to the user that the item was successfully added with price and quantity. NEVER claim an item is unavailable or out of stock if add_to_cart succeeded!
+4. Supported North Indian Categories:
+   - "Tandoori Starters" (Tikka, Kabab, Paneer Tikka)
+   - "Tandoori Breads" (Roti, Butter Roti, Naan, Butter Naan, Kulcha, Paratha)
+   - "Tandoori Side Dishes" (Paneer Butter Masala, Dal Makhani, Gravy, Curry)
+   - "Raitha" (Boondi Raitha, Onion Raitha, Cucumber Raitha)
+   - "Noodles" (Veg Noodles, Schezwan Noodles)
+   - "Salad" (Green Salad, Cucumber Salad)
+   - "Rice Varieties" (Fried Rice, Veg Biryani, Pulao, Jeera Rice)
+5. Supported South Indian Categories:
+   - "Dosa Varieties" (Plain Dosa, Masala Dosa, Ghee Roast, Uthappam)
+   - "Breakfast & Dinner" (Idli, Poori Masala, Pongal, Medu Vada)
+   - "Evening Snacks" (Samosa, Bajji, Bonda, Cutlet)
+   - "Hot Beverages" (Filter Coffee, Masala Tea, Milk)
+   - "Lunch" (South Indian Meals, Special Thali)
+   - "Rice Varieties" (Sambar Rice, Curd Rice, Lemon Rice)
+   - "Soups" (Tomato Soup, Veg Clear Soup)
+6. Catering Knowledge & Event Booking:
+   - Minimum order quantity for bulk catering is 50 guests.
+   - Available Catering Packages:
+     • Regular Breakfast (Code: MENU 1) - ₹160/plate
+     • Special Breakfast (Code: MENU 2) - ₹210/plate
+     • Grand Breakfast (Code: MENU 3) - ₹225/plate
+     • Regular Lunch (Code: L-MENU 1) - ₹150/plate
+     • Special Lunch (Code: L-MENU 2) - ₹190/plate
+     • Special Feast (Code: L-MENU 3) - ₹225/plate
+     • Grand Feast (Code: L-MENU 4) - ₹275/plate
+     • Variety Lunch/Dinner (Code: V-RICE MENU 1) - ₹200/plate
+     • Special Variety Lunch/Dinner (Code: V-RICE MENU 2) - ₹240/plate
+     • Variety Feast Lunch/Dinner (Code: V-RICE MENU 3) - ₹270/plate
+     • Variety Grand Feast Lunch/Dinner (Code: V-RICE MENU 4) - ₹320/plate
+     • Evening Tiffin 1 (Code: E-MENU 1) - ₹135/plate
+     • Evening Tiffin 2 (Code: E-MENU 2) - ₹150/plate
+     • Evening Tiffin 3 (Code: E-MENU 3) - ₹160/plate
+     • Seemantham (Code: S-MENU 1) - ₹210/plate
+   - When user provides event details (e.g. guest count, date, time, occasion, address), call tool "catering_set_event_details" with { guest_count, event_name, occasion, date, time, address } and confirm verbally.
+   - When user asks to see or choose catering packages, call "catering_choose_package" with { package_code }.`
           }
         });
       } catch (e) {
@@ -1634,6 +1693,7 @@ CRITICAL BEHAVIOR GUIDELINES:
                 lastCategoryActionTime = now;
                 console.log('[VapiStore] Speech detected intent: switch to North Indian');
                 executeSingleAction({ action: 'switch_region', region: 'North Indian' });
+                speakAgentFeedback('Switched to North Indian menu.');
               }
               else if (
                 /\b(south indian|south-indian|southindian)\b/i.test(lower)
@@ -1642,6 +1702,7 @@ CRITICAL BEHAVIOR GUIDELINES:
                 lastCategoryActionTime = now;
                 console.log('[VapiStore] Speech detected intent: switch to South Indian');
                 executeSingleAction({ action: 'switch_region', region: 'South Indian' });
+                speakAgentFeedback('Switched to South Indian menu.');
               }
               else if (
                 /\b(all regions|all foods|both regions|all foods menu|full menu)\b/i.test(lower)
@@ -1650,6 +1711,7 @@ CRITICAL BEHAVIOR GUIDELINES:
                 lastCategoryActionTime = now;
                 console.log('[VapiStore] Speech detected intent: switch to All Regions');
                 executeSingleAction({ action: 'switch_region', region: 'All Regions' });
+                speakAgentFeedback('Showing all regions menu.');
               }
               // 1.7 Menu Categories (Rice Varieties, Dosa Varieties, Starters, Breads, Noodles, Lunch, etc.)
               else if (
@@ -1663,14 +1725,17 @@ CRITICAL BEHAVIOR GUIDELINES:
                 let targetRegion: string | undefined = undefined;
 
                 // North Indian
-                if (/starter|tikka|kabab/i.test(lower)) {
-                  catName = 'Tandoori Starters';
-                  targetRegion = 'North Indian';
-                } else if (/bread|roti|naan|kulcha|paratha/i.test(lower)) {
+                if (/bread|roti|naan|kulcha|paratha/i.test(lower)) {
                   catName = 'Tandoori Breads';
                   targetRegion = 'North Indian';
-                } else if (/side dish|paneer butter|gravy|dal makhani|curry/i.test(lower)) {
+                } else if (/side dish|side dishes|paneer butter|gravy|dal makhani|curry/i.test(lower)) {
                   catName = 'Tandoori Side Dishes';
+                  targetRegion = 'North Indian';
+                } else if (/starter|tikka|kabab/i.test(lower)) {
+                  catName = 'Tandoori Starters';
+                  targetRegion = 'North Indian';
+                } else if (lower.trim() === 'tandoori') {
+                  catName = 'Tandoori Starters';
                   targetRegion = 'North Indian';
                 } else if (/noodle/i.test(lower)) {
                   catName = 'Noodles';
@@ -1714,17 +1779,46 @@ CRITICAL BEHAVIOR GUIDELINES:
                 console.log('[VapiStore] Speech detected intent: open category', catName || 'all', targetRegion || '');
                 if (catName) {
                   executeSingleAction({ action: 'open_category', category_name: catName, region: targetRegion } as any);
+                  speakAgentFeedback(`Opening ${catName} for you.`);
                 } else {
                   executeSingleAction({ action: 'open_menu' });
+                  speakAgentFeedback('Opening menu categories for you.');
                 }
               }
-              // 1.8 Catering Packages ("catering packages", "choose catering package", "order catering package")
+              // 1.8 Catering Event Details ("catering for 100 people", "100 guests", "set guest count to 80", "wedding catering")
+              else if (
+                /\b(catering for|guests?|event details|guest count|occasion|service type)\b/i.test(lower) &&
+                /\b(\d{2,4}|wedding|birthday|anniversary|reception|people|guests)\b/i.test(lower)
+              ) {
+                lastSpeechIntentTime = now;
+                const guestMatch = lower.match(/\b(\d{2,4})\s*(guests?|people|persons?|members?|pax)?\b/);
+                const count = guestMatch ? guestMatch[1] : undefined;
+                
+                let occasion = undefined;
+                if (/wedding|marriage/i.test(lower)) occasion = 'Wedding';
+                else if (/birthday/i.test(lower)) occasion = 'Birthday Party';
+                else if (/anniversary/i.test(lower)) occasion = 'Anniversary';
+                else if (/reception/i.test(lower)) occasion = 'Reception';
+                else if (/seemantham/i.test(lower)) occasion = 'Seemantham';
+                else if (/party/i.test(lower)) occasion = 'Party';
+
+                console.log('[VapiStore] Speech detected intent: catering event details', { count, occasion });
+                executeSingleAction({
+                  action: 'catering_set_event_details',
+                  guest_count: count,
+                  occasion,
+                  event_name: occasion,
+                } as any);
+                speakAgentFeedback(`Entered event details${count ? ` for ${count} guests` : ''}${occasion ? ` for ${occasion}` : ''}.`);
+              }
+              // 1.85 Catering Packages ("catering packages", "choose catering package", "order catering package")
               else if (
                 /\b(catering package|catering packages|choose catering|order catering package|bulk catering packages)\b/i.test(lower)
               ) {
                 lastSpeechIntentTime = now;
                 console.log('[VapiStore] Speech detected intent: catering packages');
                 executeSingleAction({ action: 'catering_choose_package' });
+                speakAgentFeedback('Here are our catering packages.');
               }
               // 1.9 Bulk Catering ("catering", "bulk catering", "event catering", "switch to catering")
               else if (
@@ -1734,6 +1828,7 @@ CRITICAL BEHAVIOR GUIDELINES:
                 lastSpeechIntentTime = now;
                 console.log('[VapiStore] Speech detected intent: open catering packages');
                 executeSingleAction({ action: 'catering_choose_package' });
+                speakAgentFeedback('Opening catering packages.');
               }
               // 2. Menu Navigation ("show all the menus", "show menu", "open menu", "view menu")
               else if (
@@ -1744,6 +1839,7 @@ CRITICAL BEHAVIOR GUIDELINES:
                 lastSpeechIntentTime = now;
                 console.log('[VapiStore] Speech detected intent: show all menus');
                 navigateScreen('/menu');
+                speakAgentFeedback('Opening menu for you.');
               }
               // 3. Profile Navigation ("open profile", "show profile", "my account")
               else if (
@@ -1753,6 +1849,7 @@ CRITICAL BEHAVIOR GUIDELINES:
                 lastSpeechIntentTime = now;
                 console.log('[VapiStore] Speech detected intent: open profile');
                 navigateScreen('/profile');
+                speakAgentFeedback('Opening your profile.');
               }
               // 4. Rewards / Loyalty Points ("loyalty points", "rewards", "my points")
               else if (
@@ -1762,6 +1859,7 @@ CRITICAL BEHAVIOR GUIDELINES:
                 lastSpeechIntentTime = now;
                 console.log('[VapiStore] Speech detected intent: open rewards');
                 navigateScreen('/rewards');
+                speakAgentFeedback('Opening your rewards.');
               }
               // 5. Addresses ("show addresses", "my address", "select address")
               else if (
@@ -1771,10 +1869,13 @@ CRITICAL BEHAVIOR GUIDELINES:
                 console.log('[VapiStore] Speech detected intent: address handling');
                 if (/\b(home)\b/i.test(lower)) {
                   executeSingleAction({ action: 'select_address', payload: { address: 'home' } } as any);
+                  speakAgentFeedback('Selected your home address.');
                 } else if (/\b(work|office)\b/i.test(lower)) {
                   executeSingleAction({ action: 'select_address', payload: { address: 'work' } } as any);
+                  speakAgentFeedback('Selected your work address.');
                 } else {
                   navigateScreen('/(address)/my-addresses');
+                  speakAgentFeedback('Opening your saved addresses.');
                 }
               }
               // 6. Orders / History ("show orders", "order history", "past orders")
@@ -1785,6 +1886,7 @@ CRITICAL BEHAVIOR GUIDELINES:
                 lastSpeechIntentTime = now;
                 console.log('[VapiStore] Speech detected intent: open orders');
                 navigateScreen('/(order)/orders');
+                speakAgentFeedback('Opening your orders.');
               }
               // 7. Cart / Checkout ("show cart", "view cart", "open cart", "checkout")
               else if (
@@ -1796,8 +1898,10 @@ CRITICAL BEHAVIOR GUIDELINES:
                   lastSpeechIntentTime = now;
                   console.log('[VapiStore] Speech detected intent: open cart');
                   navigateScreen('/(checkout)/checkout');
+                  speakAgentFeedback('Opening your cart.');
                 } else {
                   console.log('[VapiStore] Cart is empty, suppressed voice navigation to empty cart.');
+                  speakAgentFeedback('Your cart is currently empty. Would you like to explore our menu?');
                 }
               }
             }

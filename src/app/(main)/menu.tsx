@@ -170,6 +170,61 @@ const MenuItemCard = React.memo(function MenuItemCard({
   return prev.item === next.item && prev.count === next.count;
 });
 
+export function matchesCategoryLabel(rawTarget: string, rawLabel: string): boolean {
+  if (!rawTarget || !rawLabel) return false;
+  const target = rawTarget.toLowerCase().replace(/varities/i, 'varieties').trim();
+  const label = rawLabel.toLowerCase().replace(/varities/i, 'varieties').trim();
+  if (target === label) return true;
+
+  // Strict disambiguation for Tandoori subcategories
+  if (target.includes('bread') || target.includes('roti') || target.includes('naan') || target.includes('kulcha') || target.includes('paratha')) {
+    return label.includes('bread');
+  }
+  if (target.includes('side') || target.includes('curry') || target.includes('paneer butter') || target.includes('gravy') || target.includes('dal makhani')) {
+    return label.includes('side');
+  }
+  if (target.includes('starter') || target.includes('tikka') || target.includes('kabab')) {
+    return label.includes('starter');
+  }
+  if (target === 'tandoori') {
+    return label.includes('starter');
+  }
+
+  // Strict disambiguation for other categories
+  if (target.includes('raitha') || target.includes('raita')) {
+    return label.includes('raitha') || label.includes('raita');
+  }
+  if (target.includes('noodle')) {
+    return label.includes('noodle');
+  }
+  if (target.includes('salad')) {
+    return label.includes('salad');
+  }
+  if (target.includes('dosa') || target.includes('dosai')) {
+    return label.includes('dosa');
+  }
+  if (target.includes('snack') || target.includes('vada') || target.includes('samosa') || target.includes('bajji')) {
+    return label.includes('snack');
+  }
+  if (target.includes('beverage') || target.includes('coffee') || target.includes('tea')) {
+    return label.includes('beverage');
+  }
+  if (target.includes('soup')) {
+    return label.includes('soup');
+  }
+  if (target.includes('breakfast')) {
+    return label.includes('breakfast');
+  }
+  if (target.includes('lunch') || target.includes('thali') || target.includes('meal')) {
+    return label.includes('lunch');
+  }
+  if (target.includes('rice') || target.includes('biryani') || target.includes('pulao') || target.includes('pulav') || target.includes('fried rice')) {
+    return label.includes('rice');
+  }
+
+  return target.includes(label) || label.includes(target);
+}
+
 export default function App() {
   const router = useRouter();
   const phone = useAuthStore(s => s.phone);
@@ -251,11 +306,7 @@ export default function App() {
       setSearchQuery("");
       if (!params.region) {
         // Auto-detect region if the category belongs exclusively to one region
-        const catObj = allCategories.find(c => {
-          const l = (c.label || '').toLowerCase().replace(/varities/i, 'varieties').trim();
-          const target = newCat.toLowerCase().replace(/varities/i, 'varieties').trim();
-          return l === target || l.includes(target) || target.includes(l);
-        });
+        const catObj = allCategories.find(c => matchesCategoryLabel(newCat, c.label || ''));
         if (catObj?.region && activeRegion !== catObj.region && activeRegion !== 'All Regions') {
           setActiveRegion(catObj.region);
         }
@@ -287,9 +338,9 @@ export default function App() {
         setActiveCat(data.categoryName);
       } else {
         setActiveCat('all');
+        categoryScrollRef.current?.scrollTo({ x: 0, animated: true });
       }
       setSearchQuery('');
-      categoryScrollRef.current?.scrollTo({ x: 0, animated: true });
     });
 
     return () => {
@@ -326,11 +377,8 @@ export default function App() {
       return;
     }
 
-    const normActive = activeCat.toLowerCase().replace(/varities/i, 'varieties').trim();
-    const matchingKey = Object.keys(tabPositions.current).find(k => {
-      const normK = k.toLowerCase().replace(/varities/i, 'varieties').trim();
-      return normK === normActive || normK.includes(normActive) || normActive.includes(normK);
-    });
+    const normActive = (activeCat || '').trim();
+    const matchingKey = Object.keys(tabPositions.current).find(k => matchesCategoryLabel(normActive, k));
 
     if (matchingKey && tabPositions.current[matchingKey]) {
       const { x, width } = tabPositions.current[matchingKey];
@@ -339,10 +387,7 @@ export default function App() {
     } else {
       // If layout hasn't measured yet, try after a short delay
       const timer = setTimeout(() => {
-        const key = Object.keys(tabPositions.current).find(k => {
-          const normK = k.toLowerCase().replace(/varities/i, 'varieties').trim();
-          return normK === normActive || normK.includes(normActive) || normActive.includes(normK);
-        });
+        const key = Object.keys(tabPositions.current).find(k => matchesCategoryLabel(normActive, k));
         if (key && tabPositions.current[key]) {
           const { x } = tabPositions.current[key];
           categoryScrollRef.current?.scrollTo({ x: Math.max(0, x - 60), animated: true });
@@ -748,9 +793,7 @@ export default function App() {
       
       // Category match by label
       if (activeCat && activeCat.toLowerCase() !== "all") {
-        const targetCat = activeCat.toLowerCase().replace(/varities/i, 'varieties').trim();
-        const currentCat = (itemCat?.label || '').toLowerCase().replace(/varities/i, 'varieties').trim();
-        if (currentCat !== targetCat && !currentCat.includes(targetCat) && !targetCat.includes(currentCat)) return false;
+        if (!matchesCategoryLabel(activeCat, itemCat?.label || '')) return false;
       }
       
       // Search match
@@ -844,9 +887,7 @@ export default function App() {
           {categoriesToShow.map(cat => {
             const isTabActive = (() => {
               if (cat.id === "all") return !activeCat || activeCat.toLowerCase() === "all";
-              const normActive = (activeCat || '').toLowerCase().replace(/varities/i, 'varieties').trim();
-              const normLabel = cat.label.toLowerCase().replace(/varities/i, 'varieties').trim();
-              return normActive === normLabel || normActive.includes(normLabel) || normLabel.includes(normActive);
+              return matchesCategoryLabel(activeCat || '', cat.label);
             })();
 
             return (

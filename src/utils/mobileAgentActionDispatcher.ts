@@ -65,6 +65,15 @@ export function navigateScreen(resolvedRoute: string, params?: Record<string, an
 
   console.log(`[Dispatcher] navigateScreen triggered -> target: "${resolvedRoute}"`, params || '');
 
+  // Hard guard against navigating to empty cart screen
+  if (resolvedRoute === '/(checkout)/checkout' || resolvedRoute === '/checkout') {
+    const cartCount = useCartStore.getState().getItemCount();
+    if (cartCount === 0) {
+      console.warn('[Dispatcher] Hard blocked navigation to empty cart screen!');
+      return;
+    }
+  }
+
   // Dismiss modal overlay so the destination screen is visible to the user immediately
   try {
     useVoiceAgentStore.getState().hideAgent();
@@ -210,6 +219,28 @@ export async function executeSingleAction(act: UIAction): Promise<ActionResult> 
         if (!resolved) {
           console.warn(`[Dispatcher] Route "${rawRoute}" could not be resolved!`);
           return { success: false, action, message: `Route "${rawRoute}" is not a supported screen.` };
+        }
+
+        // If navigating to menu and rawRoute specifies a category, route through open_category
+        if (resolved === '/menu' || resolved === '/(main)/menu') {
+          const lowerRaw = rawRoute.toLowerCase();
+          const categoryKeywords = [
+            'bread', 'roti', 'naan', 'kulcha', 'paratha',
+            'side dish', 'side dishes', 'curry', 'paneer butter', 'gravy',
+            'starter', 'starters', 'tikka', 'kabab', 'tandoori',
+            'raitha', 'raita', 'noodle', 'noodles', 'salad', 'salads',
+            'dosa', 'dosai', 'snack', 'snacks', 'vada', 'samosa',
+            'beverage', 'beverages', 'coffee', 'tea', 'soup', 'soups',
+            'breakfast', 'lunch', 'dinner', 'rice', 'biryani', 'pulao'
+          ];
+          const hasCat = categoryKeywords.some(kw => lowerRaw.includes(kw));
+          if (hasCat) {
+            return await executeSingleAction({
+              action: 'open_category',
+              category_name: rawRoute,
+              payload: act.payload,
+            });
+          }
         }
 
         const params = act.payload?.params || {};
@@ -604,14 +635,17 @@ export async function executeSingleAction(act: UIAction): Promise<ActionResult> 
         const lower = rawName.toLowerCase();
 
         // North Indian
-        if (lower.includes('starter') || lower.includes('tikka') || lower.includes('kabab')) {
-          catName = 'Tandoori Starters';
-          targetRegion = 'North Indian';
-        } else if (lower.includes('bread') || lower.includes('roti') || lower.includes('naan') || lower.includes('kulcha') || lower.includes('paratha')) {
+        if (lower.includes('bread') || lower.includes('roti') || lower.includes('naan') || lower.includes('kulcha') || lower.includes('paratha')) {
           catName = 'Tandoori Breads';
           targetRegion = 'North Indian';
-        } else if (lower.includes('side dish') || lower.includes('curry') || lower.includes('paneer butter') || lower.includes('gravy') || lower.includes('dal makhani')) {
+        } else if (lower.includes('side dish') || lower.includes('side dishes') || lower.includes('curry') || lower.includes('paneer butter') || lower.includes('gravy') || lower.includes('dal makhani')) {
           catName = 'Tandoori Side Dishes';
+          targetRegion = 'North Indian';
+        } else if (lower.includes('starter') || lower.includes('tikka') || lower.includes('kabab')) {
+          catName = 'Tandoori Starters';
+          targetRegion = 'North Indian';
+        } else if (lower.trim() === 'tandoori') {
+          catName = 'Tandoori Starters';
           targetRegion = 'North Indian';
         } else if (lower.includes('noodle')) {
           catName = 'Noodles';
@@ -755,6 +789,14 @@ export async function executeSingleAction(act: UIAction): Promise<ActionResult> 
 
       case 'dine_in_pay_later': {
         useCartStore.getState().setOrderType('Dine In');
+        const cartCount = useCartStore.getState().getItemCount();
+        if (cartCount === 0) {
+          return {
+            success: true,
+            action,
+            message: 'Switched to Dine In mode.',
+          };
+        }
         navigateScreen('/(checkout)/checkout', { payLater: 'true' });
         return {
           success: true,
@@ -783,6 +825,15 @@ export async function executeSingleAction(act: UIAction): Promise<ActionResult> 
             };
           }
         } catch {}
+
+        const cartCount = useCartStore.getState().getItemCount();
+        if (cartCount === 0) {
+          return {
+            success: true,
+            action,
+            message: 'You have no active bill or items in your cart.',
+          };
+        }
         navigateScreen('/(checkout)/checkout', { payLater: 'true' });
         return {
           success: true,
@@ -886,15 +937,18 @@ export async function executeSingleAction(act: UIAction): Promise<ActionResult> 
             data: { eventName, date, time, occasion, guestCount, serviceType, address, navigatedTo: 'packages' }
           };
         } else {
-          navigateScreen('/(main)/catering-event-details', {
-            eventName,
-            date,
-            time,
-            occasion,
-            guestCount,
-            serviceType,
-            address,
-          });
+          const curr = getCurrentPathname();
+          if (!curr.includes('catering-event-details')) {
+            navigateScreen('/(main)/catering-event-details', {
+              eventName,
+              date,
+              time,
+              occasion,
+              guestCount,
+              serviceType,
+              address,
+            });
+          }
           return {
             success: true,
             action,

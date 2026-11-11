@@ -99,12 +99,39 @@ export default function CateringEventDetails() {
   // Listen for background voice agent updates to event details
   useEffect(() => {
     const sub = DeviceEventEmitter.addListener('catering_set_event_details', (data: any) => {
-      if (data?.address && String(data.address).trim().length >= 5) {
-        setIsAddressValidated(true);
+      if (!data) return;
+      const updates: any = {};
+      if (data.eventName !== undefined) updates.eventName = String(data.eventName);
+      if (data.event_name !== undefined) updates.eventName = String(data.event_name);
+      if (data.guestCount !== undefined || data.guest_count !== undefined) {
+        const raw = String(data.guestCount ?? data.guest_count);
+        const sanitized = raw.replace(/[^0-9]/g, '');
+        if (sanitized) updates.guestCount = sanitized;
+      }
+      if (data.date !== undefined) updates.date = String(data.date);
+      if (data.event_date !== undefined) updates.date = String(data.event_date);
+      if (data.time !== undefined) updates.time = String(data.time);
+      if (data.serving_time !== undefined) updates.time = String(data.serving_time);
+      if (data.occasion !== undefined) updates.occasion = String(data.occasion);
+      if (data.event_type !== undefined) updates.occasion = String(data.event_type);
+      if (data.serviceType !== undefined) updates.serviceType = String(data.serviceType);
+      if (data.service_type !== undefined) updates.serviceType = String(data.service_type);
+      if (data.orderType !== undefined) updates.orderType = String(data.orderType);
+      if (data.order_type !== undefined) updates.orderType = String(data.order_type);
+      if (data.address !== undefined || data.delivery_address !== undefined || data.location !== undefined) {
+        const addr = String(data.address || data.delivery_address || data.location || '');
+        updates.address = addr;
+        if (addr.trim().length >= 5) {
+          setIsAddressValidated(true);
+        }
+      }
+      if (Object.keys(updates).length > 0) {
+        console.log('[CateringEventDetails] Applying live voice agent updates:', updates);
+        setEventDetails(updates);
       }
     });
     return () => sub.remove();
-  }, []);
+  }, [setEventDetails]);
   const [alertConfig, setAlertConfig] = useState({
     visible: false,
     title: '',
