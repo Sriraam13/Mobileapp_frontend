@@ -290,6 +290,49 @@ async function fetchAgentData(toolName: string, args: Record<string, any>): Prom
   return promise;
 }
 
+// ─── Live Cart Sync with Vapi Session ──────────────────────────────────────────
+
+let lastSyncContent = '';
+
+export function syncCartContextWithVapi() {
+  const vapi = getVapi();
+  if (!vapi || !useVapiStore.getState().isConnected) return;
+  try {
+    const cartState = useCartStore.getState();
+    const count = cartState.getItemCount();
+    const subtotal = cartState.getSubtotal();
+    const rawItems = Object.values(cartState.items);
+    let content = '';
+    if (count > 0) {
+      const summary = rawItems.map(i => `${i.quantity}x ${i.name} (₹${i.price})`).join(', ');
+      content = `[Live Cart Updated] Cart currently has ${count} item(s): ${summary}. Subtotal: ₹${subtotal}. The cart is NOT empty! When the user asks to see or view their cart or checkout, confirm these items and call "open_cart".`;
+    } else {
+      content = `[Live Cart Updated] Cart is currently empty (0 items).`;
+    }
+
+    if (content === lastSyncContent) return; // Prevent duplicate messages
+    lastSyncContent = content;
+
+    (vapi as any).send({
+      type: 'add-message',
+      message: {
+        role: 'system',
+        content,
+      }
+    });
+    console.log('[VapiStore] Synced live cart with Vapi:', content);
+  } catch (err) {
+    console.warn('[VapiStore] Could not sync cart context with Vapi:', err);
+  }
+}
+
+// Auto-sync cart changes to active Vapi session
+useCartStore.subscribe(() => {
+  if (useVapiStore.getState().isConnected) {
+    syncCartContextWithVapi();
+  }
+});
+
 // ─── Robust Cart Resolver Helper ─────────────────────────────────────────────
 
 async function resolveAndAddToCart(fnArgs: any): Promise<{ success: boolean; code?: string; message: string; data?: any; [key: string]: any }> {
@@ -330,6 +373,7 @@ async function resolveAndAddToCart(fnArgs: any): Promise<{ success: boolean; cod
       category: String(item.category || item.category_id || 'General'),
       desc: item.desc || item.description || '',
     });
+    syncCartContextWithVapi();
     const cartCount = useCartStore.getState().getItemCount();
     const subtotal = useCartStore.getState().getSubtotal();
     return {
@@ -424,6 +468,7 @@ async function resolveAndAddToCart(fnArgs: any): Promise<{ success: boolean; cod
     category: String(bestMatch.category || bestMatch.category_id || 'General'),
     desc: bestMatch.desc || bestMatch.description || '',
   });
+  syncCartContextWithVapi();
 
   const cartTotalCount = useCartStore.getState().getItemCount();
   const subtotal = useCartStore.getState().getSubtotal();
@@ -521,25 +566,50 @@ async function handleVapiToolCall(tool: any): Promise<{ toolCallId: string; resu
 
         console.log(`[VapiStore] Resolved route: "${resolved}", executing navigation...`);
 
-        // Guard against rogue navigation to checkout screen when user is talking about food / menu
-        if (resolved === '/(checkout)/checkout') {
-          const recentUserText = useVapiStore.getState().messages
-            .filter((m: any) => m.role === 'user')
-            .slice(-3)
-            .map((m: any) => m.text.toLowerCase())
-            .join(' ');
-          const explicitCartRequest = /\b(open cart|show cart|view cart|go to cart|my cart|checkout|basket)\b/i.test(recentUserText);
+        // Guard against rogue navigation to checkout screen when cart is actually empty
+        if (resolved === '/(checkout)/checkout' || resolved === '/checkout') {
           const cartCount = useCartStore.getState().getItemCount();
-          if (!explicitCartRequest || cartCount === 0) {
-            console.log(`[VapiStore] Suppressed navigation to checkout screen (explicit=${explicitCartRequest}, cartCount=${cartCount})`);
+          if (cartCount === 0) {
+            console.log(`[VapiStore] Suppressed navigation to checkout screen: cart is empty (cartCount=0)`);
             return {
               toolCallId,
               result: JSON.stringify({
                 success: true,
-                message: 'Your cart is currently empty. Feel free to explore our menu categories!',
+                message: 'Your cart is currently empty. Feel free to explore our menu categories or ask me to add any dish!',
               })
             };
           }
+
+          // Cart has items! Open cart screen and return rich items summary
+          const cartState = useCartStore.getState();
+          const rawItems = Object.values(cartState.items);
+          const subtotal = cartState.getSubtotal();
+          const itemsList = rawItems.map(i => ({
+            id: i.id,
+            name: i.name,
+            quantity: i.quantity,
+            price: i.price,
+          }));
+          const itemNames = itemsList.map(i => `${i.quantity}x ${i.name}`).join(', ');
+          const speechSummary = `You have ${cartCount} item(s) in your cart: ${itemNames}, totaling ${subtotal} rupees. I have opened your cart on screen.`;
+
+          await executeSingleAction({
+            action: 'navigate',
+            route: resolved,
+            payload: { params: fnArgs.params || {} },
+          });
+
+          return {
+            toolCallId,
+            result: JSON.stringify({
+              success: true,
+              itemCount: cartCount,
+              subtotal,
+              items: itemsList,
+              message: speechSummary,
+              summary: speechSummary,
+            })
+          };
         }
 
         const navParams: Record<string, any> = { ...(fnArgs.params || {}) };
@@ -719,7 +789,12 @@ async function handleVapiToolCall(tool: any): Promise<{ toolCallId: string; resu
       case 'show_cart':
       case 'view_cart':
       case 'get_cart':
-      case 'cart_get': {
+      case 'cart_get':
+      case 'cart_read':
+      case 'check_cart':
+      case 'cart_summary':
+      case 'my_cart':
+      case 'cart': {
         const cartState = useCartStore.getState();
         const rawItems = Object.values(cartState.items);
         const cartCount = cartState.getItemCount();
@@ -731,24 +806,12 @@ async function handleVapiToolCall(tool: any): Promise<{ toolCallId: string; resu
           price: i.price,
         }));
 
-        const isReadOperation = fnName === 'get_cart' || fnName === 'cart_get';
-        const now = Date.now();
-        const recentlyOpenedCategory = (now - lastCategoryActionTime) < 15000;
+        const isReadOperation = fnName === 'get_cart' || fnName === 'cart_get' || fnName === 'cart_read';
 
-        // Check if the user explicitly commanded to VIEW the cart
-        const recentUserText = useVapiStore.getState().messages
-          .filter((m: any) => m.role === 'user')
-          .slice(-3)
-          .map((m: any) => m.text.toLowerCase())
-          .join(' ');
-        const explicitCartRequest = /\b(open cart|show cart|view cart|go to cart|my cart|checkout|open basket|view basket)\b/i.test(recentUserText);
-
-        // ONLY navigate if user explicitly commanded cart, it's not a read operation, not right after category, and cart has items
-        if (explicitCartRequest && !isReadOperation && !recentlyOpenedCategory && cartCount > 0) {
-          console.log('[VapiStore] Explicit cart navigation confirmed.');
+        // When user wants to see the cart and has items, open the cart screen
+        if (!isReadOperation && cartCount > 0) {
+          console.log('[VapiStore] Opening cart screen with items:', cartCount);
           await executeSingleAction({ action: 'show_cart', payload: { force: true } });
-        } else {
-          console.log(`[VapiStore] Suppressed cart screen navigation (explicit=${explicitCartRequest}, isRead=${isReadOperation}, recentCat=${recentlyOpenedCategory}, count=${cartCount})`);
         }
 
         let speechSummary = '';
@@ -756,9 +819,7 @@ async function handleVapiToolCall(tool: any): Promise<{ toolCallId: string; resu
           speechSummary = 'Your cart is currently empty. You can ask me to add any dish to your cart!';
         } else {
           const itemNames = itemsList.map(i => `${i.quantity}x ${i.name}`).join(', ');
-          speechSummary = explicitCartRequest && cartCount > 0 && !recentlyOpenedCategory
-            ? `You have ${cartCount} items in your cart: ${itemNames}, totaling ${subtotal} rupees. I have opened your cart on screen.`
-            : `You have ${cartCount} items in your cart totaling ${subtotal} rupees: ${itemNames}.`;
+          speechSummary = `You have ${cartCount} items in your cart totaling ${subtotal} rupees: ${itemNames}.`;
         }
 
         return {
@@ -787,11 +848,13 @@ async function handleVapiToolCall(tool: any): Promise<{ toolCallId: string; resu
           menu_item_id: fnArgs.item_id,
           payload: fnArgs.item_name ? { item_name: fnArgs.item_name } : undefined,
         } as any);
+        syncCartContextWithVapi();
         return { toolCallId, result: JSON.stringify(result) };
       }
 
       case 'clear_cart': {
         const result = await executeSingleAction({ action: 'clear_cart' });
+        syncCartContextWithVapi();
         return { toolCallId, result: JSON.stringify(result) };
       }
 
@@ -802,6 +865,7 @@ async function handleVapiToolCall(tool: any): Promise<{ toolCallId: string; resu
           quantity: fnArgs.quantity,
         };
         const result = await executeSingleAction(uiAction);
+        syncCartContextWithVapi();
         return { toolCallId, result: JSON.stringify(result) };
       }
 
@@ -1525,6 +1589,7 @@ export const useVapiStore = create<VapiState>((set, get) => ({
 
     vapi.on('call-start', () => {
       set({ isConnected: true, isConnecting: false });
+      lastSyncContent = '';
 
       // Warm the menu cache in the background so the first food request does
       // not stall on a cold network fetch.
@@ -1572,7 +1637,7 @@ CRITICAL BEHAVIOR & KNOWLEDGE GUIDELINES:
    - Call "open_category" (category_name) or "switch_region" ("North Indian" or "South Indian").
    - NEVER call "open_cart" or "show_cart" when user mentions a category or dish.
 3. Cart Rules:
-   - If user asks to see cart and cart has 0 items, NEVER navigate to cart. Say: "Your cart is currently empty. Feel free to explore our menu!"
+   - When user asks to view or see their cart, basket, card, or checkout (e.g. "view my cart", "cart", "show cart", "view my card", "checkout"), ALWAYS call tool "open_cart" or "show_cart". NEVER assume the cart is empty from memory—always invoke "open_cart" to verify live items and open the cart screen!
    - When "add_to_cart" succeeds, ALWAYS confirm to the user that the item was successfully added with price and quantity. NEVER claim an item is unavailable or out of stock if add_to_cart succeeded!
 4. Supported North Indian Categories (Real Data Udipi Menu):
    - "Tandoori Breads" (Butter Naan, Garlic Naan, Naan, Pulkha with Paneer Butter Masala, Roti)
@@ -2057,7 +2122,7 @@ CRITICAL BEHAVIOR & KNOWLEDGE GUIDELINES:
               // 7. Cart / Checkout ("show cart", "view cart", "open cart", "checkout", "view my card")
               else if (
                 /\b(show|open|view|go to|take me to)\b.*\b(cart|basket|checkout|card|car)\b/i.test(lower) ||
-                /^(cart|view cart|open cart|checkout|view my cart|view my card|my cart|my card|card)$/i.test(lower)
+                /^(cart|view cart|open cart|checkout|view my cart|view my card|my cart|my card|card|view card|show card|open card)$/i.test(lower)
               ) {
                 const cartCount = useCartStore.getState().getItemCount();
                 if (cartCount > 0) {

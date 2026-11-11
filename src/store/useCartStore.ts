@@ -134,12 +134,12 @@ export const useCartStore = create<CartState>()(
   clearCart: () => set({ items: {}, discountCode: null }),
   setOrderType: (type) => set((state) => {
     if (state.orderType === type) return state;
-    // When changing modes, clear items so carts never mix across Dine In, Delivery, or Takeaway.
-    // Also clear tableNumber when leaving Dine In.
-    if (state.orderType === 'Dine In' && type !== 'Dine In') {
-      return { orderType: type, items: {}, discountCode: null, tableNumber: '', tableStatus: null };
+    // Preserve cart items across modes so users do not lose their food selections.
+    // Clear tableNumber if leaving Dine In.
+    if (type !== 'Dine In') {
+      return { orderType: type, tableNumber: '', tableStatus: null };
     }
-    return { orderType: type, items: {}, discountCode: null };
+    return { orderType: type };
   }),
   setTableNumber: (tableNumber) => set({ tableNumber }),
   clearTableNumber: () => set({ tableNumber: '', tableStatus: null }),
