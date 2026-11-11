@@ -626,6 +626,18 @@ async function handleVapiToolCall(tool: any): Promise<{ toolCallId: string; resu
         return { toolCallId, result: JSON.stringify(result) };
       }
 
+      case 'set_table_number':
+      case 'table_number': {
+        const table = fnArgs.table_number || fnArgs.table || fnArgs.tableNumber || '';
+        const uiAction: UIAction = {
+          action: 'set_table_number',
+          table_number: table,
+        };
+        const result = await executeSingleAction(uiAction);
+        speakAgentFeedback(`Set table to ${table} for Dine In. What can I get for you today?`);
+        return { toolCallId, result: JSON.stringify(result) };
+      }
+
       // ── Menu Search ───────────────────────────────────────────────────────────
 
       case 'menu_search':
@@ -1313,9 +1325,15 @@ export const useVapiStore = create<VapiState>((set, get) => ({
     } else if (!isLoggedIn) {
       dynamicFirstMessage = "Welcome to Data Udipi! I'm your voice assistant. To get started, could you please tell me your phone number?";
     } else if (!hasOutlet) {
-      dynamicFirstMessage = "Welcome back to Data Udipi! We have exciting delicious menu varieties and category items. Which outlet would you like to order from today?";
+      dynamicFirstMessage = "Welcome to Data Udipi! Which outlet would you like to order from today? We have Mugalivakkam and MGR Nagar.";
     } else {
-      dynamicFirstMessage = "Welcome back to Data Udipi! We have exciting delicious menu varieties and category items. Which items would you prefer today?";
+      const { useDineInSessionStore } = require('../store/useDineInSessionStore');
+      const dineIn = useDineInSessionStore.getState();
+      if (dineIn.isActive && dineIn.activeOrderId) {
+        dynamicFirstMessage = `Welcome back! You have an active Dine-In session at Table ${dineIn.tableNumber || 'your table'}. Would you like to order more items, check order status, or pay your bill?`;
+      } else {
+        dynamicFirstMessage = "Welcome to Data Udipi! Would you like to Dine-In, Takeaway, or order Delivery today?";
+      }
     }
 
     const overrides = { 
@@ -1502,7 +1520,14 @@ CRITICAL BEHAVIOR & KNOWLEDGE GUIDELINES:
      • Evening Tiffin 3 (Code: E-MENU 3) - ₹160/plate
      • Seemantham (Code: S-MENU 1) - ₹210/plate
    - When user provides event details (e.g. guest count, date, time, occasion, address), call tool "catering_set_event_details" with { guest_count, event_name, occasion, date, time, address } and confirm verbally.
-   - When user asks to see or choose catering packages, call "catering_choose_package" with { package_code }.`
+   - When user asks to see or choose catering packages, call "catering_choose_package" with { package_code }.
+7. Dine-In Workflow:
+   - When user starts, always offer or confirm order type: Dine-In, Takeaway, or Delivery.
+   - For Dine-In: ask for their table number and call "set_table_number" with { table_number: "T-04" }.
+   - Placing Dine-In Orders: In Dine-In, users order with Pay Later so food is sent directly to the kitchen. Call tool "dine_in_pay_later" when user says "place order", "send to kitchen", "confirm order", or "pay later".
+   - Multiple Rounds: Users seated at their table can order more items at any time. When more items are ordered, they automatically append as Round 2, Round 3, etc. to the same table.
+   - Order Status: When user asks "where is my food?", "order status", or "track order", call tool "open_tracking" to show live status.
+   - Bill Settlement: When user is done eating and says "pay bill", "settle bill", or "complete meal", call tool "dine_in_pay_bill" to open the table settlement payment screen with the total across all rounds.`
           }
         });
       } catch (e) {
@@ -1653,29 +1678,50 @@ CRITICAL BEHAVIOR & KNOWLEDGE GUIDELINES:
                 /\b(switch|change|set|make|select|turn|go|put)\b.*\b(dine in|dine-in|dinein|table)\b/i.test(lower) ||
                 /^(switch to |change to )?(dine in|dine-in)(\s*(please|mode|option))?$/i.test(lower)
               ) {
-                if (useCartStore.getState().orderType !== 'Dine In') {
-                  lastSpeechIntentTime = now;
-                  console.log('[VapiStore] Speech detected intent: switch to dine in');
-                  useCartStore.getState().setOrderType('Dine In');
+                lastSpeechIntentTime = now;
+                console.log('[VapiStore] Speech detected intent: switch to dine in');
+                useCartStore.getState().setOrderType('Dine In');
+                const tableMatch = lower.match(/\btable\s*(?:no\.?|number)?\s*([a-z0-9-]+)\b/i);
+                if (tableMatch && tableMatch[1]) {
+                  const rawTable = tableMatch[1].toUpperCase();
+                  const formatted = rawTable.startsWith('T') ? rawTable : `T-${rawTable.padStart(2, '0')}`;
+                  useCartStore.getState().setTableNumber(formatted);
+                  speakAgentFeedback(`Switched to Dine-In mode at Table ${formatted}. What would you like to order?`);
+                } else {
+                  speakAgentFeedback('Switched to Dine-In mode. Which table are you seated at?');
                 }
               } else if (
                 /\b(switch|change|set|make|select|turn|go|put)\b.*\b(delivery|deliver|home delivery)\b/i.test(lower) ||
                 /^(switch to |change to )?(delivery)(\s*(please|mode|option))?$/i.test(lower)
               ) {
-                if (useCartStore.getState().orderType !== 'Delivery') {
+                lastSpeechIntentTime = now;
+                console.log('[VapiStore] Speech detected intent: switch to delivery');
+                useCartStore.getState().setOrderType('Delivery');
+                speakAgentFeedback('Switched to Delivery mode. Where would you like your order delivered?');
+              }
+              // 1.45 Table Number Selection ("table 4", "table T-02", "seated at table 5", "i am at table 3")
+              else if (
+                /\b(table|table number|seated at table|i am at table)\s*(?:no\.?|number)?\s*([a-z0-9-]+)\b/i.test(lower)
+              ) {
+                const match = lower.match(/\b(?:table|table number|seated at table|i am at table)\s*(?:no\.?|number)?\s*([a-z0-9-]+)\b/i);
+                if (match && match[1]) {
                   lastSpeechIntentTime = now;
-                  console.log('[VapiStore] Speech detected intent: switch to delivery');
-                  useCartStore.getState().setOrderType('Delivery');
+                  const rawTable = match[1].toUpperCase();
+                  const formatted = rawTable.startsWith('T') ? rawTable : `T-${rawTable.padStart(2, '0')}`;
+                  useCartStore.getState().setTableNumber(formatted);
+                  useCartStore.getState().setOrderType('Dine In');
+                  console.log('[VapiStore] Speech detected intent: set table number', formatted);
+                  speakAgentFeedback(`Set table to ${formatted} for Dine-In. What can I get for you today?`);
                 }
               }
-              // 1.5 Dine-In Pay Later ("pay later", "dine in pay later", "switch to pay later")
+              // 1.5 Dine-In Pay Later / Send to Kitchen ("place order", "send to kitchen", "confirm order", "pay later")
               else if (
-                /\b(pay later|pay-later|paylater)\b/i.test(lower) ||
-                /\b(switch to pay later|order pay later|dine in pay later)\b/i.test(lower)
+                /\b(pay later|pay-later|paylater|send to kitchen|place order|confirm order|send order)\b/i.test(lower)
               ) {
                 lastSpeechIntentTime = now;
-                console.log('[VapiStore] Speech detected intent: switch to pay later dine in');
+                console.log('[VapiStore] Speech detected intent: dine in pay later / send to kitchen');
                 executeSingleAction({ action: 'dine_in_pay_later' });
+                speakAgentFeedback('Opening your order review with Pay Later to send to the kitchen.');
               }
               // 1.6 Dine-In Pay Bill ("pay bill", "pay the bill", "pay my bill", "settle bill", "complete meal")
               else if (
@@ -1684,6 +1730,15 @@ CRITICAL BEHAVIOR & KNOWLEDGE GUIDELINES:
                 lastSpeechIntentTime = now;
                 console.log('[VapiStore] Speech detected intent: dine in pay bill');
                 executeSingleAction({ action: 'dine_in_pay_bill' });
+              }
+              // 1.62 Order Status / Tracking ("where is my food", "order status", "track order", "track my food")
+              else if (
+                /\b(where is my food|where is my order|order status|track order|track my order|is my food ready)\b/i.test(lower)
+              ) {
+                lastSpeechIntentTime = now;
+                console.log('[VapiStore] Speech detected intent: track order');
+                executeSingleAction({ action: 'open_tracking' });
+                speakAgentFeedback('Opening your order tracking screen.');
               }
               // 1.65 Region Switches (North Indian / South Indian / All Regions)
               else if (

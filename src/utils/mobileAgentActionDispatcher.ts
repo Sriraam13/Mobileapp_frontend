@@ -192,6 +192,7 @@ export interface UIAction {
   order_type?: string;
   order_id?: string;
   db_order_id?: string;
+  table_number?: string;
   name?: string;
   phone?: string;
   payload?: any;
@@ -345,6 +346,23 @@ export async function executeSingleAction(act: UIAction): Promise<ActionResult> 
         }
         useCartStore.getState().setOrderType(mapped);
         return { success: true, action, message: `Order type successfully set to ${mapped}`, data: { orderType: mapped } };
+      }
+
+      case 'set_table_number': {
+        const rawTable = act.table_number || (act as any).table || act.payload?.tableNumber || act.payload?.table || '';
+        if (!rawTable) {
+          return { success: false, action, message: 'No table number provided.' };
+        }
+        const cleaned = String(rawTable).trim().toUpperCase();
+        const formatted = cleaned.startsWith('T') ? cleaned : `T-${cleaned.padStart(2, '0')}`;
+        useCartStore.getState().setTableNumber(formatted);
+        useCartStore.getState().setOrderType('Dine In');
+        return {
+          success: true,
+          action,
+          message: `Set table number to ${formatted} for Dine In.`,
+          data: { tableNumber: formatted, orderType: 'Dine In' }
+        };
       }
 
       // ── Cart: Add ────────────────────────────────────────────────────────────

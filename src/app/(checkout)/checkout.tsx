@@ -278,8 +278,8 @@ export default function CheckoutScreen() {
         useCartStore.getState().clearCart();
         setSubmitting(false);
 
-        // Immediately navigate to Track Order status screen
-        router.push({
+        // Immediately navigate to Track Order status screen (use replace so back button doesn't land on empty cart)
+        router.replace({
           pathname: '/track-order',
           params: {
             orderId: res.orderId,
@@ -337,7 +337,7 @@ export default function CheckoutScreen() {
           <Text style={styles.emptySubtitle}>Looks like you haven&apos;t added anything to your cart yet.</Text>
           <TouchableOpacity 
             style={styles.browseMenuBtn}
-            onPress={() => router.replace('/(main)/home')}
+            onPress={() => router.replace('/(main)/menu')}
             activeOpacity={0.8}
           >
             <Text style={styles.browseMenuBtnText}>Browse Menu</Text>
