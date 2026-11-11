@@ -115,15 +115,25 @@ function canonicalToken(token: string): string {
   return token;
 }
 
-/** Lowercase, strip punctuation/diacritics, collapse whitespace. */
+/** Lowercase, strip punctuation/diacritics, collapse whitespace, and map colloquial phrases. */
 export function normalizeName(value: unknown): string {
-  return String(value ?? '')
+  let s = String(value ?? '')
     .toLowerCase()
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
     .replace(/[^a-z0-9\s]/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
+
+  // Colloquial spoken food synonyms mapped to real Data Udipi menu item names
+  s = s
+    .replace(/\bfilter coffee\b/g, 'mini coffee')
+    .replace(/\bfilter tea\b/g, 'mini tea')
+    .replace(/\brava kesari\b/g, 'kesari')
+    .replace(/\bplain dosa\b/g, 'veg dosai')
+    .replace(/\bmasala dosa\b/g, 'rava masala dosai');
+
+  return s;
 }
 
 /** Normalized, filler-stripped, synonym-folded tokens. */

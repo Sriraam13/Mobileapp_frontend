@@ -1563,22 +1563,16 @@ CRITICAL BEHAVIOR & KNOWLEDGE GUIDELINES:
 3. Cart Rules:
    - If user asks to see cart and cart has 0 items, NEVER navigate to cart. Say: "Your cart is currently empty. Feel free to explore our menu!"
    - When "add_to_cart" succeeds, ALWAYS confirm to the user that the item was successfully added with price and quantity. NEVER claim an item is unavailable or out of stock if add_to_cart succeeded!
-4. Supported North Indian Categories:
-   - "Tandoori Starters" (Tikka, Kabab, Paneer Tikka)
-   - "Tandoori Breads" (Roti, Butter Roti, Naan, Butter Naan, Kulcha, Paratha)
-   - "Tandoori Side Dishes" (Paneer Butter Masala, Dal Makhani, Gravy, Curry)
-   - "Raitha" (Boondi Raitha, Onion Raitha, Cucumber Raitha)
-   - "Noodles" (Veg Noodles, Schezwan Noodles)
-   - "Salad" (Green Salad, Cucumber Salad)
-   - "Rice Varieties" (Fried Rice, Veg Biryani, Pulao, Jeera Rice)
-5. Supported South Indian Categories:
-   - "Dosa Varieties" (Plain Dosa, Masala Dosa, Ghee Roast, Uthappam)
-   - "Breakfast & Dinner" (Idli, Poori Masala, Pongal, Medu Vada)
-   - "Evening Snacks" (Samosa, Bajji, Bonda, Cutlet)
-   - "Hot Beverages" (Filter Coffee, Masala Tea, Milk)
-   - "Lunch" (South Indian Meals, Special Thali)
-   - "Rice Varieties" (Sambar Rice, Curd Rice, Lemon Rice)
-   - "Soups" (Tomato Soup, Veg Clear Soup)
+4. Supported North Indian Categories (Real Data Udipi Menu):
+   - "Tandoori Breads" (Butter Naan, Garlic Naan, Naan, Pulkha with Paneer Butter Masala, Roti)
+   - "Tandoori Side Dishes" (Paneer 65, Aloo Paneer Mini, Gobi Masala Mini, Mushroom 65 Mini)
+   - "Tandoori Starters" (Dhal Palak, Gobi Mushroom Fry Mini)
+   - "Rice Varieties" (Veg. Biryani / Onion Raitha, Paneer Biriyani, Veg Fried Rice Mini, Gobi Fried Rice Mini)
+5. Supported South Indian Categories (Real Data Udipi Menu):
+   - "Dosa Varieties" (Rava Masala Dosai, Veg. Dosai)
+   - "Breakfast & Dinner" (Mini Idly(14), Spl Vadai, Poori Masala)
+   - "Hot Beverages" (Mini Coffee, Mini Tea, Fresh Lemon Juice, Rose Milk)
+   - "Lunch & Sweets" (Kesari, Sambar Rice, Meals, Brinji Kuruma)
 6. Catering Knowledge & Event Booking:
    - Minimum order quantity for bulk catering is 50 guests.
    - Available Catering Packages:
