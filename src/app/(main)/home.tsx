@@ -524,7 +524,7 @@ export default function Home() {
         'evening snacks': require('../../../assets/images/categories/evening_snacks.jpg'),
         'hot beverages': require('../../../assets/images/categories/hot_beverages.jpg'),
         'lunch': require('../../../assets/images/categories/lunch.jpg'),
-        'noodles': { uri: 'https://images.unsplash.com/photo-1585032226651-759b368d7246?w=500&auto=format&fit=crop&q=80' },
+        'noodles': require('../../../assets/images/categories/evening_snacks.jpg'),
         'rice varieties': require('../../../assets/images/categories/rice_varieties.jpg'),
         'salad': require('../../../assets/images/categories/salad.jpg'),
         'soups': require('../../../assets/images/categories/soups.jpg'),
@@ -536,7 +536,7 @@ export default function Home() {
       const getCategoryImage = (name: string) => {
         // Remove things like (MGR Nagar) and standardize typos like 'varities'
         const normalized = name.toLowerCase().replace(/\s*\(.*?\)\s*/g, '').replace('varities', 'varieties').trim();
-        return categoryImageMap[normalized] || { uri: 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=500&auto=format&fit=crop&q=80' };
+        return categoryImageMap[normalized] || require('../../../assets/images/categories/rice_varieties.jpg');
       };
       const getCategoryDisplayName = (c: any) => {
         if (c.description === 'South Indian' || c.description === 'North Indian') {

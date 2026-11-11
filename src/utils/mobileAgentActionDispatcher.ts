@@ -25,11 +25,22 @@ import { SUPPORTED_ACTIONS, resolveRoute } from './agentRegistry';
 
 // ─── Active Router Reference ──────────────────────────────────────────────────
 let activeRouter: any = null;
+let currentPathname: string = '';
+let lastNavRoute = '';
+let lastNavTime = 0;
 
 export function setActiveRouter(r: any) {
   if (r) {
     activeRouter = r;
   }
+}
+
+export function setCurrentPathname(p: string) {
+  currentPathname = p || '';
+}
+
+export function getCurrentPathname(): string {
+  return currentPathname;
 }
 
 export function getActiveRouter() {
@@ -41,6 +52,17 @@ export function getActiveRouter() {
  * The voice call stays connected and active in the background.
  */
 export function navigateScreen(resolvedRoute: string, params?: Record<string, any>) {
+  const now = Date.now();
+  const paramsKey = params ? JSON.stringify(params) : '';
+  const routeKey = `${resolvedRoute}:${paramsKey}`;
+
+  if (routeKey === lastNavRoute && (now - lastNavTime) < 1500) {
+    console.log(`[Dispatcher] Debouncing redundant navigation to "${resolvedRoute}"`);
+    return;
+  }
+  lastNavRoute = routeKey;
+  lastNavTime = now;
+
   console.log(`[Dispatcher] navigateScreen triggered -> target: "${resolvedRoute}"`, params || '');
 
   // Dismiss modal overlay so the destination screen is visible to the user immediately
@@ -586,7 +608,23 @@ export async function executeSingleAction(act: UIAction): Promise<ActionResult> 
         } catch {}
 
         DeviceEventEmitter.emit('open_category', { categoryName: catName });
-        navigateScreen('/menu', { categoryName: catName, search: '' });
+
+        const curr = getCurrentPathname();
+        const isAlreadyOnMenu = curr.includes('/menu');
+
+        if (isAlreadyOnMenu) {
+          console.log(`[Dispatcher] Already on menu screen, switched category tab to: ${catName}`);
+          try {
+            const r = getActiveRouter();
+            if (r.setParams) {
+              r.setParams({ categoryName: catName, search: '' });
+            }
+          } catch (e) {
+            console.warn('[Dispatcher] setParams failed:', e);
+          }
+        } else {
+          navigateScreen('/menu', { categoryName: catName, search: '' });
+        }
 
         return {
           success: true,

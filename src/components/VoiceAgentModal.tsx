@@ -36,7 +36,7 @@ import { Ionicons, FontAwesome5 } from '@expo/vector-icons';
 import { useVoiceAgentStore } from '../store/useVoiceAgentStore';
 import { useCartStore } from '../store/useCartStore';
 import { useDineInSessionStore } from '../store/useDineInSessionStore';
-import { setActiveRouter } from '../utils/mobileAgentActionDispatcher';
+import { setActiveRouter, setCurrentPathname } from '../utils/mobileAgentActionDispatcher';
 
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 
@@ -245,8 +245,11 @@ export default function VoiceAgentModal() {
     }
   }, [isAgentSpeaking, pulseAnim]);
 
-  // Notify Vapi when route changes
+  // Notify Vapi when route changes and track current pathname in dispatcher
   useEffect(() => {
+    if (pathname) {
+      setCurrentPathname(pathname);
+    }
     if (isConnected && pathname) {
       const vapiStore = useVapiStore.getState();
       if (vapiStore.notifyRouteChanged) {

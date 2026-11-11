@@ -37,6 +37,7 @@ let lastExecutedActionTime = 0;
 let lastNotifiedRoute = '';
 let lastNotifiedRouteTime = 0;
 let lastSpeechIntentTime = 0;
+let lastCategoryActionTime = 0;
 
 function extractToolCalls(message: any): any[] {
   if (!message) return [];
@@ -677,7 +678,18 @@ async function handleVapiToolCall(tool: any): Promise<{ toolCallId: string; resu
       case 'view_cart':
       case 'get_cart':
       case 'cart_get': {
-        await executeSingleAction({ action: 'show_cart' });
+        const isReadOperation = fnName === 'get_cart' || fnName === 'cart_get';
+        const now = Date.now();
+        const recentlyOpenedCategory = (now - lastCategoryActionTime) < 8000;
+
+        // Only navigate to checkout/cart if this is explicitly a navigation action,
+        // and NOT immediately after the user navigated to a category
+        if (!isReadOperation && !recentlyOpenedCategory) {
+          await executeSingleAction({ action: 'show_cart' });
+        } else {
+          console.log(`[VapiStore] Suppressed cart screen navigation (isReadOperation=${isReadOperation}, recentlyOpenedCategory=${recentlyOpenedCategory})`);
+        }
+
         const cartState = useCartStore.getState();
         const rawItems = Object.values(cartState.items);
         const cartCount = cartState.getItemCount();
@@ -694,7 +706,9 @@ async function handleVapiToolCall(tool: any): Promise<{ toolCallId: string; resu
           speechSummary = 'Your cart is currently empty. You can ask me to add any dish to your cart!';
         } else {
           const itemNames = itemsList.map(i => `${i.quantity}x ${i.name}`).join(', ');
-          speechSummary = `You have ${cartCount} items in your cart: ${itemNames}, totaling ${subtotal} rupees. I have opened your cart on screen.`;
+          speechSummary = isReadOperation || recentlyOpenedCategory
+            ? `You have ${cartCount} items in your cart totaling ${subtotal} rupees: ${itemNames}.`
+            : `You have ${cartCount} items in your cart: ${itemNames}, totaling ${subtotal} rupees. I have opened your cart on screen.`;
         }
 
         return {
@@ -985,6 +999,7 @@ async function handleVapiToolCall(tool: any): Promise<{ toolCallId: string; resu
       case 'menu_filter_category':
       case 'filter_category': {
         const catName = fnArgs.category_name || fnArgs.category || fnArgs.name || fnArgs.query || '';
+        lastCategoryActionTime = Date.now();
         const result = await executeSingleAction({
           action: 'open_category',
           category_name: catName,
@@ -1454,7 +1469,35 @@ export const useVapiStore = create<VapiState>((set, get) => ({
           await Promise.all(
             pending.map(async (tool: any) => {
               try {
-                await handleVapiToolCall(tool);
+                const res = await handleVapiToolCall(tool);
+                if (res && res.toolCallId) {
+                  const vapi = getVapi();
+                  if (vapi && get().isConnected) {
+                    try {
+                      // 1. Send client message tool-calls-result to resolve Vapi server call
+                      (vapi as any).send({
+                        type: 'tool-calls-result',
+                        toolCallResult: {
+                          toolCallId: res.toolCallId,
+                          result: res.result,
+                        },
+                      });
+                    } catch (sendErr) {
+                      console.warn('[VapiStore] Failed to send tool-calls-result:', sendErr);
+                    }
+                    try {
+                      // 2. Also send tool message to add-message for OpenAI tool format compatibility
+                      (vapi as any).send({
+                        type: 'add-message',
+                        message: {
+                          role: 'tool',
+                          tool_call_id: res.toolCallId,
+                          content: res.result,
+                        },
+                      });
+                    } catch {}
+                  }
+                }
               } catch (e) {
                 console.error('[VapiStore] Tool execution failed:', e);
               }
@@ -1528,13 +1571,14 @@ export const useVapiStore = create<VapiState>((set, get) => ({
                 console.log('[VapiStore] Speech detected intent: dine in pay bill');
                 executeSingleAction({ action: 'dine_in_pay_bill' });
               }
-              // 1.7 Menu Categories ("go to rice varieties", "show dosa varieties", "starters", "breakfast", "show categories", etc.)
+              // 1.7 Menu Categories ("go to rice varieties", "show dosa varieties", "starters", "breakfast", "lunch", "show categories", etc.)
               else if (
-                /\b(rice varieties|rice varities|dosa varieties|dosa varities|hot beverages|evening snacks|breakfast & dinner|tandoori starters|tandoori breads|tandoori side dishes)\b/i.test(lower) ||
-                /\b(show|open|view|see|go to|take me to|display)\b.*\b(rice varieties|rice varities|rice|dosa varieties|dosa varities|dosa|beverages|coffee|tea|snacks|soups|starters|tandoori|noodles|salads|breakfast|lunch|dinner|categories|category)\b/i.test(lower) ||
+                /\b(rice varieties|rice varities|dosa varieties|dosa varities|hot beverages|evening snacks|breakfast & dinner|tandoori starters|tandoori breads|tandoori side dishes|lunch|breakfast|dinner|soups|noodles|salad)\b/i.test(lower) ||
+                /\b(show|open|view|see|go to|take me to|display|switch to)\b.*\b(rice varieties|rice varities|rice|dosa varieties|dosa varities|dosa|beverages|coffee|tea|snacks|soups|starters|tandoori|noodles|salads|breakfast|lunch|dinner|categories|category)\b/i.test(lower) ||
                 /\b(categories|category names|show categories|all categories)\b/i.test(lower)
               ) {
                 lastSpeechIntentTime = now;
+                lastCategoryActionTime = now;
                 let catName = 'Rice Varieties';
                 if (/snack/i.test(lower)) catName = 'Evening Snacks';
                 else if (/rice/i.test(lower)) catName = 'Rice Varieties';
@@ -1552,7 +1596,7 @@ export const useVapiStore = create<VapiState>((set, get) => ({
                 if (catName) {
                   executeSingleAction({ action: 'open_category', category_name: catName });
                 } else {
-                  navigateScreen('/menu');
+                  executeSingleAction({ action: 'open_menu' });
                 }
               }
               // 1.8 Catering Packages ("catering packages", "choose catering package", "order catering package")
@@ -1663,6 +1707,20 @@ export const useVapiStore = create<VapiState>((set, get) => ({
     });
 
     vapi.on('error', (e: any) => {
+      const errStr = typeof e === 'string' ? e : JSON.stringify(e || {});
+      const isCleanMeetingEnd =
+        e?.errorMsg === 'Meeting has ended' ||
+        e?.error?.msg === 'Meeting has ended' ||
+        e?.error?.type === 'ejected' ||
+        errStr.includes('Meeting has ended') ||
+        errStr.includes('"type":"ejected"');
+
+      if (isCleanMeetingEnd) {
+        console.log('[VapiStore] Vapi call session closed cleanly:', e?.errorMsg || e?.error?.msg || 'Meeting has ended');
+        set({ isConnected: false, isConnecting: false });
+        return;
+      }
+
       console.error('[VapiStore] Vapi error:', e);
       set({ isConnected: false, isConnecting: false });
     });
