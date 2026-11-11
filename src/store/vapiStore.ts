@@ -93,7 +93,7 @@ function extractToolCalls(message: any): any[] {
 let VapiClass: any = null;
 let vapiInstance: any = null;
 let listenersSetup = false;
-let connectionWatchdog: NodeJS.Timeout | null = null;
+let connectionWatchdog: ReturnType<typeof setTimeout> | null = null;
 
 function clearConnectionWatchdog() {
   if (connectionWatchdog) {
@@ -313,7 +313,7 @@ export function syncCartContextWithVapi() {
     let content = '';
     if (count > 0) {
       const summary = rawItems.map(i => `${i.quantity}x ${i.name} (₹${i.price})`).join(', ');
-      content = `[Live Cart Updated] Cart currently has ${count} item(s): ${summary}. Subtotal: ₹${subtotal}. The cart is NOT empty! When the user asks to see or view their cart or checkout, confirm these items and call "open_cart".`;
+      content = `[Live Cart Updated] Cart currently has ${count} item(s): ${summary}. Subtotal: ₹${subtotal}. The cart is NOT empty! When the customer asks to see or view their cart or checkout, confirm these items and call "open_cart".`;
     } else {
       content = `[Live Cart Updated] Cart is currently empty (0 items).`;
     }
@@ -356,7 +356,7 @@ async function resolveAndAddToCart(fnArgs: any): Promise<{ success: boolean; cod
   }
 
   const qty = Math.max(1, Number(fnArgs.quantity || fnArgs.qty || fnArgs.count || 1));
-  const rawName = String(
+  const rawInput = String(
     fnArgs.item_name ||
     fnArgs.name ||
     fnArgs.dish ||
@@ -365,9 +365,15 @@ async function resolveAndAddToCart(fnArgs: any): Promise<{ success: boolean; cod
     fnArgs.query ||
     ''
   ).trim();
-  const rawId = fnArgs.item_id || fnArgs.id || (fnArgs.item && typeof fnArgs.item === 'object' ? fnArgs.item.id : null);
+  const rawId = fnArgs.menu_item_id || fnArgs.item_id || fnArgs.id || (fnArgs.item && typeof fnArgs.item === 'object' ? fnArgs.item.id : null);
 
-  console.log(`[VapiStore] resolveAndAddToCart: rawName="${rawName}", rawId="${rawId}", qty=${qty}`);
+  // Clean conversational fluff (e.g. "to my car", "to my card", "to my cart", "please add on", "can you please add")
+  const strippedFluff = rawInput
+    .replace(/\b(to my car|to my card|to my cart|in my cart|to the car|to the card|to the cart|to cart|in cart|please add on|can you please add|please add|add on|can you add|add|order|want|give me|give|put|take)\b/gi, '')
+    .trim();
+  const rawName = strippedFluff || rawInput;
+
+  console.log(`[VapiStore] resolveAndAddToCart: rawInput="${rawInput}" -> cleanName="${rawName}", rawId="${rawId}", qty=${qty}`);
 
   // If item object was directly passed with price and id
   if (fnArgs.item && typeof fnArgs.item === 'object' && fnArgs.item.id && fnArgs.item.price != null) {
@@ -392,12 +398,43 @@ async function resolveAndAddToCart(fnArgs: any): Promise<{ success: boolean; cod
     };
   }
 
+  // 1. Try local menu match if menuItems are preloaded
+  const localMenuItems = restaurantState.menuItems || [];
+  if (localMenuItems.length > 0 && rawName) {
+    const localMatch = matchMenuItem(rawName, localMenuItems);
+    if (localMatch.item) {
+      const best = localMatch.item;
+      useCartStore.getState().addItem({
+        id: Number(best.id),
+        name: String(best.name),
+        price: Number(best.price),
+        image: getFullImageUrl(best.image || best.image_url, best.name),
+        quantity: qty,
+        category: String(best.category || best.category_id || 'General'),
+        desc: best.desc || best.description || '',
+      });
+      syncCartContextWithVapi();
+      const cartCount = useCartStore.getState().getItemCount();
+      const subtotal = useCartStore.getState().getSubtotal();
+      return {
+        success: true,
+        code: 'ITEM_ADDED',
+        item_id: best.id,
+        item_name: best.name,
+        quantity: qty,
+        price: best.price,
+        message: `Added ${qty}x ${best.name} to your cart. Cart total is ${subtotal} rupees.`,
+        data: { item_id: best.id, name: best.name, quantity: qty, price: best.price, cartCount, subtotal }
+      };
+    }
+  }
+
   // Look for candidates from menu_search
   let candidates: any[] = [];
 
   // If rawId provided, check local store menuItems first
   if (rawId) {
-    const localMatch = restaurantState.menuItems?.find((i: any) => String(i.id) === String(rawId));
+    const localMatch = localMenuItems.find((i: any) => String(i.id) === String(rawId));
     if (localMatch) {
       candidates = [localMatch];
     }
@@ -405,7 +442,7 @@ async function resolveAndAddToCart(fnArgs: any): Promise<{ success: boolean; cod
 
   // If no candidate yet, search backend
   if (candidates.length === 0) {
-    const searchParam = rawName || (rawId ? String(rawId) : '');
+    const searchParam = normalizeName(rawName) || rawName || (rawId ? String(rawId) : '');
     if (!searchParam) {
       return { success: false, code: 'MISSING_ITEM', message: 'Please tell me which item you would like to add to your cart.' };
     }
@@ -414,14 +451,13 @@ async function resolveAndAddToCart(fnArgs: any): Promise<{ success: boolean; cod
     if (data.menu_items && Array.isArray(data.menu_items) && data.menu_items.length > 0) {
       candidates = data.menu_items;
     } else {
-      // Clean fluff words like "masala dosa please" or "two idlis to cart"
-      const cleanWord = searchParam
-        .replace(/\b(to cart|in cart|please|want|order|add|give|two|one|three|\d+)\b/gi, '')
-        .trim();
-      if (cleanWord && cleanWord !== searchParam) {
-        const retryData = await fetchAgentData('menu_search', { query: cleanWord });
+      // Try searching by base food noun (e.g. "biryani", "dosa", "idli", "naan", "coffee")
+      const words = searchParam.split(' ').filter(w => w.length > 2);
+      for (const w of words) {
+        const retryData = await fetchAgentData('menu_search', { query: w });
         if (retryData.menu_items && Array.isArray(retryData.menu_items) && retryData.menu_items.length > 0) {
           candidates = retryData.menu_items;
+          break;
         }
       }
     }
@@ -434,7 +470,7 @@ async function resolveAndAddToCart(fnArgs: any): Promise<{ success: boolean; cod
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             tool_name: 'menu_search',
-            arguments: { query: rawName },
+            arguments: { query: searchParam },
             restaurant_id: null,
           }),
         });
@@ -455,11 +491,14 @@ async function resolveAndAddToCart(fnArgs: any): Promise<{ success: boolean; cod
   }
 
   // Best candidate selection
-  const normTarget = rawName.toLowerCase().replace(/[^a-z0-9]/g, ' ').trim();
-  let bestMatch = candidates.find((c: any) => c.name.toLowerCase().replace(/[^a-z0-9]/g, ' ').trim() === normTarget);
+  const normTarget = normalizeName(rawName).toLowerCase().replace(/[^a-z0-9]/g, ' ').trim();
+  let bestMatch = candidates.find((c: any) => normalizeName(c.name).toLowerCase().replace(/[^a-z0-9]/g, ' ').trim() === normTarget);
 
   if (!bestMatch && normTarget) {
-    bestMatch = candidates.find((c: any) => c.name.toLowerCase().includes(normTarget) || normTarget.includes(c.name.toLowerCase()));
+    bestMatch = candidates.find((c: any) => {
+      const cNorm = normalizeName(c.name).toLowerCase();
+      return cNorm.includes(normTarget) || normTarget.includes(cNorm);
+    });
   }
 
   if (!bestMatch) {
@@ -574,50 +613,25 @@ async function handleVapiToolCall(tool: any): Promise<{ toolCallId: string; resu
 
         console.log(`[VapiStore] Resolved route: "${resolved}", executing navigation...`);
 
-        // Guard against rogue navigation to checkout screen when cart is actually empty
-        if (resolved === '/(checkout)/checkout' || resolved === '/checkout') {
+        // Guard against rogue navigation to checkout screen when user is talking about food / menu
+        if (resolved === '/(checkout)/checkout') {
+          const recentUserText = useVapiStore.getState().messages
+            .filter((m: any) => m.role === 'user')
+            .slice(-3)
+            .map((m: any) => m.text.toLowerCase())
+            .join(' ');
+          const explicitCartRequest = /\b(open cart|show cart|view cart|go to cart|my cart|checkout|basket)\b/i.test(recentUserText);
           const cartCount = useCartStore.getState().getItemCount();
-          if (cartCount === 0) {
-            console.log(`[VapiStore] Suppressed navigation to checkout screen: cart is empty (cartCount=0)`);
+          if (!explicitCartRequest || cartCount === 0) {
+            console.log(`[VapiStore] Suppressed navigation to checkout screen (explicit=${explicitCartRequest}, cartCount=${cartCount})`);
             return {
               toolCallId,
               result: JSON.stringify({
                 success: true,
-                message: 'Your cart is currently empty. Feel free to explore our menu categories or ask me to add any dish!',
+                message: 'Your cart is currently empty. Feel free to explore our menu categories!',
               })
             };
           }
-
-          // Cart has items! Open cart screen and return rich items summary
-          const cartState = useCartStore.getState();
-          const rawItems = Object.values(cartState.items);
-          const subtotal = cartState.getSubtotal();
-          const itemsList = rawItems.map(i => ({
-            id: i.id,
-            name: i.name,
-            quantity: i.quantity,
-            price: i.price,
-          }));
-          const itemNames = itemsList.map(i => `${i.quantity}x ${i.name}`).join(', ');
-          const speechSummary = `You have ${cartCount} item(s) in your cart: ${itemNames}, totaling ${subtotal} rupees. I have opened your cart on screen.`;
-
-          await executeSingleAction({
-            action: 'navigate',
-            route: resolved,
-            payload: { params: fnArgs.params || {} },
-          });
-
-          return {
-            toolCallId,
-            result: JSON.stringify({
-              success: true,
-              itemCount: cartCount,
-              subtotal,
-              items: itemsList,
-              message: speechSummary,
-              summary: speechSummary,
-            })
-          };
         }
 
         const navParams: Record<string, any> = { ...(fnArgs.params || {}) };
@@ -797,12 +811,7 @@ async function handleVapiToolCall(tool: any): Promise<{ toolCallId: string; resu
       case 'show_cart':
       case 'view_cart':
       case 'get_cart':
-      case 'cart_get':
-      case 'cart_read':
-      case 'check_cart':
-      case 'cart_summary':
-      case 'my_cart':
-      case 'cart': {
+      case 'cart_get': {
         const cartState = useCartStore.getState();
         const rawItems = Object.values(cartState.items);
         const cartCount = cartState.getItemCount();
@@ -814,20 +823,34 @@ async function handleVapiToolCall(tool: any): Promise<{ toolCallId: string; resu
           price: i.price,
         }));
 
-        const isReadOperation = fnName === 'get_cart' || fnName === 'cart_get' || fnName === 'cart_read';
+        const isReadOperation = fnName === 'get_cart' || fnName === 'cart_get';
+        const now = Date.now();
+        const recentlyOpenedCategory = (now - lastCategoryActionTime) < 15000;
 
-        // When user wants to see the cart and has items, open the cart screen
-        if (!isReadOperation && cartCount > 0) {
-          console.log('[VapiStore] Opening cart screen with items:', cartCount);
+        // Check if the user explicitly commanded to VIEW the cart
+        const recentUserText = useVapiStore.getState().messages
+          .filter((m: any) => m.role === 'user')
+          .slice(-3)
+          .map((m: any) => m.text.toLowerCase())
+          .join(' ');
+        const explicitCartRequest = /\b(open cart|show cart|view cart|go to cart|my cart|the cart|checkout|open basket|view basket|view my card|open card|show card|my card|check cart|cart)\b/i.test(recentUserText);
+
+        // ONLY navigate if user explicitly commanded cart, it's not a read operation, not right after category, and cart has items
+        if (explicitCartRequest && !isReadOperation && !recentlyOpenedCategory && cartCount > 0) {
+          console.log('[VapiStore] Explicit cart navigation confirmed.');
           await executeSingleAction({ action: 'show_cart', payload: { force: true } });
+        } else {
+          console.log(`[VapiStore] Suppressed cart screen navigation (explicit=${explicitCartRequest}, isRead=${isReadOperation}, recentCat=${recentlyOpenedCategory}, count=${cartCount})`);
         }
 
         let speechSummary = '';
         if (cartCount === 0) {
-          speechSummary = 'Your cart is currently empty. You can ask me to add any dish to your cart!';
+          speechSummary = 'Your cart is currently empty. Would you like to add some delicious dishes from our menu?';
         } else {
           const itemNames = itemsList.map(i => `${i.quantity}x ${i.name}`).join(', ');
-          speechSummary = `You have ${cartCount} items in your cart totaling ${subtotal} rupees: ${itemNames}.`;
+          speechSummary = explicitCartRequest && cartCount > 0 && !recentlyOpenedCategory
+            ? `You have ${cartCount} items in your cart: ${itemNames}, totaling ${subtotal} rupees. I have opened your cart on screen.`
+            : `You have ${cartCount} items in your cart totaling ${subtotal} rupees: ${itemNames}.`;
         }
 
         return {
@@ -856,13 +879,11 @@ async function handleVapiToolCall(tool: any): Promise<{ toolCallId: string; resu
           menu_item_id: fnArgs.item_id,
           payload: fnArgs.item_name ? { item_name: fnArgs.item_name } : undefined,
         } as any);
-        syncCartContextWithVapi();
         return { toolCallId, result: JSON.stringify(result) };
       }
 
       case 'clear_cart': {
         const result = await executeSingleAction({ action: 'clear_cart' });
-        syncCartContextWithVapi();
         return { toolCallId, result: JSON.stringify(result) };
       }
 
@@ -873,7 +894,6 @@ async function handleVapiToolCall(tool: any): Promise<{ toolCallId: string; resu
           quantity: fnArgs.quantity,
         };
         const result = await executeSingleAction(uiAction);
-        syncCartContextWithVapi();
         return { toolCallId, result: JSON.stringify(result) };
       }
 
@@ -1448,32 +1468,43 @@ export const useVapiStore = create<VapiState>((set, get) => ({
 
     const overrides = { 
       firstMessage: dynamicFirstMessage, 
-      maxDurationSeconds: 3600, // 1 hour max duration so it doesn't time out easily
+      maxDurationSeconds: 3600, // 1 hour max duration
       transcriber: {
         provider: 'deepgram',
         model: 'nova-2',
         language: 'en',
         smartFormat: true,
-        endpointing: 500, // 500ms pause tolerance so natural speaking pauses don't cut the user off
+        endpointing: 500, // Maximum allowed by Vapi schema (500ms pause tolerance)
         keywords: [
-          'cart:4',
-          'biryani:3',
-          'dosa:3',
-          'dosai:3',
-          'idly:3',
-          'vadai:3',
-          'vada:3',
-          'naan:3',
-          'paneer:3',
-          'roti:3',
-          'dine in:3',
-          'takeaway:3',
-          'data udipi:3',
-          'mgr:3',
-          'mugalivakkam:3',
-          'kesari:3',
-          'rava:3',
-          'ragi:2',
+          'cart:5',
+          'dosa:4',
+          'dosai:4',
+          'biryani:4',
+          'biriyani:4',
+          'idly:4',
+          'idli:4',
+          'vadai:4',
+          'vada:4',
+          'naan:4',
+          'paneer:4',
+          'roti:4',
+          'coffee:4',
+          'tea:4',
+          'poori:4',
+          'puri:4',
+          'kesari:4',
+          'rava:4',
+          'ragi:4',
+          'sambar:4',
+          'rasam:4',
+          'dinein:4',
+          'dine:3',
+          'takeaway:4',
+          'delivery:4',
+          'udipi:4',
+          'mgr:4',
+          'mugalivakkam:4',
+          'checkout:4',
         ],
       },
     };
@@ -1627,8 +1658,8 @@ export const useVapiStore = create<VapiState>((set, get) => ({
 
     vapi.on('call-start', () => {
       clearConnectionWatchdog();
-      set({ isConnected: true, isConnecting: false });
       lastSyncContent = '';
+      set({ isConnected: true, isConnecting: false });
 
       // Warm the menu cache in the background so the first food request does
       // not stall on a cold network fetch.
@@ -1672,23 +1703,29 @@ export const useVapiStore = create<VapiState>((set, get) => ({
             content: `[Current App Context] Order Type: ${initialContext.cart.orderType}. Outlet: ${initialContext.restaurant.selectedOutletName || 'None'}. Cart Items: ${initialContext.cart.itemCount}.${auth.isAuthenticated ? ` Customer ID: ${auth.customerId}, Name: ${auth.customerName || 'Customer'}.` : ''}
 CRITICAL BEHAVIOR & KNOWLEDGE GUIDELINES:
 1. Spoken Announcements: ALWAYS verbally announce what you are opening, switching, or adding. Never navigate or execute silently!
-2. When user asks about food categories, regional cuisines, or dishes:
-   - Call "open_category" (category_name) or "switch_region" ("North Indian" or "South Indian").
-   - NEVER call "open_cart" or "show_cart" when user mentions a category or dish.
-3. Cart Rules:
-   - When user asks to view or see their cart, basket, card, or checkout (e.g. "view my cart", "cart", "show cart", "view my card", "checkout"), ALWAYS call tool "open_cart" or "show_cart". NEVER assume the cart is empty from memory—always invoke "open_cart" to verify live items and open the cart screen!
-   - When "add_to_cart" succeeds, ALWAYS confirm to the user that the item was successfully added with price and quantity. NEVER claim an item is unavailable or out of stock if add_to_cart succeeded!
-4. Supported North Indian Categories (Real Data Udipi Menu):
+2. FOOD ORDERING & ADD TO CART (TOP PRIORITY):
+   - Whenever the customer wants to add, order, get, buy, or put any dish or drink into their cart (e.g. "add one ragi dosa", "add paneer biryani to cart", "give me 2 idlis", "order coffee", "add veg fried rice"):
+     • ALWAYS call tool "add_to_cart" with { item_name: "<dish_name>", quantity: <number> } immediately!
+     • NEVER call "open_category" or "open_menu" when the customer is ordering or adding an item!
+     • When "add_to_cart" succeeds, enthusiastically confirm: "Added [quantity] [item_name] to your cart."
+3. VIEWING CART & CHECKOUT:
+   - When the customer asks to see, view, open, check, or go to their cart, basket, or checkout (e.g. "view my cart", "cart", "show cart", "view my card", "checkout"):
+     • ALWAYS call tool "open_cart"!
+     • DO NOT assume the cart is empty from your initial prompt. The "open_cart" tool checks the live items and subtotal.
+4. BROWSING CATEGORIES & CUISINES:
+   - ONLY call "open_category" (category_name) or "switch_region" ("North Indian" or "South Indian") when the customer explicitly asks to BROWSE, VIEW, SHOW, or EXPLORE categories or cuisines without ordering (e.g. "show dosa varieties", "what rice dishes do you have", "show tandoori starters", "switch to North Indian").
+   - NEVER call "open_category" if the customer says "add", "order", "get", "cart", or names a specific dish to add.
+5. Supported North Indian Categories (Real Data Udipi Menu):
    - "Tandoori Breads" (Butter Naan, Garlic Naan, Naan, Pulkha with Paneer Butter Masala, Roti)
    - "Tandoori Side Dishes" (Paneer 65, Aloo Paneer Mini, Gobi Masala Mini, Mushroom 65 Mini)
    - "Tandoori Starters" (Dhal Palak, Gobi Mushroom Fry Mini)
    - "Rice Varieties" (Veg. Biryani / Onion Raitha, Paneer Biriyani, Veg Fried Rice Mini, Gobi Fried Rice Mini)
-5. Supported South Indian Categories (Real Data Udipi Menu):
+6. Supported South Indian Categories (Real Data Udipi Menu):
    - "Dosa Varieties" (Rava Masala Dosai, Veg. Dosai)
    - "Breakfast & Dinner" (Mini Idly(14), Spl Vadai, Poori Masala)
    - "Hot Beverages" (Mini Coffee, Mini Tea, Fresh Lemon Juice, Rose Milk)
    - "Lunch & Sweets" (Kesari, Sambar Rice, Meals, Brinji Kuruma)
-6. Catering Knowledge & Event Booking:
+7. Catering Knowledge & Event Booking:
    - Minimum order quantity for bulk catering is 50 guests.
    - Available Catering Packages:
      • Regular Breakfast (Code: MENU 1) - ₹160/plate
@@ -1708,18 +1745,18 @@ CRITICAL BEHAVIOR & KNOWLEDGE GUIDELINES:
      • Seemantham (Code: S-MENU 1) - ₹210/plate
    - When user provides event details (e.g. guest count, date, time, occasion, address), call tool "catering_set_event_details" with { guest_count, event_name, occasion, date, time, address } and confirm verbally.
    - When user asks to see or choose catering packages, call "catering_choose_package" with { package_code }.
-7. Dine-In Workflow:
+8. Dine-In Workflow:
    - When user starts, always offer or confirm order type: Dine-In, Takeaway, or Delivery.
    - For Dine-In: ask for their table number and call "set_table_number" with { table_number: "T-04" }.
    - Placing Dine-In Orders: In Dine-In, users order with Pay Later so food is sent directly to the kitchen. Call tool "dine_in_pay_later" when user says "place order", "send to kitchen", "confirm order", or "pay later".
    - Multiple Rounds: Users seated at their table can order more items at any time. When more items are ordered, they automatically append as Round 2, Round 3, etc. to the same table.
    - Order Status: When user asks "where is my food?", "order status", or "track order", call tool "open_tracking" to show live status.
    - Bill Settlement: When user is done eating and says "pay bill", "settle bill", or "complete meal", call tool "dine_in_pay_bill" to open the table settlement payment screen with the total across all rounds.
-8. Rewards & Loyalty Points:
+9. Rewards & Loyalty Points:
    - When user asks "how many reward points do I have?", "what is my loyalty balance?", "my points balance", or "check rewards":
      • Announce their exact points balance and worth (10 points = ₹1 discount).
      • Call tool "customer_get_rewards" or "open_rewards" to navigate to the Rewards screen.
-9. Favourite Orders & Recommendations:
+10. Favourite Orders & Recommendations:
    - When user asks for "favourite order", "favourite orders", "my favorites", "open favourites", or "recommendations":
      • Call tool "open_favourites".
      • Verbally confirm: "Opening your favourite orders and recommendations."`
@@ -2168,7 +2205,7 @@ CRITICAL BEHAVIOR & KNOWLEDGE GUIDELINES:
               // 7. Cart / Checkout ("show cart", "view cart", "open cart", "checkout", "view my card")
               else if (
                 /\b(show|open|view|go to|take me to)\b.*\b(cart|basket|checkout|card|car)\b/i.test(lower) ||
-                /^(cart|view cart|open cart|checkout|view my cart|view my card|my cart|my card|card|view card|show card|open card)$/i.test(lower)
+                /^(cart|view cart|open cart|checkout|view my cart|view my card|my cart|my card|card)$/i.test(lower)
               ) {
                 const cartCount = useCartStore.getState().getItemCount();
                 if (cartCount > 0) {

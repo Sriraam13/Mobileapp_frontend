@@ -128,11 +128,21 @@ export function normalizeName(value: unknown): string {
 
   // Colloquial spoken food synonyms mapped to real Data Udipi menu item names
   s = s
-    .replace(/\bfilter coffee\b/g, 'mini coffee')
-    .replace(/\bfilter tea\b/g, 'mini tea')
+    .replace(/\b(filter coffee|degree coffee|kumbakonam degree coffee|hot coffee|coffee)\b/g, 'mini coffee')
+    .replace(/\b(filter tea|hot tea|tea|chai)\b/g, 'mini tea')
     .replace(/\brava kesari\b/g, 'kesari')
-    .replace(/\bplain dosa\b/g, 'veg dosai')
-    .replace(/\bmasala dosa\b/g, 'rava masala dosai');
+    .replace(/\b(ragi dosa|ragi dosai|onion dosa|onion dosai|ghee roast|ghee dosa|kal dosa|podi dosa|podie dosa|plain dosa|dosa|dosai)\b/g, 'veg dosai')
+    .replace(/\b(masala dosa|masala dosai|rava dosa|rava dosai)\b/g, 'rava masala dosai')
+    .replace(/\b(paneer biryani|paneer briyani)\b/g, 'paneer biriyani')
+    .replace(/\b(veg biryani|vegetable biryani|biryani)\b/g, 'veg. biryani / onion raitha')
+    .replace(/\b(mini idli|mini idly|idlis|idly|idli|steamed idli)\b/g, 'mini idly(14)')
+    .replace(/\b(spl vadai|special vadai|vadais|medu vada|sambar vada|vadai|vada)\b/g, 'spl vadai')
+    .replace(/\b(poori masala|poori bhaji|poori|puri)\b/g, 'poori masala')
+    .replace(/\b(veg fried rice|fried rice)\b/g, 'veg fried rice mini')
+    .replace(/\b(gobi fried rice)\b/g, 'gobi fried rice mini')
+    .replace(/\b(aloo paneer)\b/g, 'aloo paneer mini')
+    .replace(/\b(gobi masala)\b/g, 'gobi masala mini')
+    .replace(/\b(mushroom 65)\b/g, 'mushroom 65 mini');
 
   return s;
 }
