@@ -29,6 +29,8 @@ import { useRestaurantStore } from '../store/useRestaurantStore';
 import { useLiveOrderStore } from '../store/useLiveOrderStore';
 import { useAddressStore } from '../store/useAddressStore';
 import { useCartStore } from './useCartStore';
+import { useFavoritesStore } from './useFavoritesStore';
+import { customerApi } from '../services/apiService';
 
 // Cache executed toolCallIds and debounce actions to avoid duplicate execution
 const executedToolCallIds = new Set<string>();
@@ -907,13 +909,65 @@ async function handleVapiToolCall(tool: any): Promise<{ toolCallId: string; resu
       case 'rewards':
       case 'loyalty_points':
       case 'my_rewards': {
-        executeSingleAction({ action: 'navigate', route: '/rewards' }).catch(() => {});
+        executeSingleAction({ action: 'open_rewards' }).catch(() => {});
         const auth = useAuthStore.getState();
         if (!auth.isAuthenticated || !auth.customerId) {
-          return { toolCallId, result: JSON.stringify({ success: true, message: 'Opened loyalty points and rewards screen.' }) };
+          speakAgentFeedback('Please sign in to view your loyalty points balance. Opening rewards screen.');
+          return { toolCallId, result: JSON.stringify({ success: true, message: 'Please sign in to view your loyalty points balance. Opened rewards screen.' }) };
         }
-        const data = await fetchAgentData('customer_get_rewards', { customer_id: auth.customerId });
-        return { toolCallId, result: JSON.stringify({ success: !data.error, ...data }) };
+        try {
+          const res = await customerApi.getLoyalty(auth.customerId);
+          const points = res?.balance ?? 0;
+          const worth = (points * 0.1).toFixed(2);
+          speakAgentFeedback(`You currently have ${points} loyalty points, worth ₹${worth}.`);
+          return {
+            toolCallId,
+            result: JSON.stringify({
+              success: true,
+              loyalty_points: points,
+              balance: points,
+              worth_in_rupees: worth,
+              transactions: res?.transactions || [],
+              message: `You currently have ${points} loyalty points, worth ₹${worth}. Opened your rewards screen.`
+            })
+          };
+        } catch (err: any) {
+          const data = await fetchAgentData('customer_get_rewards', { customer_id: auth.customerId });
+          return { toolCallId, result: JSON.stringify({ success: !data.error, ...data }) };
+        }
+      }
+
+      // ── Favourites & For You ──────────────────────────────────────────────────
+
+      case 'open_favourites':
+      case 'open_favorites':
+      case 'favourites':
+      case 'favorites':
+      case 'customer_get_favorites':
+      case 'my_favourites':
+      case 'my_favorites':
+      case 'get_favorites': {
+        executeSingleAction({ action: 'open_favourites' }).catch(() => {});
+        const auth = useAuthStore.getState();
+        const favStore = useFavoritesStore.getState();
+        let favCount = (favStore.favorites || []).length;
+        if (auth.isAuthenticated && auth.customerId) {
+          try {
+            const res = await customerApi.getFavorites(auth.customerId);
+            if (Array.isArray(res)) {
+              favCount = res.length;
+            }
+          } catch {}
+        }
+        speakAgentFeedback('Opening your favourite orders and recommendations.');
+        return {
+          toolCallId,
+          result: JSON.stringify({
+            success: true,
+            favorites_count: favCount,
+            message: `Opened your Favourite Orders and recommendations screen. You have ${favCount} saved favourite items.`
+          })
+        };
       }
 
       // ── Addresses ─────────────────────────────────────────────────────────────
@@ -1472,11 +1526,35 @@ export const useVapiStore = create<VapiState>((set, get) => ({
       // Inject current app context on call start
       try {
         const initialContext = getMobileAgentContext();
+        const auth = useAuthStore.getState();
+
+        // Asynchronously prefetch loyalty points so Vapi has the latest exact balance
+        if (auth.isAuthenticated && auth.customerId) {
+          customerApi.getLoyalty(auth.customerId).then((res: any) => {
+            if (res && res.balance !== undefined) {
+              const pts = res.balance || 0;
+              const worth = (pts * 0.1).toFixed(2);
+              const v = getVapi();
+              if (v && get().isConnected) {
+                try {
+                  (v as any).send({
+                    type: 'add-message',
+                    message: {
+                      role: 'system',
+                      content: `[Customer Loyalty Status] Points Balance: ${pts} loyalty points (worth ₹${worth}). 10 points = ₹1. When the customer asks about their points or rewards, announce their exact balance and rupee value!`
+                    }
+                  });
+                } catch {}
+              }
+            }
+          }).catch(() => {});
+        }
+
         (vapi as any).send({
           type: 'add-message',
           message: {
             role: 'system',
-            content: `[Current App Context] Order Type: ${initialContext.cart.orderType}. Outlet: ${initialContext.restaurant.selectedOutletName || 'None'}. Cart Items: ${initialContext.cart.itemCount}.
+            content: `[Current App Context] Order Type: ${initialContext.cart.orderType}. Outlet: ${initialContext.restaurant.selectedOutletName || 'None'}. Cart Items: ${initialContext.cart.itemCount}.${auth.isAuthenticated ? ` Customer ID: ${auth.customerId}, Name: ${auth.customerName || 'Customer'}.` : ''}
 CRITICAL BEHAVIOR & KNOWLEDGE GUIDELINES:
 1. Spoken Announcements: ALWAYS verbally announce what you are opening, switching, or adding. Never navigate or execute silently!
 2. When user asks about food categories, regional cuisines, or dishes:
@@ -1527,7 +1605,15 @@ CRITICAL BEHAVIOR & KNOWLEDGE GUIDELINES:
    - Placing Dine-In Orders: In Dine-In, users order with Pay Later so food is sent directly to the kitchen. Call tool "dine_in_pay_later" when user says "place order", "send to kitchen", "confirm order", or "pay later".
    - Multiple Rounds: Users seated at their table can order more items at any time. When more items are ordered, they automatically append as Round 2, Round 3, etc. to the same table.
    - Order Status: When user asks "where is my food?", "order status", or "track order", call tool "open_tracking" to show live status.
-   - Bill Settlement: When user is done eating and says "pay bill", "settle bill", or "complete meal", call tool "dine_in_pay_bill" to open the table settlement payment screen with the total across all rounds.`
+   - Bill Settlement: When user is done eating and says "pay bill", "settle bill", or "complete meal", call tool "dine_in_pay_bill" to open the table settlement payment screen with the total across all rounds.
+8. Rewards & Loyalty Points:
+   - When user asks "how many reward points do I have?", "what is my loyalty balance?", "my points balance", or "check rewards":
+     • Announce their exact points balance and worth (10 points = ₹1 discount).
+     • Call tool "customer_get_rewards" or "open_rewards" to navigate to the Rewards screen.
+9. Favourite Orders & Recommendations:
+   - When user asks for "favourite order", "favourite orders", "my favorites", "open favourites", or "recommendations":
+     • Call tool "open_favourites".
+     • Verbally confirm: "Opening your favourite orders and recommendations."`
           }
         });
       } catch (e) {
@@ -1906,15 +1992,36 @@ CRITICAL BEHAVIOR & KNOWLEDGE GUIDELINES:
                 navigateScreen('/profile');
                 speakAgentFeedback('Opening your profile.');
               }
-              // 4. Rewards / Loyalty Points ("loyalty points", "rewards", "my points")
+              // 4. Rewards / Loyalty Points ("loyalty points", "rewards", "my points", "how many points")
               else if (
-                /\b(reward|rewards|loyalty|loyalty point|loyalty points|my points|points balance)\b/i.test(lower) ||
+                /\b(reward|rewards|loyalty|loyalty point|loyalty points|my points|points balance|how many points)\b/i.test(lower) ||
                 /^(rewards|loyalty points)$/i.test(lower)
               ) {
                 lastSpeechIntentTime = now;
                 console.log('[VapiStore] Speech detected intent: open rewards');
                 navigateScreen('/rewards');
-                speakAgentFeedback('Opening your rewards.');
+                const auth = useAuthStore.getState();
+                if (auth.isAuthenticated && auth.customerId) {
+                  customerApi.getLoyalty(auth.customerId).then((res: any) => {
+                    const pts = res?.balance ?? 0;
+                    const worth = (pts * 0.1).toFixed(2);
+                    speakAgentFeedback(`You have ${pts} loyalty points, worth ₹${worth}. Opening your rewards.`);
+                  }).catch(() => {
+                    speakAgentFeedback('Opening your rewards and loyalty points.');
+                  });
+                } else {
+                  speakAgentFeedback('Opening your rewards.');
+                }
+              }
+              // 4.5 Favourite Orders / Recommendations ("favourite order", "favourite orders", "favorite order", "my favorites")
+              else if (
+                /\b(favourite order|favourite orders|favorite order|favorite orders|favourite|favourites|favorite|favorites|for you|frequently ordered|recommended items|recommendations)\b/i.test(lower) ||
+                /^(favourites|favorites|favourite order|favorite order)$/i.test(lower)
+              ) {
+                lastSpeechIntentTime = now;
+                console.log('[VapiStore] Speech detected intent: open favourites');
+                navigateScreen('/favourites');
+                speakAgentFeedback('Opening your favourite orders and recommendations.');
               }
               // 5. Addresses ("show addresses", "my address", "select address")
               else if (

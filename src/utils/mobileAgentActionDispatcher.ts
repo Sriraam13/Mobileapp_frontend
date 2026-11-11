@@ -627,6 +627,12 @@ export async function executeSingleAction(act: UIAction): Promise<ActionResult> 
         return { success: true, action, message: 'Opened Rewards & Loyalty Points.' };
       }
 
+      case 'open_favourites':
+      case 'open_favorites': {
+        navigateScreen('/favourites');
+        return { success: true, action, message: 'Opened Favourite Orders & Recommendations.' };
+      }
+
       case 'open_orders': {
         navigateScreen('/(order)/orders');
         return { success: true, action, message: 'Opened Orders.' };
