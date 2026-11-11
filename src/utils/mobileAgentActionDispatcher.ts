@@ -76,6 +76,71 @@ export function navigateScreen(resolvedRoute: string, params?: Record<string, an
   }, 50);
 }
 
+// ─── Catering Format Helpers ──────────────────────────────────────────────────
+
+const CATERING_MONTHS_FULL = [
+  'January', 'February', 'March', 'April', 'May', 'June',
+  'July', 'August', 'September', 'October', 'November', 'December'
+];
+
+export function normalizeCateringDate(input: string): string {
+  if (!input) return '';
+  const cleaned = input.trim().replace(/(\d+)(st|nd|rd|th)/i, '$1');
+
+  // Check if already in "DD MMMM YYYY" format
+  const parts = cleaned.split(/\s+/);
+  if (parts.length === 3 && CATERING_MONTHS_FULL.includes(parts[1])) {
+    const day = parts[0].padStart(2, '0');
+    return `${day} ${parts[1]} ${parts[2]}`;
+  }
+
+  // Try parsing ISO or other standard dates
+  try {
+    const d = new Date(cleaned);
+    if (!isNaN(d.getTime())) {
+      const day = String(d.getDate()).padStart(2, '0');
+      const month = CATERING_MONTHS_FULL[d.getMonth()];
+      const year = d.getFullYear();
+      return `${day} ${month} ${year}`;
+    }
+  } catch {}
+
+  return input;
+}
+
+export function normalizeCateringTime(input: string): string {
+  if (!input) return '';
+  const cleaned = input.trim().toLowerCase();
+
+  // Natural meal times
+  if (cleaned.includes('breakfast')) return '08:30 AM';
+  if (cleaned.includes('lunch') || cleaned.includes('noon')) return '12:30 PM';
+  if (cleaned.includes('evening') || cleaned.includes('tiffin') || cleaned.includes('snack')) return '05:00 PM';
+  if (cleaned.includes('dinner') || cleaned.includes('night')) return '07:30 PM';
+
+  // 12-hour format e.g. "12:30 PM", "1:00 pm", "7 pm"
+  const m12 = cleaned.match(/^(\d{1,2})(?::(\d{2}))?\s*(am|pm)$/i);
+  if (m12) {
+    const h = m12[1].padStart(2, '0');
+    const m = (m12[2] || '00').padStart(2, '0');
+    const ampm = m12[3].toUpperCase();
+    return `${h}:${m} ${ampm}`;
+  }
+
+  // 24-hour format e.g. "13:00", "09:30"
+  const m24 = cleaned.match(/^(\d{1,2}):(\d{2})$/);
+  if (m24) {
+    let h = parseInt(m24[1], 10);
+    const m = m24[2];
+    const ampm = h >= 12 ? 'PM' : 'AM';
+    if (h > 12) h -= 12;
+    if (h === 0) h = 12;
+    return `${String(h).padStart(2, '0')}:${m} ${ampm}`;
+  }
+
+  return input;
+}
+
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 export interface ActionResult {
@@ -202,6 +267,23 @@ export async function executeSingleAction(act: UIAction): Promise<ActionResult> 
           normalized.includes('home')
         ) {
           mapped = 'Delivery';
+        } else if (
+          normalized.includes('cater') ||
+          normalized.includes('bulk') ||
+          normalized.includes('party')
+        ) {
+          try {
+            const { useCateringSessionStore } = require('../store/useCateringSessionStore');
+            const targetType = normalized.includes('party') ? 'Party Order' : 'Catering Order';
+            useCateringSessionStore.getState().setOrderType(targetType);
+          } catch {}
+          navigateScreen('/(main)/catering-choose-package');
+          return {
+            success: true,
+            action,
+            message: 'Switched to Catering mode and opened catering packages.',
+            data: { orderType: 'Catering Order', route: '/(main)/catering-choose-package' },
+          };
         }
 
         if (!mapped) {
@@ -557,26 +639,57 @@ export async function executeSingleAction(act: UIAction): Promise<ActionResult> 
       // ── Catering ─────────────────────────────────────────────────────────────
 
       case 'open_catering': {
-        navigateScreen('/(main)/bulk-catering');
-        return { success: true, action, message: 'Opened Bulk Catering.' };
+        const payload = act.payload || {};
+        if (payload.screen === 'bulk' || payload.route === 'bulk') {
+          navigateScreen('/(main)/bulk-catering');
+          return { success: true, action, message: 'Opened Bulk Catering.' };
+        }
+        navigateScreen('/(main)/catering-choose-package', payload.params || {});
+        return { success: true, action, message: 'Opened Catering Package Selection.', data: { route: '/(main)/catering-choose-package' } };
       }
 
       case 'catering_set_event_details': {
-        const payload = act.payload || {};
+        const p = { ...(act || {}), ...(act.payload || {}), ...(act.payload?.params || {}) };
         const { useCateringSessionStore } = require('../store/useCateringSessionStore');
         const store = useCateringSessionStore.getState();
 
-        const orderType = payload.order_type || payload.orderType || store.orderType || 'Catering Order';
-        const eventName = payload.event_name || payload.eventName || store.eventName || '';
-        const date = payload.date || store.date || '';
-        const time = payload.time || payload.serving_time || store.time || '';
-        const occasion = payload.occasion || store.occasion || '';
-        const guestCount = String(payload.guest_count || payload.guestCount || store.guestCount || '50');
-        const serviceType = payload.service_type || payload.serviceType || store.serviceType || 'Delivery Only';
-        const address = payload.address || payload.delivery_address || store.address || '';
+        // 1. Order type
+        const rawOrderType = p.order_type || p.orderType || p.order_mode || store.orderType || 'Catering Order';
+        const orderType = /party/i.test(String(rawOrderType)) ? 'Party Order' : 'Catering Order';
 
+        // 2. Occasion
+        const occasion = String(p.occasion || p.event_type || p.eventType || p.reason || store.occasion || '').trim();
+
+        // 3. Event name
+        const rawEventName = p.event_name || p.eventName || p.name || p.title || store.eventName || '';
+        const eventName = String(rawEventName || (occasion ? `${occasion} Event` : 'Catering Event')).trim();
+
+        // 4. Guest count (sanitize to clean numeric digits)
+        const rawGuests = p.guest_count ?? p.guestCount ?? p.guests ?? p.pax ?? p.number_of_guests ?? p.people ?? store.guestCount ?? '50';
+        let guestCount = '50';
+        const parsedGuests = parseInt(String(rawGuests).replace(/[^0-9]/g, ''), 10);
+        if (!isNaN(parsedGuests) && parsedGuests > 0) {
+          guestCount = String(parsedGuests);
+        }
+
+        // 5. Date normalization (ensure standard "DD MMMM YYYY" for display & backend compatibility)
+        const rawDate = p.date || p.event_date || p.eventDate || p.booking_date || store.date || '';
+        const date = normalizeCateringDate(String(rawDate));
+
+        // 6. Serving time normalization (e.g. "12:30 PM")
+        const rawTime = p.time || p.serving_time || p.servingTime || p.event_time || p.time_slot || store.time || '';
+        const time = normalizeCateringTime(String(rawTime));
+
+        // 7. Service type
+        const rawService = p.service_type || p.serviceType || p.service || store.serviceType || 'Delivery Only';
+        const serviceType = /full|waiter|staff|setup|live/i.test(String(rawService)) ? 'Full Service Catering' : 'Delivery Only';
+
+        // 8. Address
+        const address = String(p.address || p.delivery_address || p.deliveryAddress || p.venue_address || p.venue || p.location || store.address || '').trim();
+
+        // Save into global Zustand store
         store.setEventDetails({
-          orderType: orderType === 'Party Order' ? 'Party Order' : 'Catering Order',
+          orderType,
           eventName,
           date,
           time,
@@ -586,8 +699,22 @@ export async function executeSingleAction(act: UIAction): Promise<ActionResult> 
           address,
         });
 
-        const proceed = payload.proceed_to_packages !== false;
-        if (proceed && eventName && date && time && occasion && address) {
+        // Broadcast to any active screen (e.g. catering-event-details) to update UI inputs live
+        DeviceEventEmitter.emit('catering_set_event_details', {
+          orderType,
+          eventName,
+          date,
+          time,
+          occasion,
+          guestCount,
+          serviceType,
+          address,
+        });
+
+        const proceed = p.proceed_to_packages !== false;
+        const hasAllDetails = Boolean(eventName && date && time && occasion && address);
+
+        if (proceed && hasAllDetails) {
           navigateScreen('/(main)/catering-choose-package', {
             eventName,
             date,
@@ -604,7 +731,15 @@ export async function executeSingleAction(act: UIAction): Promise<ActionResult> 
             data: { eventName, date, time, occasion, guestCount, serviceType, address, navigatedTo: 'packages' }
           };
         } else {
-          navigateScreen('/(main)/catering-event-details');
+          navigateScreen('/(main)/catering-event-details', {
+            eventName,
+            date,
+            time,
+            occasion,
+            guestCount,
+            serviceType,
+            address,
+          });
           return {
             success: true,
             action,
@@ -615,12 +750,32 @@ export async function executeSingleAction(act: UIAction): Promise<ActionResult> 
       }
 
       case 'catering_choose_package': {
-        const params = act.payload?.params || act.payload || {};
+        const p = { ...(act || {}), ...(act.payload || {}), ...(act.payload?.params || {}) };
+        const { useCateringSessionStore } = require('../store/useCateringSessionStore');
+        const store = useCateringSessionStore.getState();
+
+        const pkgCode = p.package_code || p.packageCode || p.code || p.selectedPackage || '';
+        if (pkgCode) {
+          store.setSelectedPackage(pkgCode);
+        }
+
+        // Forward existing event details from store or params
+        const params: Record<string, any> = {
+          selectedPackage: pkgCode || store.selectedPackage || '',
+          eventName: p.eventName || p.event_name || store.eventName || '',
+          date: p.date || p.event_date || store.date || '',
+          time: p.time || p.serving_time || store.time || '',
+          occasion: p.occasion || store.occasion || '',
+          guestCount: String(p.guestCount || p.guest_count || store.guestCount || '50'),
+          serviceType: p.serviceType || p.service_type || store.serviceType || 'Delivery Only',
+          address: p.address || p.delivery_address || store.address || '',
+        };
+
         navigateScreen('/(main)/catering-choose-package', params);
         return {
           success: true,
           action,
-          message: 'Opened Catering Package Selection.',
+          message: pkgCode ? `Opened Catering Package Selection for package ${pkgCode}.` : 'Opened Catering Package Selection.',
           data: params
         };
       }

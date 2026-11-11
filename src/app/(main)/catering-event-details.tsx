@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, SafeAreaView, Platform, StatusBar, Modal, KeyboardAvoidingView, ActivityIndicator } from 'react-native';
-import { useRouter } from 'expo-router';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, SafeAreaView, Platform, StatusBar, Modal, KeyboardAvoidingView, ActivityIndicator, DeviceEventEmitter } from 'react-native';
+import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Location from 'expo-location';
@@ -12,6 +12,7 @@ import { API_BASE_URL } from '../../constants/api';
 
 export default function CateringEventDetails() {
   const router = useRouter();
+  const params = useLocalSearchParams();
   const insets = useSafeAreaInsets();
   const { selectedOutlet } = useRestaurantStore();
   
@@ -26,9 +27,43 @@ export default function CateringEventDetails() {
     address, 
     restaurantId,
     restaurantName,
+    selectedPackage,
     setRestaurant,
     setEventDetails 
   } = useCateringSessionStore();
+
+  const GOOGLE_MAPS_KEY = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY || '';
+  const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Google Places Autocomplete state
+  const [addressPredictions, setAddressPredictions] = useState<any[]>([]);
+  const [showPredictions, setShowPredictions] = useState(false);
+  const [isSearchingAddress, setIsSearchingAddress] = useState(false);
+  const [isDetectingLocation, setIsDetectingLocation] = useState(false);
+  const [isAddressValidated, setIsAddressValidated] = useState(
+    Boolean((params.address as string) || (address && address.trim().length >= 5))
+  );
+  const { addresses: savedAddresses } = useAddressStore();
+
+  // Modals state
+  const [showDatePicker, setShowDatePicker] = useState(false);
+  const [showTimePicker, setShowTimePicker] = useState(false);
+  const [selectedHour, setSelectedHour] = useState('12');
+  const [selectedMinute, setSelectedMinute] = useState('00');
+  const [selectedAmPm, setSelectedAmPm] = useState('PM');
+  const [calendarDate, setCalendarDate] = useState(new Date());
+
+  const openTimePicker = () => {
+    if (time) {
+      const m = String(time).match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
+      if (m) {
+        setSelectedHour(m[1].padStart(2, '0'));
+        setSelectedMinute(m[2].padStart(2, '0'));
+        setSelectedAmPm(m[3].toUpperCase());
+      }
+    }
+    setShowTimePicker(true);
+  };
 
   useEffect(() => {
     const outletRestId = selectedOutlet?.restaurant_id || selectedOutlet?.id;
@@ -39,25 +74,37 @@ export default function CateringEventDetails() {
     }
   }, [selectedOutlet, restaurantId, setRestaurant]);
 
-  const GOOGLE_MAPS_KEY = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY || '';
-  const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Sync route parameters into catering store if passed via navigation
+  useEffect(() => {
+    const updates: any = {};
+    if (params.eventName && !eventName) updates.eventName = String(params.eventName);
+    if (params.date && !date) updates.date = String(params.date);
+    if (params.time && !time) updates.time = String(params.time);
+    if (params.occasion && !occasion) updates.occasion = String(params.occasion);
+    if (params.guestCount && params.guestCount !== guestCount) {
+      const sanitized = String(params.guestCount).replace(/[^0-9]/g, '');
+      if (sanitized) updates.guestCount = sanitized;
+    }
+    if (params.serviceType && !serviceType) updates.serviceType = String(params.serviceType);
+    if (params.orderType && !orderType) updates.orderType = String(params.orderType);
+    if (params.address && !address) {
+      updates.address = String(params.address);
+    }
+    if (Object.keys(updates).length > 0) {
+      setEventDetails(updates);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [params]);
 
-  // Google Places Autocomplete state
-  const [addressPredictions, setAddressPredictions] = useState<any[]>([]);
-  const [showPredictions, setShowPredictions] = useState(false);
-  const [isSearchingAddress, setIsSearchingAddress] = useState(false);
-  const [isDetectingLocation, setIsDetectingLocation] = useState(false);
-  const [isAddressValidated, setIsAddressValidated] = useState(false);
-  const { addresses: savedAddresses } = useAddressStore();
-
-  // Modals state
-  const [showDatePicker, setShowDatePicker] = useState(false);
-  const [showTimePicker, setShowTimePicker] = useState(false);
-  const [selectedHour, setSelectedHour] = useState('12');
-  const [selectedMinute, setSelectedMinute] = useState('00');
-  const [selectedAmPm, setSelectedAmPm] = useState('PM');
-  
-  const [calendarDate, setCalendarDate] = useState(new Date());
+  // Listen for background voice agent updates to event details
+  useEffect(() => {
+    const sub = DeviceEventEmitter.addListener('catering_set_event_details', (data: any) => {
+      if (data?.address && String(data.address).trim().length >= 5) {
+        setIsAddressValidated(true);
+      }
+    });
+    return () => sub.remove();
+  }, []);
   const [alertConfig, setAlertConfig] = useState({
     visible: false,
     title: '',
@@ -263,6 +310,7 @@ export default function CateringEventDetails() {
 
     const effectiveRestId = restaurantId || Number(selectedOutlet?.restaurant_id || selectedOutlet?.id || 1);
     const effectiveRestName = restaurantName || selectedOutlet?.name || 'Data Udipi';
+    const effectivePackage = (params.selectedPackage as string) || (params.packageCode as string) || selectedPackage || '';
 
     // Navigate to next step
     router.push({
@@ -277,6 +325,7 @@ export default function CateringEventDetails() {
         address,
         restaurantId: effectiveRestId.toString(),
         restaurantName: effectiveRestName,
+        selectedPackage: effectivePackage,
       }
     });
   };
@@ -541,7 +590,7 @@ export default function CateringEventDetails() {
           </View>
           <View style={[styles.inputGroup, { flex: 1, marginLeft: 10 }]}>
             <Text style={styles.label}>Serving Time <Text style={styles.asterisk}>*</Text></Text>
-            <TouchableOpacity activeOpacity={0.8} onPress={() => setShowTimePicker(true)}>
+            <TouchableOpacity activeOpacity={0.8} onPress={openTimePicker}>
               <View style={[styles.input, { justifyContent: 'center' }]}>
                 <Text style={{ color: time ? '#333' : '#999', fontSize: 14 }}>
                   {time || 'e.g. 12:30 PM'}

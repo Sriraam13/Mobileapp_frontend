@@ -1563,14 +1563,14 @@ export const useVapiStore = create<VapiState>((set, get) => ({
                 console.log('[VapiStore] Speech detected intent: catering packages');
                 executeSingleAction({ action: 'catering_choose_package' });
               }
-              // 1.9 Bulk Catering ("catering", "bulk catering", "event catering")
+              // 1.9 Bulk Catering ("catering", "bulk catering", "event catering", "switch to catering")
               else if (
-                /\b(show|open|view|see|go to|take me to)\b.*\b(catering|bulk catering|event catering)\b/i.test(lower) ||
+                /\b(show|open|view|see|go to|take me to|switch to|switch mode to)\b.*\b(catering|bulk catering|event catering)\b/i.test(lower) ||
                 /^(catering|bulk catering)$/i.test(lower)
               ) {
                 lastSpeechIntentTime = now;
-                console.log('[VapiStore] Speech detected intent: open bulk catering');
-                navigateScreen('/(main)/bulk-catering');
+                console.log('[VapiStore] Speech detected intent: open catering packages');
+                executeSingleAction({ action: 'catering_choose_package' });
               }
               // 2. Menu Navigation ("show all the menus", "show menu", "open menu", "view menu")
               else if (

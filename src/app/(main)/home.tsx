@@ -1029,7 +1029,8 @@ export default function Home() {
           <TouchableOpacity
             style={[styles.tabBtn, activeTab === 'Bulk' && styles.activeTabBtn]}
             onPress={() => {
-              router.push('/(main)/bulk-catering');
+              setActiveTab('Bulk');
+              router.push('/(main)/catering-choose-package');
             }}
           >
             <Text style={[styles.tabText, activeTab === 'Bulk' && styles.activeTabText]}>Catering</Text>

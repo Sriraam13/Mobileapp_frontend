@@ -36,7 +36,9 @@ export default function ChoosePackage() {
   const [activeTab, setActiveTab] = useState('All');
   const [packages, setPackages] = useState<CateringPackage[]>([]);
   const [loading, setLoading] = useState(true);
-  const [selectedPackage, setSelectedPackage] = useState<string | null>(null);
+  const cateringStore = useCateringSessionStore();
+  const initialPkg = (params.selectedPackage as string) || (params.packageCode as string) || cateringStore.selectedPackage || null;
+  const [selectedPackage, setSelectedPackage] = useState<string | null>(initialPkg);
   const [creatingSession, setCreatingSession] = useState(false);
 
   // Show more / Items modal states
@@ -142,6 +144,34 @@ export default function ChoosePackage() {
   const handleProceed = async () => {
     if (!selectedPackage) return;
     
+    // Resolve event details with fallback to catering store
+    const cateringStore = useCateringSessionStore.getState();
+    const effectiveEventName = (params.eventName as string) || cateringStore.eventName || '';
+    const effectiveDate = (params.date as string) || cateringStore.date || '';
+    const effectiveTime = (params.time as string) || cateringStore.time || '';
+    const effectiveOccasion = (params.occasion as string) || cateringStore.occasion || '';
+    const effectiveAddress = (params.address as string) || cateringStore.address || '';
+    const effectiveServiceType = (params.serviceType as string) || cateringStore.serviceType || 'Delivery Only';
+    const effectiveGuests = parseInt((params.guestCount as string) || cateringStore.guestCount || '50', 10);
+    const validGuests = isNaN(effectiveGuests) || effectiveGuests < 50 ? 50 : effectiveGuests;
+
+    // If event details (e.g. date or delivery address) are missing, save package and redirect to Step 1 Event Details
+    if (!effectiveDate || !effectiveAddress) {
+      cateringStore.setSelectedPackage(selectedPackage);
+      router.push({
+        pathname: '/(main)/catering-event-details',
+        params: {
+          selectedPackage,
+          packageCode: selectedPackage,
+          guestCount: validGuests.toString(),
+          eventName: effectiveEventName || '',
+          occasion: effectiveOccasion || '',
+          serviceType: effectiveServiceType,
+        }
+      });
+      return;
+    }
+
     setCreatingSession(true);
     try {
       const baseUrl = API_BASE_URL;
@@ -152,7 +182,6 @@ export default function ChoosePackage() {
 
       // 1. Resolve and include restaurant_id
       const { selectedOutlet } = useRestaurantStore.getState();
-      const cateringStore = useCateringSessionStore.getState();
       const effectiveRestaurantId = Number(params.restaurantId) ||
         Number(cateringStore.restaurantId) ||
         Number(selectedOutlet?.restaurant_id) ||
@@ -164,7 +193,7 @@ export default function ChoosePackage() {
         customer_id: auth.customerId || 1,
         restaurant_id: effectiveRestaurantId,
         package_code: selectedPackage,
-        guest_count: parseInt(params.guestCount as string || '50', 10)
+        guest_count: validGuests
       };
       
       const createResponse = await fetch(`${baseUrl}/api/v1/public/catering/sessions`, {
@@ -184,32 +213,36 @@ export default function ChoosePackage() {
       // 2. Patch Event Details
       const eventBody: any = {
         restaurant_id: effectiveRestaurantId,
-        event_name: params.eventName,
-        serving_time: params.time,
-        occasion: params.occasion,
-        service_type: params.serviceType,
+        event_name: effectiveEventName || 'Catering Event',
+        serving_time: effectiveTime || '12:30 PM',
+        occasion: effectiveOccasion || 'Catering',
+        service_type: effectiveServiceType,
       };
-      // Convert date like "21 September 2026" => "2026-09-21"
-      if (params.date) {
-        const dateStr = params.date as string;
-        const months = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
-        const parts = dateStr.split(" ");
-        if (parts.length === 3) {
-          const day = parts[0].padStart(2, '0');
-          const monthIndex = months.indexOf(parts[1]);
-          if (monthIndex !== -1) {
-            const month = (monthIndex + 1).toString().padStart(2, '0');
-            const year = parts[2];
-            eventBody.event_date = `${year}-${month}-${day}`;
-          }
+
+      // Convert date to ISO format YYYY-MM-DD
+      if (effectiveDate) {
+        const dateStr = effectiveDate.trim();
+        if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
+          eventBody.event_date = dateStr;
         } else {
-          // Fallback if it's already a standard format or another format
-          try {
-            const parsed = new Date(dateStr);
-            if (!isNaN(parsed.getTime())) {
-              eventBody.event_date = parsed.toISOString().split('T')[0];
+          const months = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+          const parts = dateStr.replace(/(\d+)(st|nd|rd|th)/i, '$1').split(/\s+/);
+          if (parts.length === 3) {
+            const day = parts[0].padStart(2, '0');
+            const monthIndex = months.indexOf(parts[1]);
+            if (monthIndex !== -1) {
+              const month = (monthIndex + 1).toString().padStart(2, '0');
+              const year = parts[2];
+              eventBody.event_date = `${year}-${month}-${day}`;
             }
-          } catch {}
+          } else {
+            try {
+              const parsed = new Date(dateStr);
+              if (!isNaN(parsed.getTime())) {
+                eventBody.event_date = parsed.toISOString().split('T')[0];
+              }
+            } catch {}
+          }
         }
       }
       
@@ -225,16 +258,17 @@ export default function ChoosePackage() {
         params: {
           sessionId: sessionId.toString(),
           restaurantId: effectiveRestaurantId.toString(),
-          restaurantName: (params.restaurantName as string) || selectedOutlet?.name || 'Data Udipi',
+          restaurantName: (params.restaurantName as string) || cateringStore.restaurantName || selectedOutlet?.name || 'Data Udipi',
           packageCode: selectedPackage,
-          guestCount: params.guestCount,
+          guestCount: validGuests.toString(),
           packagePrice: packages.find(p => p.code === selectedPackage)?.price?.toString() || '0',
           packageName: packages.find(p => p.code === selectedPackage)?.name || '',
-          eventName: params.eventName,
-          date: params.date,
-          time: params.time,
-          serviceType: params.serviceType,
-          address: params.address,
+          eventName: effectiveEventName,
+          date: effectiveDate,
+          time: effectiveTime,
+          occasion: effectiveOccasion,
+          serviceType: effectiveServiceType,
+          address: effectiveAddress,
         }
       });
 

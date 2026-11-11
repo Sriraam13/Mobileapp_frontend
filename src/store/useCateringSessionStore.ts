@@ -11,8 +11,10 @@ interface CateringSessionState {
   address: string;
   restaurantId: number | null;
   restaurantName: string | null;
+  selectedPackage: string | null;
   setOrderType: (type: 'Catering Order' | 'Party Order') => void;
   setRestaurant: (id: number | null, name?: string | null) => void;
+  setSelectedPackage: (code: string | null) => void;
   setEventDetails: (details: Partial<CateringSessionState>) => void;
   reset: () => void;
 }
@@ -28,8 +30,10 @@ export const useCateringSessionStore = create<CateringSessionState>((set) => ({
   address: '',
   restaurantId: null,
   restaurantName: null,
+  selectedPackage: null,
   setOrderType: (type) => set({ orderType: type }),
   setRestaurant: (id, name) => set({ restaurantId: id, restaurantName: name || null }),
+  setSelectedPackage: (code) => set({ selectedPackage: code }),
   setEventDetails: (details) => set((state) => ({ ...state, ...details })),
   reset: () => set({
     orderType: 'Catering Order',
@@ -42,5 +46,6 @@ export const useCateringSessionStore = create<CateringSessionState>((set) => ({
     address: '',
     restaurantId: null,
     restaurantName: null,
+    selectedPackage: null,
   }),
 }));

@@ -81,21 +81,35 @@ export default function BulkCatering() {
 
           {/* Packages Grid */}
           <View style={styles.gridContainer}>
-            <View style={styles.gridCard}>
+            <TouchableOpacity 
+              style={styles.gridCard}
+              activeOpacity={0.8}
+              onPress={() => router.push({
+                pathname: '/(main)/catering-choose-package',
+                params: { activeTab: 'Lunch' }
+              })}
+            >
               <View style={[styles.iconCircle, { backgroundColor: '#e8f5e9' }]}>
                 <MaterialCommunityIcons name="leaf" size={18} color="#4caf50" />
               </View>
               <Text style={styles.cardTitle}>Variety Lunch</Text>
               <Text style={styles.cardDesc}>Classic spread with rice, kootu, fry & sweet</Text>
-            </View>
+            </TouchableOpacity>
 
-            <View style={styles.gridCard}>
+            <TouchableOpacity 
+              style={styles.gridCard}
+              activeOpacity={0.8}
+              onPress={() => router.push({
+                pathname: '/(main)/catering-choose-package',
+                params: { activeTab: 'Dinner' }
+              })}
+            >
               <View style={[styles.iconCircle, { backgroundColor: '#ffebee' }]}>
                 <MaterialCommunityIcons name="silverware-fork-knife" size={18} color="#ff4500" />
               </View>
               <Text style={styles.cardTitle}>Grand Feast</Text>
               <Text style={styles.cardDesc}>Premium drinks, starters, sweets & full service</Text>
-            </View>
+            </TouchableOpacity>
           </View>
 
           {/* Terms & Conditions Block */}
