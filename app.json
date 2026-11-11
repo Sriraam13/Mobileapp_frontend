@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "Data Udipi app Testing",
+    "name": "Data Udipi",
     "slug": "data-udipi-app",
     "version": "1.0.1",
     "orientation": "portrait",
@@ -79,7 +79,8 @@
         {
           "android": {
             "usesCleartextTraffic": true,
-            "minSdkVersion": 24
+            "minSdkVersion": 24,
+            "extraProguardRules": "-keep class androidx.work.impl.WorkDatabase_Impl { *; }\n-keep class androidx.work.impl.WorkDatabase { *; }\n-keep class * extends androidx.room.RoomDatabase { *; }\n-keepclassmembers class * extends androidx.room.RoomDatabase { <init>(); }\n-keep class * extends androidx.work.Worker { public <init>(android.content.Context, androidx.work.WorkerParameters); }\n-keep class * extends androidx.work.ListenableWorker { public <init>(android.content.Context, androidx.work.WorkerParameters); }\n-dontwarn androidx.work.impl.**\n-dontwarn androidx.room.**"
           },
           "ios": {
             "deploymentTarget": "16.4"
@@ -97,7 +98,7 @@
         "root": "src/app"
       },
       "eas": {
-        "projectId": "927f995e-93f1-4348-83d6-2b4a4753993c"
+        "projectId": "07a600e4-fe0d-4ba1-b941-36bed42fd455"
       }
     }
   }

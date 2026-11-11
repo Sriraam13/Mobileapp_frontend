@@ -48,3 +48,11 @@ playwright/.cache/
 # generated native folders
 /ios
 /android
+
+# backups
+*.backup
+*.bak
+
+# build artifacts
+*.aab
+*.apk
