@@ -133,23 +133,8 @@ const getVapi = () => {
 };
 
 export function speakAgentFeedback(message: string) {
-  try {
-    const vapi = getVapi();
-    if (!vapi) return;
-    if (typeof (vapi as any).say === 'function') {
-      (vapi as any).say(message, false);
-      return;
-    }
-    if (typeof (vapi as any).send === 'function') {
-      (vapi as any).send({
-        type: 'say',
-        message,
-        endCallAfterSpoken: false,
-      });
-    }
-  } catch (err) {
-    console.warn('[VapiStore] Failed to speak agent feedback:', err);
-  }
+  // Log feedback; suppressed from vapi.say to prevent overlapping speech and user turn interruptions
+  console.log('[VapiStore] Agent feedback (spoken natively by Vapi):', message);
 }
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -413,7 +398,7 @@ async function resolveAndAddToCart(fnArgs: any): Promise<{ success: boolean; cod
     return {
       success: false,
       code: 'MENU_ITEM_NOT_FOUND',
-      message: `I couldn't find "${rawName || rawId}" on this outlet's menu. Would you like me to open the menu for you?`
+      message: `Sorry, "${rawName || rawId}" is not available on our menu today. We have Rava Masala Dosai, Veg. Dosai, Paneer Biriyani, Butter Naan, and Mini Coffee available. Would you like to try one of those?`
     };
   }
 
@@ -443,7 +428,6 @@ async function resolveAndAddToCart(fnArgs: any): Promise<{ success: boolean; cod
   const cartTotalCount = useCartStore.getState().getItemCount();
   const subtotal = useCartStore.getState().getSubtotal();
   const feedbackMsg = `Added ${qty}x ${bestMatch.name} at ${bestMatch.price} rupees to cart. You now have ${cartTotalCount} items in cart totaling ${subtotal} rupees.`;
-  speakAgentFeedback(`Added ${qty} ${bestMatch.name} to your cart.`);
 
   return {
     success: true,
@@ -1393,6 +1377,33 @@ export const useVapiStore = create<VapiState>((set, get) => ({
     const overrides = { 
       firstMessage: dynamicFirstMessage, 
       maxDurationSeconds: 3600, // 1 hour max duration so it doesn't time out easily
+      transcriber: {
+        provider: 'deepgram',
+        model: 'nova-2',
+        language: 'en',
+        smartFormat: true,
+        endpointing: 500, // 500ms pause tolerance so natural speaking pauses don't cut the user off
+        keywords: [
+          'cart:4',
+          'biryani:3',
+          'dosa:3',
+          'dosai:3',
+          'idly:3',
+          'vadai:3',
+          'vada:3',
+          'naan:3',
+          'paneer:3',
+          'roti:3',
+          'dine in:3',
+          'takeaway:3',
+          'data udipi:3',
+          'mgr:3',
+          'mugalivakkam:3',
+          'kesari:3',
+          'rava:3',
+          'ragi:2',
+        ],
+      },
     };
 
     try {
@@ -1728,8 +1739,18 @@ CRITICAL BEHAVIOR & KNOWLEDGE GUIDELINES:
       // ── Transcript handling: real-time partial + merged final ────────────────
 
       if (message.type === 'transcript') {
-        const text: string = message.transcript || '';
+        const rawText: string = message.transcript || '';
         const role: string = message.role || 'user';
+
+        // Clean up common STT phonetics and accent mis-hearings
+        const text: string = role === 'user'
+          ? rawText
+              .replace(/\b(to my car|in my car|into my car|to car|in car|to my card|in my card)\b/gi, 'to my cart')
+              .replace(/\b(view my card|view card|show card|open card|my card)\b/gi, 'view my cart')
+              .replace(/\b(add on)\b/gi, 'add')
+              .replace(/\b(take away)\b/gi, 'takeaway')
+              .replace(/\bdinein\b/gi, 'dine in')
+          : rawText;
 
         if (message.transcriptType === 'partial') {
           if (role === 'user') {
@@ -1742,8 +1763,9 @@ CRITICAL BEHAVIOR & KNOWLEDGE GUIDELINES:
           if (role === 'user' && text) {
             const lower = text.toLowerCase().trim();
             const now = Date.now();
+            const isOrderIntent = /\b(add|order|cart|car|card|want|give|buy|get|take|plus|put|parcel|plate|cup|please add)\b/i.test(lower);
 
-            if (now - lastSpeechIntentTime >= 2000) {
+            if (now - lastSpeechIntentTime >= 1500) {
               // 1. Order Mode Switches (Takeaway / Dine In / Delivery)
               if (
                 /\b(switch|change|set|make|select|turn|go|put)\b.*\b(takeaway|take away|take out|parcel|pickup)\b/i.test(lower) ||
@@ -1766,9 +1788,6 @@ CRITICAL BEHAVIOR & KNOWLEDGE GUIDELINES:
                   const rawTable = tableMatch[1].toUpperCase();
                   const formatted = rawTable.startsWith('T') ? rawTable : `T-${rawTable.padStart(2, '0')}`;
                   useCartStore.getState().setTableNumber(formatted);
-                  speakAgentFeedback(`Switched to Dine-In mode at Table ${formatted}. What would you like to order?`);
-                } else {
-                  speakAgentFeedback('Switched to Dine-In mode. Which table are you seated at?');
                 }
               } else if (
                 /\b(switch|change|set|make|select|turn|go|put)\b.*\b(delivery|deliver|home delivery)\b/i.test(lower) ||
@@ -1777,7 +1796,6 @@ CRITICAL BEHAVIOR & KNOWLEDGE GUIDELINES:
                 lastSpeechIntentTime = now;
                 console.log('[VapiStore] Speech detected intent: switch to delivery');
                 useCartStore.getState().setOrderType('Delivery');
-                speakAgentFeedback('Switched to Delivery mode. Where would you like your order delivered?');
               }
               // 1.45 Table Number Selection ("table 4", "table T-02", "seated at table 5", "i am at table 3")
               else if (
@@ -1791,7 +1809,6 @@ CRITICAL BEHAVIOR & KNOWLEDGE GUIDELINES:
                   useCartStore.getState().setTableNumber(formatted);
                   useCartStore.getState().setOrderType('Dine In');
                   console.log('[VapiStore] Speech detected intent: set table number', formatted);
-                  speakAgentFeedback(`Set table to ${formatted} for Dine-In. What can I get for you today?`);
                 }
               }
               // 1.5 Dine-In Pay Later / Send to Kitchen ("place order", "send to kitchen", "confirm order", "pay later")
@@ -1801,7 +1818,6 @@ CRITICAL BEHAVIOR & KNOWLEDGE GUIDELINES:
                 lastSpeechIntentTime = now;
                 console.log('[VapiStore] Speech detected intent: dine in pay later / send to kitchen');
                 executeSingleAction({ action: 'dine_in_pay_later' });
-                speakAgentFeedback('Opening your order review with Pay Later to send to the kitchen.');
               }
               // 1.6 Dine-In Pay Bill ("pay bill", "pay the bill", "pay my bill", "settle bill", "complete meal")
               else if (
@@ -1818,7 +1834,6 @@ CRITICAL BEHAVIOR & KNOWLEDGE GUIDELINES:
                 lastSpeechIntentTime = now;
                 console.log('[VapiStore] Speech detected intent: track order');
                 executeSingleAction({ action: 'open_tracking' });
-                speakAgentFeedback('Opening your order tracking screen.');
               }
               // 1.65 Region Switches (North Indian / South Indian / All Regions)
               else if (
@@ -1828,7 +1843,6 @@ CRITICAL BEHAVIOR & KNOWLEDGE GUIDELINES:
                 lastCategoryActionTime = now;
                 console.log('[VapiStore] Speech detected intent: switch to North Indian');
                 executeSingleAction({ action: 'switch_region', region: 'North Indian' });
-                speakAgentFeedback('Switched to North Indian menu.');
               }
               else if (
                 /\b(south indian|south-indian|southindian)\b/i.test(lower)
@@ -1837,7 +1851,6 @@ CRITICAL BEHAVIOR & KNOWLEDGE GUIDELINES:
                 lastCategoryActionTime = now;
                 console.log('[VapiStore] Speech detected intent: switch to South Indian');
                 executeSingleAction({ action: 'switch_region', region: 'South Indian' });
-                speakAgentFeedback('Switched to South Indian menu.');
               }
               else if (
                 /\b(all regions|all foods|both regions|all foods menu|full menu)\b/i.test(lower)
@@ -1846,14 +1859,13 @@ CRITICAL BEHAVIOR & KNOWLEDGE GUIDELINES:
                 lastCategoryActionTime = now;
                 console.log('[VapiStore] Speech detected intent: switch to All Regions');
                 executeSingleAction({ action: 'switch_region', region: 'All Regions' });
-                speakAgentFeedback('Showing all regions menu.');
               }
               // 1.7 Menu Categories (Rice Varieties, Dosa Varieties, Starters, Breads, Noodles, Lunch, etc.)
-              else if (
-                /\b(rice varieties|rice varities|dosa varieties|dosa varities|hot beverages|evening snacks|breakfast & dinner|tandoori starters|tandoori breads|tandoori side dishes|lunch|breakfast|dinner|soups|soup|noodles|noodle|salad|salads|raitha|raita|starters|starter|breads|bread|roti|naan|kulcha|tikka|dosa|dosai|idli|vada|pongal|poori|meals|thali|filter coffee|coffee|tea|snacks|fried rice|biryani|pulao|pulav)\b/i.test(lower) ||
-                /\b(show|open|view|see|go to|take me to|display|switch to)\b.*\b(rice|dosa|beverages|coffee|tea|snacks|soups|soup|starters|tandoori|noodles|noodle|salad|salads|raitha|raita|breakfast|lunch|dinner|categories|category|meals|breads|roti|naan|biryani|fried rice)\b/i.test(lower) ||
-                /\b(categories|category names|show categories|all categories)\b/i.test(lower)
-              ) {
+              // CRITICAL: NEVER trigger category navigation if the user is attempting to add/order an item!
+              else if (!isOrderIntent && (
+                /\b(show|open|view|see|go to|take me to|display|switch to|explore)\b.*\b(rice|dosa|beverages|coffee|tea|snacks|soups|soup|starters|tandoori|noodles|noodle|salad|salads|raitha|raita|breakfast|lunch|dinner|categories|category|meals|breads|roti|naan|biryani|fried rice)\b/i.test(lower) ||
+                /^(rice varieties|rice varities|dosa varieties|dosa varities|hot beverages|evening snacks|breakfast & dinner|tandoori starters|tandoori breads|tandoori side dishes|lunch|breakfast|dinner|soups|soup|noodles|noodle|salad|salads|raitha|raita|starters|starter|breads|bread|roti|naan|categories|menu)$/i.test(lower)
+              )) {
                 lastSpeechIntentTime = now;
                 lastCategoryActionTime = now;
                 let catName = 'Rice Varieties';
@@ -1914,10 +1926,8 @@ CRITICAL BEHAVIOR & KNOWLEDGE GUIDELINES:
                 console.log('[VapiStore] Speech detected intent: open category', catName || 'all', targetRegion || '');
                 if (catName) {
                   executeSingleAction({ action: 'open_category', category_name: catName, region: targetRegion } as any);
-                  speakAgentFeedback(`Opening ${catName} for you.`);
                 } else {
                   executeSingleAction({ action: 'open_menu' });
-                  speakAgentFeedback('Opening menu categories for you.');
                 }
               }
               // 1.8 Catering Event Details ("catering for 100 people", "100 guests", "set guest count to 80", "wedding catering")
@@ -2044,20 +2054,18 @@ CRITICAL BEHAVIOR & KNOWLEDGE GUIDELINES:
                 navigateScreen('/(order)/orders');
                 speakAgentFeedback('Opening your orders.');
               }
-              // 7. Cart / Checkout ("show cart", "view cart", "open cart", "checkout")
+              // 7. Cart / Checkout ("show cart", "view cart", "open cart", "checkout", "view my card")
               else if (
-                /\b(show|open|view|go to|take me to)\b.*\b(cart|basket|checkout)\b/i.test(lower) ||
-                /^(cart|view cart|open cart|checkout)$/i.test(lower)
+                /\b(show|open|view|go to|take me to)\b.*\b(cart|basket|checkout|card|car)\b/i.test(lower) ||
+                /^(cart|view cart|open cart|checkout|view my cart|view my card|my cart|my card|card)$/i.test(lower)
               ) {
                 const cartCount = useCartStore.getState().getItemCount();
                 if (cartCount > 0) {
                   lastSpeechIntentTime = now;
                   console.log('[VapiStore] Speech detected intent: open cart');
                   navigateScreen('/(checkout)/checkout');
-                  speakAgentFeedback('Opening your cart.');
                 } else {
                   console.log('[VapiStore] Cart is empty, suppressed voice navigation to empty cart.');
-                  speakAgentFeedback('Your cart is currently empty. Would you like to explore our menu?');
                 }
               }
             }
