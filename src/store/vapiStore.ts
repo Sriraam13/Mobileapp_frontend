@@ -512,6 +512,28 @@ async function handleVapiToolCall(tool: any): Promise<{ toolCallId: string; resu
         }
 
         console.log(`[VapiStore] Resolved route: "${resolved}", executing navigation...`);
+
+        // Guard against rogue navigation to checkout screen when user is talking about food / menu
+        if (resolved === '/(checkout)/checkout') {
+          const recentUserText = useVapiStore.getState().messages
+            .filter((m: any) => m.role === 'user')
+            .slice(-3)
+            .map((m: any) => m.text.toLowerCase())
+            .join(' ');
+          const explicitCartRequest = /\b(open cart|show cart|view cart|go to cart|my cart|checkout|basket)\b/i.test(recentUserText);
+          const cartCount = useCartStore.getState().getItemCount();
+          if (!explicitCartRequest || cartCount === 0) {
+            console.log(`[VapiStore] Suppressed navigation to checkout screen (explicit=${explicitCartRequest}, cartCount=${cartCount})`);
+            return {
+              toolCallId,
+              result: JSON.stringify({
+                success: true,
+                message: 'Your cart is currently empty. Feel free to explore our menu categories!',
+              })
+            };
+          }
+        }
+
         const navParams: Record<string, any> = { ...(fnArgs.params || {}) };
         if (fnArgs.category || fnArgs.category_name) {
           navParams.categoryName = fnArgs.category || fnArgs.category_name;
@@ -678,18 +700,6 @@ async function handleVapiToolCall(tool: any): Promise<{ toolCallId: string; resu
       case 'view_cart':
       case 'get_cart':
       case 'cart_get': {
-        const isReadOperation = fnName === 'get_cart' || fnName === 'cart_get';
-        const now = Date.now();
-        const recentlyOpenedCategory = (now - lastCategoryActionTime) < 8000;
-
-        // Only navigate to checkout/cart if this is explicitly a navigation action,
-        // and NOT immediately after the user navigated to a category
-        if (!isReadOperation && !recentlyOpenedCategory) {
-          await executeSingleAction({ action: 'show_cart' });
-        } else {
-          console.log(`[VapiStore] Suppressed cart screen navigation (isReadOperation=${isReadOperation}, recentlyOpenedCategory=${recentlyOpenedCategory})`);
-        }
-
         const cartState = useCartStore.getState();
         const rawItems = Object.values(cartState.items);
         const cartCount = cartState.getItemCount();
@@ -701,14 +711,34 @@ async function handleVapiToolCall(tool: any): Promise<{ toolCallId: string; resu
           price: i.price,
         }));
 
+        const isReadOperation = fnName === 'get_cart' || fnName === 'cart_get';
+        const now = Date.now();
+        const recentlyOpenedCategory = (now - lastCategoryActionTime) < 15000;
+
+        // Check if the user explicitly commanded to VIEW the cart
+        const recentUserText = useVapiStore.getState().messages
+          .filter((m: any) => m.role === 'user')
+          .slice(-3)
+          .map((m: any) => m.text.toLowerCase())
+          .join(' ');
+        const explicitCartRequest = /\b(open cart|show cart|view cart|go to cart|my cart|checkout|open basket|view basket)\b/i.test(recentUserText);
+
+        // ONLY navigate if user explicitly commanded cart, it's not a read operation, not right after category, and cart has items
+        if (explicitCartRequest && !isReadOperation && !recentlyOpenedCategory && cartCount > 0) {
+          console.log('[VapiStore] Explicit cart navigation confirmed.');
+          await executeSingleAction({ action: 'show_cart', payload: { force: true } });
+        } else {
+          console.log(`[VapiStore] Suppressed cart screen navigation (explicit=${explicitCartRequest}, isRead=${isReadOperation}, recentCat=${recentlyOpenedCategory}, count=${cartCount})`);
+        }
+
         let speechSummary = '';
         if (cartCount === 0) {
           speechSummary = 'Your cart is currently empty. You can ask me to add any dish to your cart!';
         } else {
           const itemNames = itemsList.map(i => `${i.quantity}x ${i.name}`).join(', ');
-          speechSummary = isReadOperation || recentlyOpenedCategory
-            ? `You have ${cartCount} items in your cart totaling ${subtotal} rupees: ${itemNames}.`
-            : `You have ${cartCount} items in your cart: ${itemNames}, totaling ${subtotal} rupees. I have opened your cart on screen.`;
+          speechSummary = explicitCartRequest && cartCount > 0 && !recentlyOpenedCategory
+            ? `You have ${cartCount} items in your cart: ${itemNames}, totaling ${subtotal} rupees. I have opened your cart on screen.`
+            : `You have ${cartCount} items in your cart totaling ${subtotal} rupees: ${itemNames}.`;
         }
 
         return {
@@ -993,21 +1023,39 @@ async function handleVapiToolCall(tool: any): Promise<{ toolCallId: string; resu
         return { toolCallId, result: JSON.stringify({ success: !data.error, ...data }) };
       }
 
-      // ── Menu Category Navigation ─────────────────────────────────────────────
+      // ── Menu Category & Region Navigation ─────────────────────────────────────
+
+      case 'switch_region':
+      case 'select_region':
+      case 'open_region': {
+        const region = fnArgs.region || fnArgs.region_name || fnArgs.name || fnArgs.cuisine || '';
+        lastCategoryActionTime = Date.now();
+        const result = await executeSingleAction({
+          action: 'switch_region',
+          region,
+        });
+        const speech = `I have switched your menu to ${result.data?.region || region || 'your requested region'}.`;
+        return {
+          toolCallId,
+          result: JSON.stringify({ ...result, message: speech }),
+        };
+      }
 
       case 'open_category':
       case 'menu_filter_category':
       case 'filter_category': {
         const catName = fnArgs.category_name || fnArgs.category || fnArgs.name || fnArgs.query || '';
+        const region = fnArgs.region || fnArgs.region_name || '';
         lastCategoryActionTime = Date.now();
         const result = await executeSingleAction({
           action: 'open_category',
           category_name: catName,
-        });
+          region,
+        } as any);
         const speech = `I have opened the ${catName || 'menu'} category on your screen.`;
         return {
           toolCallId,
-          result: JSON.stringify({ success: true, message: speech, categoryName: catName }),
+          result: JSON.stringify({ success: true, message: speech, categoryName: catName, region }),
         };
       }
 
@@ -1388,7 +1436,14 @@ export const useVapiStore = create<VapiState>((set, get) => ({
           type: 'add-message',
           message: {
             role: 'system',
-            content: `[Current App Context] Order Type: ${initialContext.cart.orderType}. Outlet: ${initialContext.restaurant.selectedOutletName || 'None'}. Cart Items: ${initialContext.cart.itemCount}. If customer asks to switch to takeaway, dine in, or delivery, you can use set_order_type ("Take Away", "Dine In", "Delivery").`
+            content: `[Current App Context] Order Type: ${initialContext.cart.orderType}. Outlet: ${initialContext.restaurant.selectedOutletName || 'None'}. Cart Items: ${initialContext.cart.itemCount}.
+CRITICAL BEHAVIOR GUIDELINES:
+1. When user asks about food categories, regional cuisines, or dishes:
+   - Call "open_category" (category_name) or "switch_region" ("North Indian" or "South Indian").
+   - NEVER call "open_cart" or "show_cart" when user mentions a category or dish.
+2. Only call "open_cart" when the user explicitly commands to view or open their cart ("show cart", "view cart", "checkout").
+3. Supported North Indian Categories: Tandoori Starters, Tandoori Breads (Roti, Naan, Kulcha), Tandoori Side Dishes, Noodles, Salad, Raitha, Rice Varieties (Fried Rice, Biryani, Pulao).
+4. Supported South Indian Categories: Dosa Varieties, Breakfast & Dinner (Idli, Poori, Pongal), Evening Snacks (Vada, Samosa), Hot Beverages (Filter Coffee, Tea), Lunch (Meals, Thali), Rice Varieties (Sambar Rice, Curd Rice), Soups.`
           }
         });
       } catch (e) {
@@ -1571,30 +1626,94 @@ export const useVapiStore = create<VapiState>((set, get) => ({
                 console.log('[VapiStore] Speech detected intent: dine in pay bill');
                 executeSingleAction({ action: 'dine_in_pay_bill' });
               }
-              // 1.7 Menu Categories ("go to rice varieties", "show dosa varieties", "starters", "breakfast", "lunch", "show categories", etc.)
+              // 1.65 Region Switches (North Indian / South Indian / All Regions)
               else if (
-                /\b(rice varieties|rice varities|dosa varieties|dosa varities|hot beverages|evening snacks|breakfast & dinner|tandoori starters|tandoori breads|tandoori side dishes|lunch|breakfast|dinner|soups|noodles|salad)\b/i.test(lower) ||
-                /\b(show|open|view|see|go to|take me to|display|switch to)\b.*\b(rice varieties|rice varities|rice|dosa varieties|dosa varities|dosa|beverages|coffee|tea|snacks|soups|starters|tandoori|noodles|salads|breakfast|lunch|dinner|categories|category)\b/i.test(lower) ||
+                /\b(north indian|north-indian|northindian)\b/i.test(lower)
+              ) {
+                lastSpeechIntentTime = now;
+                lastCategoryActionTime = now;
+                console.log('[VapiStore] Speech detected intent: switch to North Indian');
+                executeSingleAction({ action: 'switch_region', region: 'North Indian' });
+              }
+              else if (
+                /\b(south indian|south-indian|southindian)\b/i.test(lower)
+              ) {
+                lastSpeechIntentTime = now;
+                lastCategoryActionTime = now;
+                console.log('[VapiStore] Speech detected intent: switch to South Indian');
+                executeSingleAction({ action: 'switch_region', region: 'South Indian' });
+              }
+              else if (
+                /\b(all regions|all foods|both regions|all foods menu|full menu)\b/i.test(lower)
+              ) {
+                lastSpeechIntentTime = now;
+                lastCategoryActionTime = now;
+                console.log('[VapiStore] Speech detected intent: switch to All Regions');
+                executeSingleAction({ action: 'switch_region', region: 'All Regions' });
+              }
+              // 1.7 Menu Categories (Rice Varieties, Dosa Varieties, Starters, Breads, Noodles, Lunch, etc.)
+              else if (
+                /\b(rice varieties|rice varities|dosa varieties|dosa varities|hot beverages|evening snacks|breakfast & dinner|tandoori starters|tandoori breads|tandoori side dishes|lunch|breakfast|dinner|soups|soup|noodles|noodle|salad|salads|raitha|raita|starters|starter|breads|bread|roti|naan|kulcha|tikka|dosa|dosai|idli|vada|pongal|poori|meals|thali|filter coffee|coffee|tea|snacks|fried rice|biryani|pulao|pulav)\b/i.test(lower) ||
+                /\b(show|open|view|see|go to|take me to|display|switch to)\b.*\b(rice|dosa|beverages|coffee|tea|snacks|soups|soup|starters|tandoori|noodles|noodle|salad|salads|raitha|raita|breakfast|lunch|dinner|categories|category|meals|breads|roti|naan|biryani|fried rice)\b/i.test(lower) ||
                 /\b(categories|category names|show categories|all categories)\b/i.test(lower)
               ) {
                 lastSpeechIntentTime = now;
                 lastCategoryActionTime = now;
                 let catName = 'Rice Varieties';
-                if (/snack/i.test(lower)) catName = 'Evening Snacks';
-                else if (/rice/i.test(lower)) catName = 'Rice Varieties';
-                else if (/dosa/i.test(lower)) catName = 'Dosa Varieties';
-                else if (/beverage|coffee|tea/i.test(lower)) catName = 'Hot Beverages';
-                else if (/soup/i.test(lower)) catName = 'Soups';
-                else if (/starter|tandoori/i.test(lower)) catName = 'Tandoori Starters';
-                else if (/noodle/i.test(lower)) catName = 'Noodles';
-                else if (/salad/i.test(lower)) catName = 'Salad';
-                else if (/breakfast/i.test(lower)) catName = 'Breakfast & Dinner';
-                else if (/lunch/i.test(lower)) catName = 'Lunch';
-                else if (/categories|category/i.test(lower)) catName = '';
+                let targetRegion: string | undefined = undefined;
 
-                console.log('[VapiStore] Speech detected intent: open category', catName || 'all');
+                // North Indian
+                if (/starter|tikka|kabab/i.test(lower)) {
+                  catName = 'Tandoori Starters';
+                  targetRegion = 'North Indian';
+                } else if (/bread|roti|naan|kulcha|paratha/i.test(lower)) {
+                  catName = 'Tandoori Breads';
+                  targetRegion = 'North Indian';
+                } else if (/side dish|paneer butter|gravy|dal makhani|curry/i.test(lower)) {
+                  catName = 'Tandoori Side Dishes';
+                  targetRegion = 'North Indian';
+                } else if (/noodle/i.test(lower)) {
+                  catName = 'Noodles';
+                  targetRegion = 'North Indian';
+                } else if (/salad/i.test(lower)) {
+                  catName = 'Salad';
+                  targetRegion = 'North Indian';
+                } else if (/raitha|raita/i.test(lower)) {
+                  catName = 'Raitha';
+                  targetRegion = 'North Indian';
+                } else if (/fried rice|biryani|pulao|pulav|jeera rice/i.test(lower)) {
+                  catName = 'Rice Varieties';
+                  targetRegion = 'North Indian';
+                }
+                // South Indian
+                else if (/dosa|dosai|roast|uthappam/i.test(lower)) {
+                  catName = 'Dosa Varieties';
+                  targetRegion = 'South Indian';
+                } else if (/snack|vada|samosa|bajji|bonda/i.test(lower)) {
+                  catName = 'Evening Snacks';
+                  targetRegion = 'South Indian';
+                } else if (/beverage|coffee|tea|filter coffee|drink/i.test(lower)) {
+                  catName = 'Hot Beverages';
+                  targetRegion = 'South Indian';
+                } else if (/soup/i.test(lower)) {
+                  catName = 'Soups';
+                  targetRegion = 'South Indian';
+                } else if (/breakfast|idli|pongal|poori|dinner/i.test(lower)) {
+                  catName = 'Breakfast & Dinner';
+                  targetRegion = 'South Indian';
+                } else if (/lunch|meal|thali/i.test(lower)) {
+                  catName = 'Lunch';
+                  targetRegion = 'South Indian';
+                } else if (/rice/i.test(lower)) {
+                  catName = 'Rice Varieties';
+                  targetRegion = 'South Indian';
+                } else if (/categories|category/i.test(lower)) {
+                  catName = '';
+                }
+
+                console.log('[VapiStore] Speech detected intent: open category', catName || 'all', targetRegion || '');
                 if (catName) {
-                  executeSingleAction({ action: 'open_category', category_name: catName });
+                  executeSingleAction({ action: 'open_category', category_name: catName, region: targetRegion } as any);
                 } else {
                   executeSingleAction({ action: 'open_menu' });
                 }
@@ -1672,9 +1791,14 @@ export const useVapiStore = create<VapiState>((set, get) => ({
                 /\b(show|open|view|go to|take me to)\b.*\b(cart|basket|checkout)\b/i.test(lower) ||
                 /^(cart|view cart|open cart|checkout)$/i.test(lower)
               ) {
-                lastSpeechIntentTime = now;
-                console.log('[VapiStore] Speech detected intent: open cart');
-                navigateScreen('/(checkout)/checkout');
+                const cartCount = useCartStore.getState().getItemCount();
+                if (cartCount > 0) {
+                  lastSpeechIntentTime = now;
+                  console.log('[VapiStore] Speech detected intent: open cart');
+                  navigateScreen('/(checkout)/checkout');
+                } else {
+                  console.log('[VapiStore] Cart is empty, suppressed voice navigation to empty cart.');
+                }
               }
             }
           }

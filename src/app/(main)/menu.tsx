@@ -175,7 +175,7 @@ export default function App() {
   const phone = useAuthStore(s => s.phone);
   const dineInSession = useDineInSessionStore();
   const [isPlacingOrder, setIsPlacingOrder] = useState(false);
-  const params = useLocalSearchParams<{ orderType?: string; tableNumber?: string; categoryId?: string; categoryName?: string; search?: string }>();
+  const params = useLocalSearchParams<{ orderType?: string; tableNumber?: string; categoryId?: string; categoryName?: string; search?: string; region?: string }>();
   const insets = useSafeAreaInsets();
   
   const cart = useCartStore(s => s.items);
@@ -242,27 +242,60 @@ export default function App() {
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setSearchQuery(params.search as string);
     }
+    if (params.region) {
+      setActiveRegion(params.region as string);
+    }
     if (params.categoryName || params.categoryId) {
       const newCat = (params.categoryName as string) || (params.categoryId as string);
       setActiveCat(newCat);
       setSearchQuery("");
-      setActiveRegion("All Regions");
+      if (!params.region) {
+        // Auto-detect region if the category belongs exclusively to one region
+        const catObj = allCategories.find(c => {
+          const l = (c.label || '').toLowerCase().replace(/varities/i, 'varieties').trim();
+          const target = newCat.toLowerCase().replace(/varities/i, 'varieties').trim();
+          return l === target || l.includes(target) || target.includes(l);
+        });
+        if (catObj?.region && activeRegion !== catObj.region && activeRegion !== 'All Regions') {
+          setActiveRegion(catObj.region);
+        }
+      }
     }
    
-  }, [params.orderType, params.tableNumber, params.search, params.categoryName, params.categoryId, setOrderType, setTableNumber]);
+  }, [params.orderType, params.tableNumber, params.search, params.categoryName, params.categoryId, params.region, allCategories, setOrderType, setTableNumber]);
 
-  // Listen for real-time open_category events from voice assistant
+  // Listen for real-time open_category and switch_region events from voice assistant
   useEffect(() => {
     const sub = DeviceEventEmitter.addListener('open_category', (data: any) => {
       console.log('[Menu] Event received open_category:', data);
       const catName = data?.categoryName || data?.category || data;
+      const targetRegion = data?.region;
       if (catName) {
         setActiveCat(catName);
         setSearchQuery('');
-        setActiveRegion('All Regions');
+        if (targetRegion) {
+          setActiveRegion(targetRegion);
+        }
       }
     });
-    return () => sub.remove();
+
+    const regSub = DeviceEventEmitter.addListener('switch_region', (data: any) => {
+      console.log('[Menu] Event received switch_region:', data);
+      const reg = data?.region || (typeof data === 'string' ? data : 'All Regions');
+      setActiveRegion(reg);
+      if (data?.categoryName) {
+        setActiveCat(data.categoryName);
+      } else {
+        setActiveCat('all');
+      }
+      setSearchQuery('');
+      categoryScrollRef.current?.scrollTo({ x: 0, animated: true });
+    });
+
+    return () => {
+      sub.remove();
+      regSub.remove();
+    };
   }, []);
 
   // Check if active dine-in session conflicts with delivery mode
@@ -317,7 +350,7 @@ export default function App() {
       }, 300);
       return () => clearTimeout(timer);
     }
-  }, [activeCat, allCategories]);
+  }, [activeCat, allCategories, activeRegion]);
 
   const [refreshing, setRefreshing] = useState(false);
   

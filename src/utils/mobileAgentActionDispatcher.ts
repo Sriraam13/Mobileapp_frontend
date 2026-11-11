@@ -175,6 +175,7 @@ export interface ActionResult {
 export interface UIAction {
   action: string;
   route?: string;
+  region?: string;
   category_id?: number;
   category_name?: string;
   menu_item_id?: number;
@@ -459,6 +460,15 @@ export async function executeSingleAction(act: UIAction): Promise<ActionResult> 
       // ── Cart: Show ───────────────────────────────────────────────────────────
 
       case 'show_cart': {
+        const cartState = useCartStore.getState();
+        const itemCount = cartState.getItemCount();
+
+        // If cart is empty and user is browsing menu, avoid bouncing to an empty cart screen
+        if (itemCount === 0 && !act.payload?.force) {
+          console.log('[Dispatcher] Cart is empty, skipping navigation to empty cart screen.');
+          return { success: true, action, message: 'Your cart is currently empty. Feel free to explore our delicious menu!' };
+        }
+
         // Show cart navigates to checkout (cart UI lives there)
         navigateScreen('/(checkout)/checkout');
         return { success: true, action, message: 'Opened cart.' };
@@ -590,47 +600,154 @@ export async function executeSingleAction(act: UIAction): Promise<ActionResult> 
         ).trim();
 
         let catName = 'Rice Varieties';
+        let targetRegion: string | undefined = act.region || (act as any).payload?.region;
         const lower = rawName.toLowerCase();
-        if (lower.includes('rice')) catName = 'Rice Varieties';
-        else if (lower.includes('dosa')) catName = 'Dosa Varieties';
-        else if (lower.includes('snack')) catName = 'Evening Snacks';
-        else if (lower.includes('beverage') || lower.includes('coffee') || lower.includes('tea')) catName = 'Hot Beverages';
-        else if (lower.includes('soup')) catName = 'Soups';
-        else if (lower.includes('starter') || lower.includes('tandoori')) catName = 'Tandoori Starters';
-        else if (lower.includes('noodle')) catName = 'Noodles';
-        else if (lower.includes('salad')) catName = 'Salad';
-        else if (lower.includes('breakfast')) catName = 'Breakfast & Dinner';
-        else if (lower.includes('lunch')) catName = 'Lunch';
-        else if (rawName) catName = rawName;
+
+        // North Indian
+        if (lower.includes('starter') || lower.includes('tikka') || lower.includes('kabab')) {
+          catName = 'Tandoori Starters';
+          targetRegion = 'North Indian';
+        } else if (lower.includes('bread') || lower.includes('roti') || lower.includes('naan') || lower.includes('kulcha') || lower.includes('paratha')) {
+          catName = 'Tandoori Breads';
+          targetRegion = 'North Indian';
+        } else if (lower.includes('side dish') || lower.includes('curry') || lower.includes('paneer butter') || lower.includes('gravy') || lower.includes('dal makhani')) {
+          catName = 'Tandoori Side Dishes';
+          targetRegion = 'North Indian';
+        } else if (lower.includes('noodle')) {
+          catName = 'Noodles';
+          targetRegion = 'North Indian';
+        } else if (lower.includes('salad')) {
+          catName = 'Salad';
+          targetRegion = 'North Indian';
+        } else if (lower.includes('raitha') || lower.includes('raita')) {
+          catName = 'Raitha';
+          targetRegion = 'North Indian';
+        } else if (lower.includes('fried rice') || lower.includes('biryani') || lower.includes('pulao') || lower.includes('pulav') || lower.includes('jeera rice')) {
+          catName = 'Rice Varieties';
+          targetRegion = 'North Indian';
+        }
+        // South Indian
+        else if (lower.includes('dosa') || lower.includes('dosai') || lower.includes('roast') || lower.includes('uthappam') || lower.includes('oothappam')) {
+          catName = 'Dosa Varieties';
+          targetRegion = 'South Indian';
+        } else if (lower.includes('snack') || lower.includes('vada') || lower.includes('samosa') || lower.includes('bajji') || lower.includes('bonda') || lower.includes('cutlet')) {
+          catName = 'Evening Snacks';
+          targetRegion = 'South Indian';
+        } else if (lower.includes('beverage') || lower.includes('coffee') || lower.includes('tea') || lower.includes('filter coffee') || lower.includes('drink')) {
+          catName = 'Hot Beverages';
+          targetRegion = 'South Indian';
+        } else if (lower.includes('soup')) {
+          catName = 'Soups';
+          targetRegion = 'South Indian';
+        } else if (lower.includes('breakfast') || lower.includes('idli') || lower.includes('pongal') || lower.includes('poori') || lower.includes('dinner')) {
+          catName = 'Breakfast & Dinner';
+          targetRegion = 'South Indian';
+        } else if (lower.includes('lunch') || lower.includes('meal') || lower.includes('thali') || lower.includes('meals')) {
+          catName = 'Lunch';
+          targetRegion = 'South Indian';
+        } else if (lower.includes('rice') || lower.includes('sambar rice') || lower.includes('curd rice') || lower.includes('lemon rice')) {
+          catName = 'Rice Varieties';
+          targetRegion = 'South Indian';
+        } else if (rawName) {
+          catName = rawName;
+        }
 
         try {
           useVoiceAgentStore.getState().hideAgent();
         } catch {}
 
-        DeviceEventEmitter.emit('open_category', { categoryName: catName });
+        DeviceEventEmitter.emit('open_category', { categoryName: catName, region: targetRegion });
+        if (targetRegion) {
+          DeviceEventEmitter.emit('switch_region', { region: targetRegion, categoryName: catName });
+        }
 
         const curr = getCurrentPathname();
         const isAlreadyOnMenu = curr.includes('/menu');
+        const navParams: Record<string, any> = { categoryName: catName, search: '' };
+        if (targetRegion) navParams.region = targetRegion;
 
         if (isAlreadyOnMenu) {
-          console.log(`[Dispatcher] Already on menu screen, switched category tab to: ${catName}`);
+          console.log(`[Dispatcher] Already on menu screen, switched category tab to: ${catName} (region: ${targetRegion || 'any'})`);
           try {
             const r = getActiveRouter();
             if (r.setParams) {
-              r.setParams({ categoryName: catName, search: '' });
+              r.setParams(navParams);
             }
           } catch (e) {
             console.warn('[Dispatcher] setParams failed:', e);
           }
         } else {
-          navigateScreen('/menu', { categoryName: catName, search: '' });
+          navigateScreen('/menu', navParams);
         }
 
         return {
           success: true,
           action,
-          message: `Opened menu category: ${catName}.`,
-          data: { categoryName: catName },
+          message: `Opened menu category: ${catName}${targetRegion ? ` in ${targetRegion}` : ''}.`,
+          data: { categoryName: catName, region: targetRegion },
+        };
+      }
+
+      // ── Region Switching (North Indian / South Indian / All Regions) ─────────
+
+      case 'switch_region':
+      case 'select_region':
+      case 'open_region': {
+        const rawRegion = String(
+          act.region ||
+          (act as any).payload?.region ||
+          act.payload?.region_name ||
+          ''
+        ).trim().toLowerCase();
+
+        let targetRegion = 'All Regions';
+        if (rawRegion.includes('north')) {
+          targetRegion = 'North Indian';
+        } else if (rawRegion.includes('south')) {
+          targetRegion = 'South Indian';
+        } else if (rawRegion.includes('all') || rawRegion.includes('both')) {
+          targetRegion = 'All Regions';
+        }
+
+        const catName = String(
+          act.category_name ||
+          (act as any).category ||
+          act.payload?.categoryName ||
+          ''
+        ).trim();
+
+        try {
+          useVoiceAgentStore.getState().hideAgent();
+        } catch {}
+
+        DeviceEventEmitter.emit('switch_region', { region: targetRegion, categoryName: catName || 'all' });
+        if (catName) {
+          DeviceEventEmitter.emit('open_category', { categoryName: catName, region: targetRegion });
+        }
+
+        const curr = getCurrentPathname();
+        const isAlreadyOnMenu = curr.includes('/menu');
+        const navParams: Record<string, any> = { region: targetRegion, categoryName: catName || 'all', search: '' };
+
+        if (isAlreadyOnMenu) {
+          console.log(`[Dispatcher] Already on menu screen, switched region to: ${targetRegion}`);
+          try {
+            const r = getActiveRouter();
+            if (r.setParams) {
+              r.setParams(navParams);
+            }
+          } catch (e) {
+            console.warn('[Dispatcher] setParams failed:', e);
+          }
+        } else {
+          navigateScreen('/menu', navParams);
+        }
+
+        return {
+          success: true,
+          action,
+          message: `Switched menu to ${targetRegion}${catName ? ` and opened ${catName}` : ''}.`,
+          data: { region: targetRegion, categoryName: catName },
         };
       }
 
