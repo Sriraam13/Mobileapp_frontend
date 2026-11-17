@@ -18,6 +18,8 @@ import { router } from 'expo-router';
 import { DeviceEventEmitter } from 'react-native';
 import { useCartStore } from '../store/useCartStore';
 import { useLiveOrderStore } from '../store/useLiveOrderStore';
+import { useOrderStore } from '../store/useOrderStore';
+import { useAuthStore } from '../store/useAuthStore';
 import { useRestaurantStore } from '../store/useRestaurantStore';
 import { useVoiceAgentStore } from '../store/useVoiceAgentStore';
 import { useAddressStore } from '../store/useAddressStore';
@@ -332,12 +334,12 @@ export async function executeSingleAction(act: UIAction): Promise<ActionResult> 
             const targetType = normalized.includes('party') ? 'Party Order' : 'Catering Order';
             useCateringSessionStore.getState().setOrderType(targetType);
           } catch {}
-          navigateScreen('/(main)/catering-choose-package');
+          navigateScreen('/(main)/bulk-catering');
           return {
             success: true,
             action,
-            message: 'Switched to Catering mode and opened catering packages.',
-            data: { orderType: 'Catering Order', route: '/(main)/catering-choose-package' },
+            message: 'Switched to Catering mode and opened bulk catering.',
+            data: { orderType: 'Catering Order', route: '/(main)/bulk-catering' },
           };
         }
 
@@ -866,16 +868,134 @@ export async function executeSingleAction(act: UIAction): Promise<ActionResult> 
         };
       }
 
+      case 'dine_in_pay_counter': {
+        useCartStore.getState().setOrderType('Dine In');
+        const cartState = useCartStore.getState();
+        const rawItems = Object.values(cartState.items);
+        const cartCount = cartState.getItemCount();
+
+        if (cartCount === 0) {
+          return {
+            success: false,
+            action,
+            message: 'Your cart is empty. Please add items to your cart before proceeding to pay at counter.',
+          };
+        }
+
+        const subtotal = cartState.getSubtotal();
+        const discountAmount = cartState.getDiscountAmount();
+        const discountCode = cartState.discountCode;
+        const gst = cartState.getGst();
+        const serviceCharge = cartState.getServiceCharge();
+        const totalVal = cartState.getGrandTotal();
+        const effectiveTable = cartState.tableNumber || 'T-04';
+        const userPhone = useAuthStore.getState().phone || '+919876543210';
+        const restId = Number(useRestaurantStore.getState().selectedOutlet?.restaurant_id || 1);
+
+        const formattedCart = rawItems.map(item => ({
+          id: Number(item.id || (item as any).menu_item_id),
+          name: item.name,
+          image: item.image,
+          quantity: Number(item.quantity || 1),
+          price: Number(item.price || 0),
+          title: item.name,
+          itemName: item.name,
+          image_url: item.image,
+          note: item.note || ''
+        }));
+
+        let generatedOrderId = 'ORD-' + Math.floor(100000 + Math.random() * 900000);
+        let dbOrderId = '';
+
+        try {
+          const { orderApi } = require('../services/apiService');
+          const orderData = {
+            restaurant_id: restId,
+            table_number: effectiveTable,
+            order_type: 'DINE_IN',
+            delivery_address: null,
+            delivery_address_id: null,
+            delivery_fee: 0,
+            packaging_fee: 0,
+            tip_amount: 0,
+            payment_method: 'Pay at Counter',
+            phone: userPhone,
+            cart: formattedCart,
+            subtotal,
+            gst,
+            service_charge: serviceCharge,
+            discount_amount: discountAmount,
+            discount_code: discountCode || null,
+            total_amount: totalVal
+          };
+
+          const resultData = await orderApi.createOrder(orderData);
+          if (resultData && (resultData.success || resultData.orderId || resultData.dbOrderId)) {
+            if (resultData.orderId) generatedOrderId = resultData.orderId;
+            if (resultData.dbOrderId) dbOrderId = resultData.dbOrderId.toString();
+          }
+        } catch (e) {
+          console.warn('[Dispatcher] createOrder Pay at Counter error, using local fallback:', e);
+        }
+
+        const finalOrder = {
+          orderId: generatedOrderId,
+          dbOrderId,
+          total: totalVal.toString(),
+          paymentMethod: 'Pay at Counter',
+          phone: userPhone,
+          tableNumber: effectiveTable,
+          itemCount: rawItems.length.toString(),
+          cart: JSON.stringify(formattedCart),
+          orderType: 'Dine In',
+          subtotal: subtotal.toString(),
+          discountAmount: discountAmount.toString(),
+          discountCode: discountCode || ''
+        };
+
+        useOrderStore.getState().setCurrentOrder(finalOrder as any);
+        useOrderStore.getState().addPastOrder({
+          orderId: generatedOrderId,
+          dbOrderId,
+          date: new Date().toISOString(),
+          total: totalVal,
+          itemsCount: rawItems.length,
+          status: 'Preparing',
+          customer_phone: userPhone || '',
+          order_type: 'Dine In',
+        });
+        useLiveOrderStore.getState().setLiveOrder('Dine In', generatedOrderId, dbOrderId, 'Preparing');
+        useCartStore.getState().clearCart();
+
+        navigateScreen('/(checkout)/order-completed', {
+          orderId: generatedOrderId,
+          dbOrderId,
+          tableNumber: effectiveTable,
+          totalAmount: String(totalVal),
+          paymentMethod: 'Pay at Counter',
+          cartItems: JSON.stringify(formattedCart),
+          orderType: 'Dine In',
+          date: new Date().toISOString(),
+        });
+
+        return {
+          success: true,
+          action,
+          message: `Placed Dine-In order #${generatedOrderId} with Pay at Counter at Table ${effectiveTable}. Navigated to order completed screen.`,
+          data: { orderId: generatedOrderId, tableNumber: effectiveTable, paymentMethod: 'Pay at Counter' }
+        };
+      }
+
       // ── Catering ─────────────────────────────────────────────────────────────
 
       case 'open_catering': {
         const payload = act.payload || {};
-        if (payload.screen === 'bulk' || payload.route === 'bulk') {
-          navigateScreen('/(main)/bulk-catering');
-          return { success: true, action, message: 'Opened Bulk Catering.' };
+        if (payload.screen === 'event_details' || payload.route === 'event_details') {
+          navigateScreen('/(main)/catering-event-details', payload.params || {});
+          return { success: true, action, message: 'Opened Catering Event Details.', data: { route: '/(main)/catering-event-details' } };
         }
-        navigateScreen('/(main)/catering-choose-package', payload.params || {});
-        return { success: true, action, message: 'Opened Catering Package Selection.', data: { route: '/(main)/catering-choose-package' } };
+        navigateScreen('/(main)/bulk-catering', payload.params || {});
+        return { success: true, action, message: 'Opened Bulk Catering.', data: { route: '/(main)/bulk-catering' } };
       }
 
       case 'catering_set_event_details': {
@@ -894,12 +1014,12 @@ export async function executeSingleAction(act: UIAction): Promise<ActionResult> 
         const rawEventName = p.event_name || p.eventName || p.name || p.title || store.eventName || '';
         const eventName = String(rawEventName || (occasion ? `${occasion} Event` : 'Catering Event')).trim();
 
-        // 4. Guest count (sanitize to clean numeric digits)
+        // 4. Guest count (sanitize to clean numeric digits, min 50)
         const rawGuests = p.guest_count ?? p.guestCount ?? p.guests ?? p.pax ?? p.number_of_guests ?? p.people ?? store.guestCount ?? '50';
-        let guestCount = '50';
+        let guestCount = store.guestCount || '50';
         const parsedGuests = parseInt(String(rawGuests).replace(/[^0-9]/g, ''), 10);
-        if (!isNaN(parsedGuests) && parsedGuests > 0) {
-          guestCount = String(parsedGuests);
+        if (!isNaN(parsedGuests)) {
+          guestCount = parsedGuests < 50 ? '50' : String(parsedGuests);
         }
 
         // 5. Date normalization (ensure standard "DD MMMM YYYY" for display & backend compatibility)
@@ -992,6 +1112,10 @@ export async function executeSingleAction(act: UIAction): Promise<ActionResult> 
           store.setSelectedPackage(pkgCode);
         }
 
+        const rawCount = p.guestCount || p.guest_count || store.guestCount || '50';
+        const parsedCount = parseInt(String(rawCount).replace(/[^0-9]/g, ''), 10);
+        const validGuestCount = (!isNaN(parsedCount) && parsedCount >= 50) ? String(parsedCount) : (store.guestCount && parseInt(store.guestCount, 10) >= 50 ? store.guestCount : '50');
+
         // Forward existing event details from store or params
         const params: Record<string, any> = {
           selectedPackage: pkgCode || store.selectedPackage || '',
@@ -999,10 +1123,22 @@ export async function executeSingleAction(act: UIAction): Promise<ActionResult> 
           date: p.date || p.event_date || store.date || '',
           time: p.time || p.serving_time || store.time || '',
           occasion: p.occasion || store.occasion || '',
-          guestCount: String(p.guestCount || p.guest_count || store.guestCount || '50'),
+          guestCount: validGuestCount,
           serviceType: p.serviceType || p.service_type || store.serviceType || 'Delivery Only',
           address: p.address || p.delivery_address || store.address || '',
         };
+
+        // If date or address is missing, navigate to Event Details first
+        const hasEventDetails = Boolean(params.date && params.address);
+        if (!hasEventDetails) {
+          navigateScreen('/(main)/catering-event-details', params);
+          return {
+            success: true,
+            action,
+            message: 'Please provide event details first before choosing packages. Opened Catering Event Details.',
+            data: { ...params, navigatedTo: 'event_details' }
+          };
+        }
 
         navigateScreen('/(main)/catering-choose-package', params);
         return {

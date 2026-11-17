@@ -75,15 +75,20 @@ export default function CateringEventDetails() {
   }, [selectedOutlet, restaurantId, setRestaurant]);
 
   // Sync route parameters into catering store if passed via navigation
+  const paramsAppliedRef = useRef(false);
   useEffect(() => {
+    if (paramsAppliedRef.current) return;
     const updates: any = {};
     if (params.eventName && !eventName) updates.eventName = String(params.eventName);
     if (params.date && !date) updates.date = String(params.date);
     if (params.time && !time) updates.time = String(params.time);
     if (params.occasion && !occasion) updates.occasion = String(params.occasion);
-    if (params.guestCount && params.guestCount !== guestCount) {
+    if (params.guestCount) {
       const sanitized = String(params.guestCount).replace(/[^0-9]/g, '');
-      if (sanitized) updates.guestCount = sanitized;
+      const parsed = parseInt(sanitized, 10);
+      if (!isNaN(parsed) && parsed >= 50) {
+        updates.guestCount = sanitized;
+      }
     }
     if (params.serviceType && !serviceType) updates.serviceType = String(params.serviceType);
     if (params.orderType && !orderType) updates.orderType = String(params.orderType);
@@ -93,6 +98,7 @@ export default function CateringEventDetails() {
     if (Object.keys(updates).length > 0) {
       setEventDetails(updates);
     }
+    paramsAppliedRef.current = true;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [params]);
 
@@ -106,7 +112,10 @@ export default function CateringEventDetails() {
       if (data.guestCount !== undefined || data.guest_count !== undefined) {
         const raw = String(data.guestCount ?? data.guest_count);
         const sanitized = raw.replace(/[^0-9]/g, '');
-        if (sanitized) updates.guestCount = sanitized;
+        const num = parseInt(sanitized, 10);
+        if (!isNaN(num)) {
+          updates.guestCount = num < 50 ? '50' : sanitized;
+        }
       }
       if (data.date !== undefined) updates.date = String(data.date);
       if (data.event_date !== undefined) updates.date = String(data.event_date);
@@ -326,7 +335,7 @@ export default function CateringEventDetails() {
     
     const guests = parseInt(guestCount, 10);
     if (isNaN(guests) || guests < 50) {
-      showAlert('Invalid Guest Count', 'The guest count should be minimum 50.');
+      showAlert('Invalid Guest Count', 'The minimum guest count for bulk catering is 50 persons. You can enter 50 or any number greater than 50.');
       return;
     }
 
@@ -545,7 +554,13 @@ export default function CateringEventDetails() {
       
       {/* Header */}
       <View style={styles.header}>
-        <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
+        <TouchableOpacity style={styles.backButton} onPress={() => {
+          if (router.canGoBack()) {
+            router.back();
+          } else {
+            router.replace('/(main)/bulk-catering');
+          }
+        }}>
           <Ionicons name="chevron-back" size={24} color="#000" />
         </TouchableOpacity>
         <View style={styles.headerTextContainer}>
@@ -641,15 +656,56 @@ export default function CateringEventDetails() {
           </View>
           <View style={[styles.inputGroup, { flex: 1, marginLeft: 10 }]}>
             <Text style={styles.label}>Guest Count (Min 50) <Text style={styles.asterisk}>*</Text></Text>
-            <View style={styles.guestCounter}>
+            <View style={styles.guestCounterRow}>
+              <TouchableOpacity
+                style={[
+                  styles.counterBtn,
+                  (parseInt(guestCount, 10) <= 50 || isNaN(parseInt(guestCount, 10))) && styles.counterBtnDisabled
+                ]}
+                disabled={parseInt(guestCount, 10) <= 50 || isNaN(parseInt(guestCount, 10))}
+                onPress={() => {
+                  const curr = parseInt(guestCount, 10) || 50;
+                  const next = Math.max(50, curr - 5);
+                  setEventDetails({ guestCount: next.toString() });
+                }}
+              >
+                <Ionicons
+                  name="remove"
+                  size={18}
+                  color={parseInt(guestCount, 10) <= 50 || isNaN(parseInt(guestCount, 10)) ? "#bbb" : "#ff4500"}
+                />
+              </TouchableOpacity>
               <TextInput
                 style={styles.guestInput}
                 value={guestCount}
-                onChangeText={(text) => setEventDetails({ guestCount: text })}
+                onChangeText={(text) => {
+                  const sanitized = text.replace(/[^0-9]/g, '');
+                  setEventDetails({ guestCount: sanitized });
+                }}
+                onBlur={() => {
+                  const num = parseInt(guestCount, 10);
+                  if (isNaN(num) || num < 50) {
+                    setEventDetails({ guestCount: '50' });
+                  }
+                }}
                 keyboardType="numeric"
-                maxLength={4}
+                maxLength={5}
+                placeholder="50"
               />
+              <TouchableOpacity
+                style={styles.counterBtn}
+                onPress={() => {
+                  const curr = parseInt(guestCount, 10) || 50;
+                  const next = curr + 5;
+                  setEventDetails({ guestCount: next.toString() });
+                }}
+              >
+                <Ionicons name="add" size={18} color="#ff4500" />
+              </TouchableOpacity>
             </View>
+            {guestCount.length > 0 && parseInt(guestCount, 10) < 50 && (
+              <Text style={styles.guestWarningText}>Minimum 50 guests required</Text>
+            )}
           </View>
         </View>
 
@@ -905,22 +961,42 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
   },
-  guestCounter: {
+  guestCounterRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
     borderWidth: 1,
     borderColor: '#ff4500',
     borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 12,
     backgroundColor: '#fff',
     minHeight: 46,
+    paddingHorizontal: 6,
+    justifyContent: 'space-between',
+  },
+  counterBtn: {
+    width: 30,
+    height: 30,
+    borderRadius: 6,
+    backgroundColor: '#fff3e0',
+    alignItems: 'center',
     justifyContent: 'center',
   },
+  counterBtnDisabled: {
+    backgroundColor: '#f5f5f5',
+  },
   guestInput: {
-    fontSize: 14,
+    flex: 1,
+    textAlign: 'center',
+    fontSize: 15,
     fontWeight: 'bold',
     color: '#ff4500',
-    padding: 0,
-    margin: 0,
+    paddingVertical: 0,
+    marginHorizontal: 4,
+  },
+  guestWarningText: {
+    fontSize: 10,
+    color: '#d32f2f',
+    marginTop: 4,
+    fontWeight: '600',
   },
   segmentControl: {
     flexDirection: 'row',

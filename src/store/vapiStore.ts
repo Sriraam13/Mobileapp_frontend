@@ -30,6 +30,7 @@ import { useLiveOrderStore } from '../store/useLiveOrderStore';
 import { useAddressStore } from '../store/useAddressStore';
 import { useCartStore } from './useCartStore';
 import { useFavoritesStore } from './useFavoritesStore';
+import { useCateringSessionStore } from './useCateringSessionStore';
 import { customerApi } from '../services/apiService';
 
 // Cache executed toolCallIds and debounce actions to avoid duplicate execution
@@ -143,6 +144,42 @@ const getVapi = () => {
 export function speakAgentFeedback(message: string) {
   // Log feedback; suppressed from vapi.say to prevent overlapping speech and user turn interruptions
   console.log('[VapiStore] Agent feedback (spoken natively by Vapi):', message);
+}
+
+/**
+ * Sanitizes speech transcripts to prevent brand corruption, phonetic errors,
+ * and common speech-to-text mis-hearings across both user and assistant speech.
+ */
+export function sanitizeTranscript(raw: string, role?: string): string {
+  if (!raw) return '';
+  let text = raw;
+
+  // 1. Universal Brand, Outlet & Name pronunciations/STT corruptions
+  text = text
+    .replace(/\b(DataUtipes|DataUtipies|Data\s*Utipes|Data\s*ODP|data\s*ODP|data\s*UDP|Data\s*UDP|data\s*udp|DataUdipi)\b/gi, 'Data Udipi')
+    .replace(/\b(m\s*g\s*r\s*nagar|mgr\s*nagar)\b/gi, 'MGR Nagar')
+    .replace(/\b(m\s*g\s*r)\b/gi, 'MGR')
+    .replace(/\b(mugalivakam|mugalivakkam)\b/gi, 'Mugalivakkam');
+
+  // Customer Name fix: "Riram" -> "Sriram"
+  text = text.replace(/\bRiram\b/g, 'Sriram');
+
+  // 2. Common user STT mis-hearings for food and cart actions
+  if (role === 'user') {
+    text = text
+      .replace(/\b(to my car|in my car|into my car|to car|in car|to my card|in my card|to card|in card)\b/gi, 'to my cart')
+      .replace(/\b(view my card|view card|show card|open card|my card|view my car|show car|open car|check my card|see my card)\b/gi, 'view my cart')
+      .replace(/\b(add on)\b/gi, 'add')
+      .replace(/\b(take away)\b/gi, 'takeaway')
+      .replace(/\bdinein\b/gi, 'dine in')
+      .replace(/\b(pay counter|counter pay|pay in counter|at counter)\b/gi, 'pay at counter');
+
+    if (/^(card|car)$/i.test(text.trim())) {
+      text = 'cart';
+    }
+  }
+
+  return text;
 }
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -375,6 +412,72 @@ async function resolveAndAddToCart(fnArgs: any): Promise<{ success: boolean; cod
 
   console.log(`[VapiStore] resolveAndAddToCart: rawInput="${rawInput}" -> cleanName="${rawName}", rawId="${rawId}", qty=${qty}`);
 
+  // STRICT GUARD: Masala Dosa & Ragi Dosa do not exist on Data Udipi menu (only Rava Masala Dosai and Veg. Dosai exist).
+  // Never substitute them or open categories! Inform the customer immediately.
+  const isExplicitRava = /\brava\b/i.test(rawName);
+  const isMasalaDosa = /\bmasala\s*dosa/i.test(rawName);
+  const isRagiDosa = /\bragi\s*dosa/i.test(rawName);
+
+  if ((isMasalaDosa && !isExplicitRava) || isRagiDosa) {
+    const itemLabel = isRagiDosa ? 'Ragi Dosa' : 'Masala Dosa';
+    const msg = `Sorry, ${itemLabel} is not available on our menu today. Would you like to try Rava Masala Dosai or Veg. Dosai?`;
+    console.log(`[VapiStore] Strictly rejected unavailable dish: ${itemLabel}`);
+    try {
+      const v = getVapi();
+      if (v?.say) v.say(`Sorry, ${itemLabel} is not available on our menu today.`, false, true, true);
+    } catch {}
+    return {
+      success: false,
+      code: 'MENU_ITEM_NOT_FOUND',
+      message: msg,
+    };
+  }
+
+  // STRICT GUARD: Pure Sambar request without vadai or idly
+  const isPureSambar = /\bsambar\b/i.test(rawName) && !/\b(vadai|vada|idly|idli|rice)\b/i.test(rawName);
+  if (isPureSambar) {
+    const localSambar = (restaurantState.menuItems || []).find((i: any) => /^sambar$|^tiffin sambar$/i.test(normalizeName(i.name)));
+    if (!localSambar) {
+      const msg = `Sorry, Sambar is not available as a separate item. We serve sambar with our tiffin dishes, or you can order Sambar Vadai or Sambar Rice.`;
+      console.log(`[VapiStore] Pure sambar unavailable as standalone item.`);
+      try {
+        const v = getVapi();
+        if (v?.say) v.say(`Sorry, Sambar is not available as a separate dish today.`, false, true, true);
+      } catch {}
+      return {
+        success: false,
+        code: 'MENU_ITEM_NOT_FOUND',
+        message: msg,
+      };
+    }
+  }
+
+  // STRICT GUARD: Standalone Paneer Butter Masala without pulkha/phulka/naan combo:
+  // "Pulkha with Paneer Butter Masala" and "Butter Nan with Paneer Butter Masala" are bread combos.
+  // If customer asked for "Paneer Butter Masala" or "Paneer Masala" without specifying pulkha/phulka/nan combo,
+  // do NOT silently add a combo! Check if standalone curry exists in database.
+  const isExplicitCombo = /\b(pulkha|phulka|nan\s*with|naan\s*with|combo|roti\s*with)\b/i.test(rawName);
+  const isPaneerButter = /\bpaneer\s*butter(\s*masala)?\b/i.test(rawName) || /\bpaneer\s*masala\b/i.test(rawName);
+  if (isPaneerButter && !isExplicitCombo) {
+    const standalone = (restaurantState.menuItems || []).find((i: any) => {
+      const n = normalizeName(i.name);
+      return (n === 'paneer butter masala' || n === 'paneer butter' || n === 'paneer masala') && !/\b(pulkha|phulka|naan|nan|roti|combo)\b/i.test(n);
+    });
+    if (!standalone) {
+      const msg = `Sorry, Paneer Butter Masala is only available as a combo (such as Pulkha with Paneer Butter Masala or Butter Naan with Paneer Butter Masala), not as a standalone dish. Would you like to order the combo or a side dish like Paneer 65?`;
+      console.log(`[VapiStore] Standalone Paneer Butter Masala not found in database; refused combo substitution.`);
+      try {
+        const v = getVapi();
+        if (v?.say) v.say(msg, false, true, true);
+      } catch {}
+      return {
+        success: false,
+        code: 'MENU_ITEM_NOT_FOUND',
+        message: msg,
+      };
+    }
+  }
+
   // If item object was directly passed with price and id
   if (fnArgs.item && typeof fnArgs.item === 'object' && fnArgs.item.id && fnArgs.item.price != null) {
     const item = fnArgs.item;
@@ -398,8 +501,18 @@ async function resolveAndAddToCart(fnArgs: any): Promise<{ success: boolean; cod
     };
   }
 
-  // 1. Try local menu match if menuItems are preloaded
-  const localMenuItems = restaurantState.menuItems || [];
+  // 1. Try local menu match if menuItems are preloaded (or load from database on demand)
+  let localMenuItems = restaurantState.menuItems || [];
+  if (localMenuItems.length === 0) {
+    try {
+      const dbMenuData = await fetchAgentData('menu_search', {});
+      if (dbMenuData && Array.isArray(dbMenuData.menu_items) && dbMenuData.menu_items.length > 0) {
+        restaurantState.setMenuItems(dbMenuData.menu_items);
+        localMenuItems = dbMenuData.menu_items;
+        console.log(`[VapiStore] On-demand loaded ${dbMenuData.menu_items.length} items from database.`);
+      }
+    } catch {}
+  }
   if (localMenuItems.length > 0 && rawName) {
     const localMatch = matchMenuItem(rawName, localMenuItems);
     if (localMatch.item) {
@@ -490,19 +603,70 @@ async function resolveAndAddToCart(fnArgs: any): Promise<{ success: boolean; cod
     };
   }
 
+  // 1. Sambar filtering: If customer asked for sambar (without explicitly requesting vadai or idly), exclude composite dishes
+  const isPureSambarRequest = /\bsambar\b/i.test(rawName) && !/\b(vadai|vada|idly|idli|rice)\b/i.test(rawName);
+  if (isPureSambarRequest) {
+    const pureSambarCandidates = candidates.filter((c: any) => !/\b(vadai|vada|idly|idli|rice)\b/i.test(c.name));
+    if (pureSambarCandidates.length > 0) {
+      candidates = pureSambarCandidates;
+    }
+  }
+
+  // 2. Idly filtering: If customer asked for idly (without explicitly requesting mini idly), do NOT pick mini idly
+  const isMiniIdlyRequest = /\bmini\b/i.test(rawName);
+  const isSingleIdlyRequest = /\b(single|one|1)\b/i.test(rawName);
+  if (!isMiniIdlyRequest && /\b(idli|idly|idlis)\b/i.test(rawName)) {
+    const nonMiniCandidates = candidates.filter((c: any) => !/\bmini\b/i.test(c.name));
+    if (nonMiniCandidates.length > 0) {
+      candidates = nonMiniCandidates;
+    }
+  }
+
+  // 3. Unrequested combo carrier filtering:
+  const STAPLE_CARRIERS = ['pulkha', 'phulka', 'roti', 'chapati', 'paratha', 'parotta', 'combo', 'meals', 'thali'];
+  const rawLower = rawName.toLowerCase();
+  const nonComboCandidates = candidates.filter((c: any) => {
+    const cLower = c.name.toLowerCase();
+    const hasUnrequested = STAPLE_CARRIERS.some(sc => cLower.includes(sc) && !rawLower.includes(sc));
+    return !hasUnrequested;
+  });
+  if (nonComboCandidates.length > 0) {
+    candidates = nonComboCandidates;
+  }
+
   // Best candidate selection
   const normTarget = normalizeName(rawName).toLowerCase().replace(/[^a-z0-9]/g, ' ').trim();
   let bestMatch = candidates.find((c: any) => normalizeName(c.name).toLowerCase().replace(/[^a-z0-9]/g, ' ').trim() === normTarget);
 
+  if (!bestMatch && !isMiniIdlyRequest && /\b(idli|idly|idlis)\b/i.test(rawName)) {
+    if (isSingleIdlyRequest) {
+      bestMatch = candidates.find((c: any) => /single piece|idly\(1\)/i.test(c.name));
+    } else {
+      bestMatch = candidates.find((c: any) => /idly\s*\(2\)|idly\(2\)/i.test(c.name));
+    }
+  }
+
+  if (!bestMatch && isPureSambarRequest) {
+    bestMatch = candidates.find((c: any) => /^sambar$/i.test(c.name.trim())) ||
+                candidates.find((c: any) => /tiffin sambar/i.test(c.name));
+  }
+
   if (!bestMatch && normTarget) {
     bestMatch = candidates.find((c: any) => {
       const cNorm = normalizeName(c.name).toLowerCase();
-      return cNorm.includes(normTarget) || normTarget.includes(cNorm);
+      return cNorm === normTarget;
     });
   }
 
+  // STRICT REQUIREMENT: If the exact item requested by the user does not exist in the database,
+  // DO NOT substitute candidates[0]! Inform the customer politely that the item is not available.
   if (!bestMatch) {
-    bestMatch = candidates[0];
+    console.warn(`[VapiStore] No exact match for "${rawName}" in candidates:`, candidates.map(c => c.name));
+    return {
+      success: false,
+      code: 'MENU_ITEM_NOT_FOUND',
+      message: `Sorry, "${rawName}" is not available on our menu today. Would you like to try something else from our menu?`
+    };
   }
 
   // Add to cart in useCartStore
@@ -745,23 +909,11 @@ async function handleVapiToolCall(tool: any): Promise<{ toolCallId: string; resu
 
         const isShowAll = !rawQuery || /^(all|all menus?|menu|everything|items)$/i.test(rawQuery || '');
 
-        // If a category was requested, filter directly to that category tab without clogging search query
-        const detectedCat = rawCategory || (
-          rawQuery && /\b(rice|dosa|snack|beverage|coffee|tea|soup|starter|tandoori|noodle|salad|breakfast|lunch)\b/i.test(rawQuery)
-            ? rawQuery
-            : undefined
-        );
-
-        if (detectedCat) {
+        // menu_search is a data read tool. Screen navigation is only performed if explicit category navigation is requested without a search query.
+        if (rawCategory && !rawQuery) {
           executeSingleAction({
             action: 'open_category',
-            category_name: detectedCat,
-          }).catch(() => {});
-        } else {
-          executeSingleAction({
-            action: 'navigate',
-            route: '/menu',
-            payload: { params: { search: isShowAll ? '' : (rawQuery || '') } }
+            category_name: rawCategory,
           }).catch(() => {});
         }
 
@@ -1210,6 +1362,28 @@ async function handleVapiToolCall(tool: any): Promise<{ toolCallId: string; resu
       case 'filter_category': {
         const catName = fnArgs.category_name || fnArgs.category || fnArgs.name || fnArgs.query || '';
         const region = fnArgs.region || fnArgs.region_name || '';
+
+        // Check if recent user message was attempting to order food or ask for dishes (e.g. "ragi dosa", "masala dosa", "paneer biryani")
+        const recentUserText = useVapiStore.getState().messages
+          .filter((m: any) => m.role === 'user')
+          .slice(-2)
+          .map((m: any) => m.text.toLowerCase())
+          .join(' ');
+
+        const isOrderingContext = /\b(add|order|cart|car|card|want|give|put|take|dosa|biryani|idli|idly|poori|coffee|tea|naan|roti|paneer|gobi)\b/i.test(recentUserText);
+
+        if (isOrderingContext) {
+          console.log(`[VapiStore] Suppressed open_category ("${catName}") because user is in ordering intent: "${recentUserText}"`);
+          return {
+            toolCallId,
+            result: JSON.stringify({
+              success: false,
+              code: 'CATEGORY_OPEN_SUPPRESSED',
+              message: 'Do not open menu categories when the customer is ordering, adding, or inquiring about specific dishes. Handle dish ordering or state dish availability directly without navigating categories.',
+            }),
+          };
+        }
+
         lastCategoryActionTime = Date.now();
         const result = await executeSingleAction({
           action: 'open_category',
@@ -1223,20 +1397,28 @@ async function handleVapiToolCall(tool: any): Promise<{ toolCallId: string; resu
         };
       }
 
-      // ── Dine-In Workflows (Pay Later & Pay Bill) ──────────────────────────────
+      // ── Dine-In Workflows (Pay Later, Pay at Counter & Pay Bill) ──────────────
 
       case 'dine_in_action':
       case 'dine_in_pay_later':
       case 'dine_in_pay_bill':
+      case 'dine_in_pay_counter':
       case 'pay_bill':
-      case 'pay_later': {
+      case 'pay_later':
+      case 'pay_counter':
+      case 'pay_at_counter': {
         const rawAction = String(
           fnArgs.action_type ||
           fnArgs.action ||
-          (fnName === 'pay_bill' || fnName === 'dine_in_pay_bill' ? 'pay_bill' : 'pay_later')
+          (fnName === 'pay_bill' || fnName === 'dine_in_pay_bill' ? 'pay_bill' :
+           fnName === 'dine_in_pay_counter' || fnName === 'pay_counter' || fnName === 'pay_at_counter' ? 'pay_counter' :
+           'pay_later')
         ).toLowerCase();
 
-        if (rawAction.includes('bill') || rawAction.includes('settle')) {
+        if (rawAction.includes('counter') || rawAction.includes('cash')) {
+          const result = await executeSingleAction({ action: 'dine_in_pay_counter' });
+          return { toolCallId, result: JSON.stringify(result) };
+        } else if (rawAction.includes('bill') || rawAction.includes('settle')) {
           const result = await executeSingleAction({ action: 'dine_in_pay_bill' });
           return { toolCallId, result: JSON.stringify(result) };
         } else {
@@ -1281,7 +1463,10 @@ async function handleVapiToolCall(tool: any): Promise<{ toolCallId: string; resu
       case 'catering_select_package': {
         const pkgCode = fnArgs.package_code || fnArgs.code || '';
         const pkgName = fnArgs.package_name || fnArgs.name || '';
-        const guestCount = fnArgs.guest_count || fnArgs.pax || 50;
+        const currentStoreCount = useCateringSessionStore.getState().guestCount;
+        const rawCount = fnArgs.guest_count || fnArgs.pax || currentStoreCount || '50';
+        const parsedCount = parseInt(String(rawCount), 10);
+        const guestCount = (!isNaN(parsedCount) && parsedCount >= 50) ? parsedCount : 50;
         const params: Record<string, any> = {};
         if (pkgCode) params.selectedPackage = pkgCode;
         if (guestCount) params.guestCount = String(guestCount);
@@ -1289,7 +1474,10 @@ async function handleVapiToolCall(tool: any): Promise<{ toolCallId: string; resu
           action: 'catering_choose_package',
           payload: { params },
         });
-        const speech = pkgName
+        const navigatedToEventDetails = result.data?.navigatedTo === 'event_details';
+        const speech = navigatedToEventDetails
+          ? `I have opened catering event details on your screen. Please provide your event date, occasion, and guest count (minimum 50 guests) first.`
+          : pkgName
           ? `I have opened catering package selection for ${pkgName} on your screen.`
           : `I have opened the catering packages on your screen. You can select from Grand Breakfast, Variety Feast, Regular Lunch, and more.`;
         return { toolCallId, result: JSON.stringify({ success: true, message: speech, ...params }) };
@@ -1343,7 +1531,26 @@ async function handleVapiToolCall(tool: any): Promise<{ toolCallId: string; resu
       }
 
       case 'select_payment_method': {
-        return { toolCallId, result: JSON.stringify({ success: false, message: 'Please use the app checkout screen to complete payment.' }) };
+        const method = String(fnArgs.payment_method || fnArgs.method || '').toLowerCase();
+        if (method.includes('counter') || method.includes('cash')) {
+          return {
+            toolCallId,
+            result: JSON.stringify({
+              success: true,
+              message: 'Selected Pay at Counter. You can pay with Cash, Card, or UPI directly at the counter.',
+              payment_method: 'Pay at Counter',
+            })
+          };
+        } else {
+          return {
+            toolCallId,
+            result: JSON.stringify({
+              success: true,
+              message: 'Selected UPI / Online Payment. You can pay via Google Pay, PhonePe, Paytm, or Cards.',
+              payment_method: 'UPI',
+            })
+          };
+        }
       }
 
       case 'place_order': {
@@ -1466,49 +1673,6 @@ export const useVapiStore = create<VapiState>((set, get) => ({
       }
     }
 
-    const overrides = { 
-      firstMessage: dynamicFirstMessage, 
-      maxDurationSeconds: 3600, // 1 hour max duration
-      transcriber: {
-        provider: 'deepgram',
-        model: 'nova-2',
-        language: 'en',
-        smartFormat: true,
-        endpointing: 500, // Maximum allowed by Vapi schema (500ms pause tolerance)
-        keywords: [
-          'cart:5',
-          'dosa:4',
-          'dosai:4',
-          'biryani:4',
-          'biriyani:4',
-          'idly:4',
-          'idli:4',
-          'vadai:4',
-          'vada:4',
-          'naan:4',
-          'paneer:4',
-          'roti:4',
-          'coffee:4',
-          'tea:4',
-          'poori:4',
-          'puri:4',
-          'kesari:4',
-          'rava:4',
-          'ragi:4',
-          'sambar:4',
-          'rasam:4',
-          'dinein:4',
-          'dine:3',
-          'takeaway:4',
-          'delivery:4',
-          'udipi:4',
-          'mgr:4',
-          'mugalivakkam:4',
-          'checkout:4',
-        ],
-      },
-    };
-
     // Clean up any stale or half-open native call before starting a new one
     if ((vapi as any).started) {
       try {
@@ -1531,16 +1695,12 @@ export const useVapiStore = create<VapiState>((set, get) => ({
     }, 15000);
 
     try {
-      await vapi.start(assistantId, overrides);
+      console.log('[VapiStore] Starting Vapi call with assistantId:', assistantId);
+      await vapi.start(assistantId);
     } catch (e) {
-      console.warn('[VapiStore] startCall with overrides failed, retrying clean:', e);
-      try {
-        await vapi.start(assistantId, { firstMessage: dynamicFirstMessage, maxDurationSeconds: 3600 });
-      } catch (retryErr) {
-        console.error('[VapiStore] startCall fallback error:', retryErr);
-        clearConnectionWatchdog();
-        set({ isConnecting: false });
-      }
+      console.error('[VapiStore] startCall error:', e);
+      clearConnectionWatchdog();
+      set({ isConnecting: false });
     }
   },
 
@@ -1662,11 +1822,15 @@ export const useVapiStore = create<VapiState>((set, get) => ({
       set({ isConnected: true, isConnecting: false });
 
       // Warm the menu cache in the background so the first food request does
-      // not stall on a cold network fetch.
-      const outletId = useRestaurantStore.getState().selectedOutlet?.restaurant_id;
+      // not stall on a cold network fetch, and populate store with real database items.
       const hasLocalMenu = (useRestaurantStore.getState().menuItems || []).length > 0;
-      if (outletId && !hasLocalMenu) {
-        fetchAgentData('menu_search', {}).catch(() => {});
+      if (!hasLocalMenu) {
+        fetchAgentData('menu_search', {}).then((data: any) => {
+          if (data && Array.isArray(data.menu_items) && data.menu_items.length > 0) {
+            useRestaurantStore.getState().setMenuItems(data.menu_items);
+            console.log(`[VapiStore] Preloaded ${data.menu_items.length} menu items from database into store.`);
+          }
+        }).catch(() => {});
       }
 
       // Inject current app context on call start
@@ -1696,18 +1860,48 @@ export const useVapiStore = create<VapiState>((set, get) => ({
           }).catch(() => {});
         }
 
+        const customerName = auth.customerName ? auth.customerName.replace(/\bRiram\b/gi, 'Sriram') : 'Customer';
+        const outletName = initialContext.restaurant.selectedOutletName || 'MGR Nagar';
+        const rawOrderType = initialContext.cart.orderType || 'Take Away';
+        const hasCartItems = initialContext.cart.itemCount > 0;
+        const hasActiveDineIn = initialContext.dineIn.isActive && !!initialContext.dineIn.activeOrderId;
+
+        let workflowStatus = '';
+        if (hasActiveDineIn) {
+          workflowStatus = `Active Dine-In session at Table ${initialContext.dineIn.tableNumber || 'your table'}.`;
+        } else if (hasCartItems) {
+          workflowStatus = `Active ${rawOrderType} order in progress with ${initialContext.cart.itemCount} items in cart.`;
+        } else {
+          workflowStatus = `No order mode selected yet. Default app tab is ${rawOrderType}. DO NOT assume the customer wants ${rawOrderType}!`;
+        }
+
         (vapi as any).send({
           type: 'add-message',
           message: {
             role: 'system',
-            content: `[Current App Context] Order Type: ${initialContext.cart.orderType}. Outlet: ${initialContext.restaurant.selectedOutletName || 'None'}. Cart Items: ${initialContext.cart.itemCount}.${auth.isAuthenticated ? ` Customer ID: ${auth.customerId}, Name: ${auth.customerName || 'Customer'}.` : ''}
-CRITICAL BEHAVIOR & KNOWLEDGE GUIDELINES:
-1. Spoken Announcements: ALWAYS verbally announce what you are opening, switching, or adding. Never navigate or execute silently!
+            content: `[Current App Context]
+- Restaurant Brand: Data Udipi (Pronunciation: "Dah-tah Oo-dih-pee"). ALWAYS say "Data Udipi". NEVER say "DataUtipes", "Data ODP", or "data UDP".
+- Customer Name: ${customerName} (Pronunciation: "Shree-rahm" or "Sree-ram"). ALWAYS say "${customerName}". NEVER say "Riram".
+- Selected Outlet: ${outletName} (Pronunciation: "M-G-R Nagar"). NEVER say or write "m g r nagar".
+- Status: ${workflowStatus}
+- Cart Items: ${initialContext.cart.itemCount}, Subtotal: ₹${initialContext.cart.subtotal}.${auth.isAuthenticated ? ` Customer ID: ${auth.customerId}.` : ''}
+
+CRITICAL GREETING & WORKFLOW DIRECTIVES:
+1. GREETING DIRECTIVE:
+   - Unless the customer has an active Dine-In session or items already in their cart, DO NOT assert an order mode!
+   - NEVER say "You've selected takeaway" or "Would you like to order for takeaway today?"!
+   - Greet warmly: "Welcome to Data Udipi, ${customerName}! Would you like to Dine-In, Takeaway, or order Delivery today?"
+   - Let the customer choose their preferred order workflow!
+2. Spoken Announcements: ALWAYS verbally announce what you are opening, switching, or adding. Never navigate or execute silently!
 2. FOOD ORDERING & ADD TO CART (TOP PRIORITY):
    - Whenever the customer wants to add, order, get, buy, or put any dish or drink into their cart (e.g. "add one ragi dosa", "add paneer biryani to cart", "give me 2 idlis", "order coffee", "add veg fried rice"):
      • ALWAYS call tool "add_to_cart" with { item_name: "<dish_name>", quantity: <number> } immediately!
      • NEVER call "open_category" or "open_menu" when the customer is ordering or adding an item!
      • When "add_to_cart" succeeds, enthusiastically confirm: "Added [quantity] [item_name] to your cart."
+   - STRICT REAL MENU MATCHING & NO ARBITRARY SUBSTITUTIONS:
+     • If an item is NOT in the database (e.g. Masala Dosa, Ragi Dosa), DO NOT substitute another dish and DO NOT call open_category. Politely announce that it is not available on today's menu.
+     • When customer asks for "idly", add "Idly (2)" or single piece idly if single piece is asked. NEVER add "Mini Idly(14)".
+     • When customer asks for "sambar", add only "Sambar" or "Tiffin Sambar". NEVER add "Sambar Vadai" or "Sambar Idly".
 3. VIEWING CART & CHECKOUT:
    - When the customer asks to see, view, open, check, or go to their cart, basket, or checkout (e.g. "view my cart", "cart", "show cart", "view my card", "checkout"):
      • ALWAYS call tool "open_cart"!
@@ -1715,18 +1909,24 @@ CRITICAL BEHAVIOR & KNOWLEDGE GUIDELINES:
 4. BROWSING CATEGORIES & CUISINES:
    - ONLY call "open_category" (category_name) or "switch_region" ("North Indian" or "South Indian") when the customer explicitly asks to BROWSE, VIEW, SHOW, or EXPLORE categories or cuisines without ordering (e.g. "show dosa varieties", "what rice dishes do you have", "show tandoori starters", "switch to North Indian").
    - NEVER call "open_category" if the customer says "add", "order", "get", "cart", or names a specific dish to add.
-5. Supported North Indian Categories (Real Data Udipi Menu):
-   - "Tandoori Breads" (Butter Naan, Garlic Naan, Naan, Pulkha with Paneer Butter Masala, Roti)
-   - "Tandoori Side Dishes" (Paneer 65, Aloo Paneer Mini, Gobi Masala Mini, Mushroom 65 Mini)
-   - "Tandoori Starters" (Dhal Palak, Gobi Mushroom Fry Mini)
-   - "Rice Varieties" (Veg. Biryani / Onion Raitha, Paneer Biriyani, Veg Fried Rice Mini, Gobi Fried Rice Mini)
-6. Supported South Indian Categories (Real Data Udipi Menu):
-   - "Dosa Varieties" (Rava Masala Dosai, Veg. Dosai)
-   - "Breakfast & Dinner" (Mini Idly(14), Spl Vadai, Poori Masala)
-   - "Hot Beverages" (Mini Coffee, Mini Tea, Fresh Lemon Juice, Rose Milk)
-   - "Lunch & Sweets" (Kesari, Sambar Rice, Meals, Brinji Kuruma)
+5. DATABASE AS THE SOLE SOURCE OF TRUTH (STRICT MANDATORY):
+   - The backend database is the ONLY source of truth for all menu items, prices, and availability!
+   - NEVER invent, assume, or guess dishes or prices.
+   - NEVER substitute an item with a combo or bread combo!
+     • If the customer asks for "Paneer Butter Masala" as a curry, DO NOT add "Pulkha with Paneer Butter Masala" or "Butter Naan with Paneer Butter Masala"!
+     • If a customer asks for a dish that does not exist in the database, politely explain that it is not available on today's menu.
+   - When the customer asks to browse categories or asks what dishes exist, call tool "menu_search" or "open_category" to fetch real database items.
+   - When the customer asks to add an item to the cart, call "add_to_cart" with their EXACT dish request name.
 7. Catering Knowledge & Event Booking:
-   - Minimum order quantity for bulk catering is 50 guests.
+   - Catering Navigation Flow:
+     • The first page of catering is the Bulk Catering overview screen (bulk-catering) with features, featured packages, and terms & conditions.
+     • When planning or booking an order, the flow order is: FIRST Event Details screen (catering-event-details), THEN Packages section (catering-choose-package).
+   - Guest Count Rules:
+     • Minimum order quantity for bulk catering is strictly 50 guests.
+     • Customers can enter 50 or ANY number greater than 50 (e.g. 50, 75, 100, 200, 500+).
+     • NEVER clamp or restrict guest count to only 50 when the customer wants more.
+     • Orders for fewer than 50 guests (e.g. 10, 25, 40) are NOT permitted. If a customer requests fewer than 50, politely explain:
+       "Bulk catering requires a minimum of 50 guests. The order count must be 50 or more."
    - Available Catering Packages:
      • Regular Breakfast (Code: MENU 1) - ₹160/plate
      • Special Breakfast (Code: MENU 2) - ₹210/plate
@@ -1743,15 +1943,29 @@ CRITICAL BEHAVIOR & KNOWLEDGE GUIDELINES:
      • Evening Tiffin 2 (Code: E-MENU 2) - ₹150/plate
      • Evening Tiffin 3 (Code: E-MENU 3) - ₹160/plate
      • Seemantham (Code: S-MENU 1) - ₹210/plate
-   - When user provides event details (e.g. guest count, date, time, occasion, address), call tool "catering_set_event_details" with { guest_count, event_name, occasion, date, time, address } and confirm verbally.
-   - When user asks to see or choose catering packages, call "catering_choose_package" with { package_code }.
-8. Dine-In Workflow:
+   - When user asks to open catering, explore catering, or show catering:
+     Call tool "open_catering" to navigate to the Bulk Catering screen (bulk-catering).
+   - When user provides event details (e.g. guest count, date, time, occasion, address):
+     Call tool "catering_set_event_details" with { guest_count, event_name, occasion, date, time, address }.
+     If user specifies a count of 50 or more (e.g. 100 guests), pass that exact count. If user asks for fewer than 50, state that 50 is the minimum.
+   - When user asks to see or choose catering packages:
+     Call "catering_choose_package" with { package_code }. If event details are not filled yet, it will open Event Details first.
+8. Dine-In Workflow (MANDATORY PRESENTATION SCENARIO):
    - When user starts, always offer or confirm order type: Dine-In, Takeaway, or Delivery.
    - For Dine-In: ask for their table number and call "set_table_number" with { table_number: "T-04" }.
-   - Placing Dine-In Orders: In Dine-In, users order with Pay Later so food is sent directly to the kitchen. Call tool "dine_in_pay_later" when user says "place order", "send to kitchen", "confirm order", or "pay later".
+   - MAIN DINE-IN ORDERING & PAYMENT FLOW (CRITICAL):
+     • When the customer has selected items in their cart and is ready to order or checkout:
+       YOU MUST ASK THE CUSTOMER VERBATIM:
+       "Do you want to proceed to payment or want to pay later?"
+     • If customer says "Pay later" (or "send to kitchen", "after eating"):
+       Call tool "dine_in_pay_later". Food is sent to the kitchen and status is tracked.
+     • If customer says "Cash" or "Pay at counter" or "Counter" or "Proceed to payment":
+       In Dine-In, "Cash" means "Pay at Counter"!
+       Call tool "dine_in_pay_counter". This places the order with Pay at Counter and navigates directly to the final completed screen (/order-completed).
+   - This flow applies ONLY to Dine-In.
    - Multiple Rounds: Users seated at their table can order more items at any time. When more items are ordered, they automatically append as Round 2, Round 3, etc. to the same table.
    - Order Status: When user asks "where is my food?", "order status", or "track order", call tool "open_tracking" to show live status.
-   - Bill Settlement: When user is done eating and says "pay bill", "settle bill", or "complete meal", call tool "dine_in_pay_bill" to open the table settlement payment screen with the total across all rounds.
+   - Bill Settlement: When user is done eating and says "pay bill", "settle bill", or "complete meal", call tool "dine_in_pay_bill" to open the table settlement payment screen.
 9. Rewards & Loyalty Points:
    - When user asks "how many reward points do I have?", "what is my loyalty balance?", "my points balance", or "check rewards":
      • Announce their exact points balance and worth (10 points = ₹1 discount).
@@ -1805,6 +2019,39 @@ CRITICAL BEHAVIOR & KNOWLEDGE GUIDELINES:
       if (!message) return;
 
       console.log(`[VapiStore] Incoming Vapi message: "${message.type || 'unknown'}"`);
+
+      // ── Speech-update / interruption lifecycle ───────────────────────────────
+      if (message.type === 'speech-update') {
+        if (message.status === 'stopped' && (message.role === 'assistant' || message.role === 'agent')) {
+          const partial = get().partialAgentTranscript.trim();
+          if (partial) {
+            set((state) => {
+              const newMessages = [...state.messages];
+              const last = newMessages[newMessages.length - 1];
+              const lastIsAgent = last && (last.role === 'assistant' || last.role === 'agent');
+              if (last && lastIsAgent) {
+                if (!last.text.includes(partial)) {
+                  newMessages[newMessages.length - 1] = {
+                    ...last,
+                    text: `${last.text.trim()} ${partial}`.trim(),
+                  };
+                }
+              } else {
+                newMessages.push({ role: 'assistant', text: partial, isFinal: true });
+              }
+              return { messages: newMessages, partialAgentTranscript: '' };
+            });
+          } else {
+            set({ partialAgentTranscript: '' });
+          }
+        } else if (message.status === 'stopped' && message.role === 'user') {
+          set({ partialUserTranscript: '' });
+        }
+      }
+
+      if (message.type === 'user-interrupted') {
+        set({ partialAgentTranscript: '' });
+      }
 
       // ── Tool Call Extraction & Execution ──────────────────────────────────────
       const isToolCallsMessage =
@@ -1888,17 +2135,12 @@ CRITICAL BEHAVIOR & KNOWLEDGE GUIDELINES:
 
       if (message.type === 'transcript') {
         const rawText: string = message.transcript || '';
-        const role: string = message.role || 'user';
+        const rawRole: string = message.role || 'user';
+        const role: 'user' | 'assistant' =
+          (rawRole === 'assistant' || rawRole === 'agent' || rawRole === 'bot') ? 'assistant' : 'user';
 
-        // Clean up common STT phonetics and accent mis-hearings
-        const text: string = role === 'user'
-          ? rawText
-              .replace(/\b(to my car|in my car|into my car|to car|in car|to my card|in my card)\b/gi, 'to my cart')
-              .replace(/\b(view my card|view card|show card|open card|my card)\b/gi, 'view my cart')
-              .replace(/\b(add on)\b/gi, 'add')
-              .replace(/\b(take away)\b/gi, 'takeaway')
-              .replace(/\bdinein\b/gi, 'dine in')
-          : rawText;
+        // Clean up common STT phonetics, brand names, and mis-hearings across both speakers
+        const text: string = sanitizeTranscript(rawText, role);
 
         if (message.transcriptType === 'partial') {
           if (role === 'user') {
@@ -1914,8 +2156,24 @@ CRITICAL BEHAVIOR & KNOWLEDGE GUIDELINES:
             const isOrderIntent = /\b(add|order|cart|car|card|want|give|buy|get|take|plus|put|parcel|plate|cup|please add)\b/i.test(lower);
 
             if (now - lastSpeechIntentTime >= 1500) {
-              // 1. Order Mode Switches (Takeaway / Dine In / Delivery)
+              // 1.05 Direct Voice Food Ordering Fallback (catches "add on paneer biryani to my car", "add 1 paneer biryani", etc.)
               if (
+                /\b(add|order|get|want|put|give me)\b.*\b(biryani|dosa|idli|idly|vadai|vada|coffee|tea|poori|naan|roti|paneer|gobi|meals|rice|fried rice)\b/i.test(lower)
+              ) {
+                const dishTokens = lower
+                  .replace(/\b(to my car|to my card|to my cart|in my cart|to cart|in cart|please add on|can you please add|please add|add on|can you add|add|order|want|give me|give|put|take|uh|can i get|i want)\b/gi, '')
+                  .replace(/\b(one|1|two|2|three|3|four|4)\b/gi, '')
+                  .trim();
+
+                const parsedQty = /\b(two|2)\b/i.test(lower) ? 2 : /\b(three|3)\b/i.test(lower) ? 3 : /\b(four|4)\b/i.test(lower) ? 4 : 1;
+                if (dishTokens.length > 2) {
+                  lastSpeechIntentTime = now;
+                  console.log(`[VapiStore] Speech fallback ordering dish: "${dishTokens}" qty=${parsedQty}`);
+                  resolveAndAddToCart({ item_name: dishTokens, quantity: parsedQty });
+                }
+              }
+              // 1. Order Mode Switches (Takeaway / Dine In / Delivery)
+              else if (
                 /\b(switch|change|set|make|select|turn|go|put)\b.*\b(takeaway|take away|take out|parcel|pickup)\b/i.test(lower) ||
                 /^(switch to |change to )?(takeaway|take away)(\s*(please|mode|option))?$/i.test(lower)
               ) {
@@ -1959,17 +2217,49 @@ CRITICAL BEHAVIOR & KNOWLEDGE GUIDELINES:
                   console.log('[VapiStore] Speech detected intent: set table number', formatted);
                 }
               }
-              // 1.5 Dine-In Pay Later / Send to Kitchen ("place order", "send to kitchen", "confirm order", "pay later")
+              // 1.48 Dine-In Checkout Inquiries ("place order", "checkout", "order now", "ready to order")
               else if (
-                /\b(pay later|pay-later|paylater|send to kitchen|place order|confirm order|send order)\b/i.test(lower)
+                useCartStore.getState().orderType === 'Dine In' &&
+                useCartStore.getState().getItemCount() > 0 &&
+                /\b(checkout|place order|order now|ready to order|confirm order|proceed to checkout)\b/i.test(lower) &&
+                !/\b(pay later|cash|counter|pay at counter|pay bill)\b/i.test(lower)
+              ) {
+                lastSpeechIntentTime = now;
+                console.log('[VapiStore] Speech detected intent: dine-in prompt payment choice');
+                try {
+                  const v = getVapi();
+                  if (v?.say) v.say("Do you want to proceed to payment or want to pay later?", false, true, true);
+                } catch {}
+              }
+              // 1.5 Dine-In Pay Later / Send to Kitchen ("pay later", "send to kitchen")
+              else if (
+                /\b(pay later|pay-later|paylater|send to kitchen|pay after eating)\b/i.test(lower)
               ) {
                 lastSpeechIntentTime = now;
                 console.log('[VapiStore] Speech detected intent: dine in pay later / send to kitchen');
                 executeSingleAction({ action: 'dine_in_pay_later' });
+                try {
+                  const v = getVapi();
+                  if (v?.say) v.say("Your order has been sent to the kitchen. You can enjoy your meal and pay later.", false, true, true);
+                } catch {}
               }
-              // 1.6 Dine-In Pay Bill ("pay bill", "pay the bill", "pay my bill", "settle bill", "complete meal")
+              // 1.55 Dine-In Pay at Counter / Cash ("cash", "pay at counter", "counter", "pay with cash", "proceed to payment")
               else if (
-                /\b(pay bill|pay the bill|pay my bill|settle bill|paybill|complete meal)\b/i.test(lower)
+                useCartStore.getState().orderType === 'Dine In' &&
+                useCartStore.getState().getItemCount() > 0 &&
+                /\b(cash|pay at counter|pay counter|counter|pay with cash|pay by cash|proceed to payment|pay now)\b/i.test(lower)
+              ) {
+                lastSpeechIntentTime = now;
+                console.log('[VapiStore] Speech detected intent: dine in pay at counter (cash)');
+                executeSingleAction({ action: 'dine_in_pay_counter' });
+                try {
+                  const v = getVapi();
+                  if (v?.say) v.say("I have placed your order with Pay at Counter. Please settle the bill at the counter when you are ready.", false, true, true);
+                } catch {}
+              }
+              // 1.6 Dine-In Pay Bill / Settle Meal ("pay bill", "settle bill", "complete meal")
+              else if (
+                /\b(pay bill|pay the bill|pay my bill|settle bill|paybill|complete meal|settle at counter)\b/i.test(lower)
               ) {
                 lastSpeechIntentTime = now;
                 console.log('[VapiStore] Speech detected intent: dine in pay bill');
@@ -2081,11 +2371,21 @@ CRITICAL BEHAVIOR & KNOWLEDGE GUIDELINES:
               // 1.8 Catering Event Details ("catering for 100 people", "100 guests", "set guest count to 80", "wedding catering")
               else if (
                 /\b(catering for|guests?|event details|guest count|occasion|service type)\b/i.test(lower) &&
-                /\b(\d{2,4}|wedding|birthday|anniversary|reception|people|guests)\b/i.test(lower)
+                /\b(\d{1,4}|wedding|birthday|anniversary|reception|people|guests)\b/i.test(lower)
               ) {
                 lastSpeechIntentTime = now;
-                const guestMatch = lower.match(/\b(\d{2,4})\s*(guests?|people|persons?|members?|pax)?\b/);
-                const count = guestMatch ? guestMatch[1] : undefined;
+                const guestMatch = lower.match(/\b(\d{1,4})\s*(guests?|people|persons?|members?|pax)?\b/);
+                let countNum = guestMatch ? parseInt(guestMatch[1], 10) : undefined;
+                let guestFeedback = '';
+                if (countNum !== undefined) {
+                  if (countNum < 50) {
+                    guestFeedback = ' (minimum 50 guests required, set to 50)';
+                    countNum = 50;
+                  } else {
+                    guestFeedback = ` for ${countNum} guests`;
+                  }
+                }
+                const count = countNum !== undefined ? String(countNum) : undefined;
                 
                 let occasion = undefined;
                 if (/wedding|marriage/i.test(lower)) occasion = 'Wedding';
@@ -2102,7 +2402,7 @@ CRITICAL BEHAVIOR & KNOWLEDGE GUIDELINES:
                   occasion,
                   event_name: occasion,
                 } as any);
-                speakAgentFeedback(`Entered event details${count ? ` for ${count} guests` : ''}${occasion ? ` for ${occasion}` : ''}.`);
+                speakAgentFeedback(`Entered event details${guestFeedback}${occasion ? ` for ${occasion}` : ''}.`);
               }
               // 1.85 Catering Packages ("catering packages", "choose catering package", "order catering package")
               else if (
@@ -2119,9 +2419,9 @@ CRITICAL BEHAVIOR & KNOWLEDGE GUIDELINES:
                 /^(catering|bulk catering)$/i.test(lower)
               ) {
                 lastSpeechIntentTime = now;
-                console.log('[VapiStore] Speech detected intent: open catering packages');
-                executeSingleAction({ action: 'catering_choose_package' });
-                speakAgentFeedback('Opening catering packages.');
+                console.log('[VapiStore] Speech detected intent: open catering event details');
+                executeSingleAction({ action: 'open_catering' });
+                speakAgentFeedback('Opening catering event details. Please share your event date, occasion, and guest count (minimum 50 guests).');
               }
               // 2. Menu Navigation ("show all the menus", "show menu", "open menu", "view menu")
               else if (
@@ -2224,22 +2524,35 @@ CRITICAL BEHAVIOR & KNOWLEDGE GUIDELINES:
 
             const newMessages = [...state.messages];
             const lastMessage = newMessages[newMessages.length - 1];
+            const isAgent = role === 'assistant';
+            const lastIsAgent = lastMessage && (lastMessage.role === 'assistant' || lastMessage.role === 'agent');
 
-            // Merge consecutive messages from the same speaker (no split bubbles)
-            if (lastMessage && lastMessage.role === role) {
-              newMessages[newMessages.length - 1] = {
-                ...lastMessage,
-                text: lastMessage.text + ' ' + text,
-              };
+            // Merge consecutive messages from the same speaker into one bubble
+            if (lastMessage && ((isAgent && lastIsAgent) || (!isAgent && lastMessage.role === 'user'))) {
+              const prevText = lastMessage.text.trim();
+              const incomingText = text.trim();
+
+              if (incomingText.startsWith(prevText)) {
+                // Cumulative transcript update from Vapi
+                newMessages[newMessages.length - 1] = {
+                  ...lastMessage,
+                  text: incomingText,
+                };
+              } else if (!prevText.endsWith(incomingText)) {
+                // Incremental chunk: join cleanly with a space
+                newMessages[newMessages.length - 1] = {
+                  ...lastMessage,
+                  text: `${prevText} ${incomingText}`.replace(/\s+/g, ' ').trim(),
+                };
+              }
             } else {
-              newMessages.push({ role: role as any, text, isFinal: true });
+              newMessages.push({ role, text: text.trim(), isFinal: true });
             }
 
             return {
               messages: newMessages,
               partialUserTranscript: role === 'user' ? '' : state.partialUserTranscript,
-              partialAgentTranscript:
-                role === 'assistant' || role === 'agent' ? '' : state.partialAgentTranscript,
+              partialAgentTranscript: isAgent ? '' : state.partialAgentTranscript,
             };
           });
         }

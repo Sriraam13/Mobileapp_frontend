@@ -85,8 +85,8 @@ export default function BulkCatering() {
               style={styles.gridCard}
               activeOpacity={0.8}
               onPress={() => router.push({
-                pathname: '/(main)/catering-choose-package',
-                params: { activeTab: 'Lunch' }
+                pathname: '/(main)/catering-event-details',
+                params: { occasion: 'Lunch' }
               })}
             >
               <View style={[styles.iconCircle, { backgroundColor: '#e8f5e9' }]}>
@@ -100,8 +100,8 @@ export default function BulkCatering() {
               style={styles.gridCard}
               activeOpacity={0.8}
               onPress={() => router.push({
-                pathname: '/(main)/catering-choose-package',
-                params: { activeTab: 'Dinner' }
+                pathname: '/(main)/catering-event-details',
+                params: { occasion: 'Dinner' }
               })}
             >
               <View style={[styles.iconCircle, { backgroundColor: '#ffebee' }]}>

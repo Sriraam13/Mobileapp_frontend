@@ -1,23 +1,29 @@
 import Constants from 'expo-constants';
 import { Platform } from 'react-native';
 
-const getApiUrl = () => {
-  const envUrl = process.env.EXPO_PUBLIC_API_URL?.trim() || process.env.EXPO_PUBLIC_API_BASE_URL?.trim();
+const getApiUrl = (): string => {
+  const envUrl =
+    process.env.EXPO_PUBLIC_API_URL?.trim() ||
+    process.env.EXPO_PUBLIC_API_BASE_URL?.trim();
 
-  // Auto-detect host IP when running via Metro dev server (e.g. 10.214.75.246)
   const hostUri = Constants.expoConfig?.hostUri;
   const metroHost = hostUri ? hostUri.split(':')[0] : null;
 
+  const localHostIp = '10.146.221.246';
+
   if (envUrl) {
     let clean = envUrl.replace(/\/+$/, '');
-    // If running on a native device/emulator and env specifies localhost/127.0.0.1,
-    // map to the Metro host IP or known LAN IP so mobile devices can reach the local host backend
-    if (Platform.OS !== 'web' && (clean.includes('localhost') || clean.includes('127.0.0.1'))) {
+
+    if (
+      Platform.OS !== 'web' &&
+      (clean.includes('localhost') || clean.includes('127.0.0.1'))
+    ) {
       if (metroHost) {
         return clean.replace(/localhost|127\.0\.0\.1/, metroHost);
       }
-      return clean.replace(/localhost|127\.0\.0\.1/, '10.214.75.246');
+      return clean.replace(/localhost|127\.0\.0\.1/, localHostIp);
     }
+
     return clean;
   }
 
@@ -29,43 +35,68 @@ const getApiUrl = () => {
     return 'http://localhost:8001';
   }
 
-  return 'https://dev-api.dataudipi.com';
+  return `http://${localHostIp}:8001`;
 };
 
 export const API_BASE_URL = getApiUrl();
 export const IMAGE_BASE_URL = getApiUrl();
 
-// Helper to construct image URLs directly from database
-export const getFullImageUrl = (url: string | null | undefined, dishName?: string): string => {
+export const getFullImageUrl = (
+  url: string | null | undefined,
+  _dishName?: string
+): string => {
   const trimmed = typeof url === 'string' ? url.trim() : '';
 
-  if (!trimmed || trimmed === '' || trimmed.includes('placeholder') || trimmed.includes('unsplash.com')) {
+  if (
+    !trimmed ||
+    trimmed.includes('placeholder') ||
+    trimmed.includes('unsplash.com')
+  ) {
     return '';
   }
 
-  // If already a data URI (e.g. base64), local file URI, or blob URI, return directly
-  if (trimmed.startsWith('data:') || trimmed.startsWith('blob:') || trimmed.startsWith('file://')) {
+  if (
+    trimmed.startsWith('data:') ||
+    trimmed.startsWith('blob:') ||
+    trimmed.startsWith('file://')
+  ) {
     return trimmed;
   }
 
-  // If already a complete cloud/CDN URL (e.g. S3, Cloudinary, HTTPS)
-  if (trimmed.startsWith('https://') || trimmed.startsWith('http://')) {
-    if (trimmed.includes('unsplash.com')) {
-      return '';
-    }
-    // If it points to local localhost from backend seeds, map it to IMAGE_BASE_URL
-    if (trimmed.includes('localhost') || trimmed.includes('127.0.0.1') || trimmed.includes('10.0.2.2')) {
-      try {
-        const urlObj = new URL(trimmed);
-        return `${IMAGE_BASE_URL}${urlObj.pathname}${urlObj.search}`;
-      } catch {
-        return trimmed;
-      }
-    }
+  if (
+    trimmed.startsWith('https://') ||
+    trimmed.startsWith('http://')
+  ) {
     return trimmed;
   }
 
-  // If stored as a relative path in the database
-  const path = trimmed.startsWith('/') ? trimmed : `/${trimmed}`;
+  const path = trimmed.startsWith('/')
+    ? trimmed
+    : `/${trimmed}`;
+
   return `${IMAGE_BASE_URL}${path}`;
 };
+
+export const API_ENDPOINTS = {
+  LOGIN: `${API_BASE_URL}/api/v1/public/customers/login`,
+  REGISTER: `${API_BASE_URL}/api/v1/public/customers/register`,
+  OTP_VERIFY: `${API_BASE_URL}/api/v1/public/customers/verify-otp`,
+  RESEND_OTP: `${API_BASE_URL}/api/v1/public/customers/resend-otp`,
+
+  CUSTOMERS: `${API_BASE_URL}/api/v1/customers`,
+  PROFILE: `${API_BASE_URL}/api/v1/customers/profile`,
+
+  RESTAURANTS: `${API_BASE_URL}/api/v1/restaurants`,
+  CATEGORIES: `${API_BASE_URL}/api/v1/categories`,
+  DISHES: `${API_BASE_URL}/api/v1/dishes`,
+  PRODUCTS: `${API_BASE_URL}/api/v1/products`,
+
+  CART: `${API_BASE_URL}/api/v1/cart`,
+  ORDERS: `${API_BASE_URL}/api/v1/orders`,
+  PAYMENTS: `${API_BASE_URL}/api/v1/payments`,
+
+  OFFERS: `${API_BASE_URL}/api/v1/offers`,
+  BANNERS: `${API_BASE_URL}/api/v1/banners`,
+};
+
+export default API_BASE_URL;

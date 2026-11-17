@@ -14,23 +14,23 @@ mobile app. It is a **UI Orchestrator + Read-Only Data Assistant**.
 
 ```
 Customer Speech
-     │
-     ▼
+    │
+    ▼
   Vapi ASR (Speech-to-Text)
-     │
-     ▼
+    │
+    ▼
   Vapi LLM (Claude Sonnet or similar)
-     │ uses tools ↓
-     ├─ Frontend actions → vapiStore.handleVapiToolCall()
-     │                   → mobileAgentActionDispatcher.ts
-     │                   → Expo Router / Zustand cart
-     │
-     └─ Backend reads   → vapiStore.fetchAgentData()
+    │ uses tools ↓
+    ├─ Frontend actions → vapiStore.handleVapiToolCall()
+    │                   → mobileAgentActionDispatcher.ts
+    │                   → Expo Router / Zustand cart
+    │
+    └─ Backend reads   → vapiStore.fetchAgentData()
                         → POST /api/v1/public/mcp/mobile-agent-tool
                         → FastAPI → existing models → PostgreSQL READ
                         → JSON → spoken response
-     │
-     ▼
+    │
+    ▼
   Vapi TTS (Text-to-Speech) → Customer hears response
 ```
 
@@ -39,11 +39,13 @@ Customer Speech
 ## Vapi Dashboard Settings
 
 ### Assistant Name
+
 ```
 Data Udipi Customer Assistant
 ```
 
 ### First Message (Initial Greeting — one of the following, randomly selected)
+
 ```
 Vanakkam! Welcome to Data Udipi Veg Restaurant. I am your dining assistant. How may I help you today?
 ```
@@ -52,19 +54,23 @@ Vanakkam! Welcome to Data Udipi Veg Restaurant. I am your dining assistant. How 
 > instructs the LLM NOT to greet again after navigation.
 
 ### Voice
+
 Recommended: `11Labs` provider, a warm, clear Indian-English accent voice.
 Fallback: Any natural-sounding female or male voice from the provider.
 
 ### Model
+
 - Provider: `Anthropic`
 - Model: `claude-sonnet-4-5` or `claude-3-5-sonnet-20241022`
 - Max tokens: `1000`
 - Temperature: `0.3`
 
 ### Background Sound
+
 - `off` (restaurant ambient is real; don't add artificial background)
 
 ### End-of-Call Message
+
 ```
 Thank you for dining with Data Udipi. Have a wonderful day!
 ```
@@ -74,6 +80,7 @@ Thank you for dining with Data Udipi. Have a wonderful day!
 ## System Prompt Location
 
 The system prompt is maintained in:
+
 ```
 Food_Ordering_App_Backend/app/prompts/mobile_customer_agent.py
 → MOBILE_CUSTOMER_AGENT_PROMPT
@@ -98,12 +105,13 @@ Each tool is a **function** that Vapi calls during conversation.
 **Frontend/Backend:** Frontend (Expo Router)
 
 **Parameters:**
-| Parameter | Type   | Required | Description                                    |
+| Parameter | Type | Required | Description |
 |-----------|--------|----------|------------------------------------------------|
-| route     | string | Yes      | The target screen route (see routes below)     |
-| params    | object | No       | Optional query params to pass to the screen    |
+| route | string | Yes | The target screen route (see routes below) |
+| params | object | No | Optional query params to pass to the screen |
 
 **Supported routes:**
+
 ```
 /home
 /menu
@@ -135,6 +143,7 @@ Each tool is a **function** that Vapi calls during conversation.
 ```
 
 **Example call:**
+
 ```json
 {
   "route": "/profile"
@@ -142,8 +151,14 @@ Each tool is a **function** that Vapi calls during conversation.
 ```
 
 **Expected result:**
+
 ```json
-{ "success": true, "action": "navigate", "message": "Navigated to /profile", "data": { "route": "/profile" } }
+{
+  "success": true,
+  "action": "navigate",
+  "message": "Navigated to /profile",
+  "data": { "route": "/profile" }
+}
 ```
 
 ---
@@ -159,6 +174,7 @@ Each tool is a **function** that Vapi calls during conversation.
 **Example call:** `{}`
 
 **Expected result:**
+
 ```json
 { "success": true, "action": "go_back", "message": "Went back." }
 ```
@@ -176,6 +192,7 @@ Each tool is a **function** that Vapi calls during conversation.
 **Example call:** `{}`
 
 **Expected result:**
+
 ```json
 {
   "success": true,
@@ -195,9 +212,7 @@ Each tool is a **function** that Vapi calls during conversation.
       "itemCount": 2,
       "subtotal": 200,
       "tableNumber": "",
-      "items": [
-        { "id": 5, "name": "Masala Dosa", "quantity": 2, "price": 100 }
-      ]
+      "items": [{ "id": 5, "name": "Masala Dosa", "quantity": 2, "price": 100 }]
     },
     "liveOrder": {
       "hasActiveOrder": false,
@@ -226,23 +241,31 @@ Each tool is a **function** that Vapi calls during conversation.
 **Frontend/Backend:** Frontend (Zustand cart store)
 
 **Parameters:**
-| Parameter  | Type   | Required | Description                                   |
+| Parameter | Type | Required | Description |
 |------------|--------|----------|-----------------------------------------------|
-| order_type | string | Yes      | One of: "Dine In", "Take Away", "Delivery"   |
+| order_type | string | Yes | One of: "Dine In", "Take Away", "Delivery" |
 
 **Accepted variations** (normalized internally):
+
 - "takeaway", "take away", "take-away", "takeout" → `Take Away`
 - "dine in", "dinein", "dine-in", "table" → `Dine In`
 - "delivery", "deliver", "home delivery" → `Delivery`
 
 **Example call:**
+
 ```json
 { "order_type": "Take Away" }
 ```
 
 **Expected result:**
+
 ```json
-{ "success": true, "action": "set_order_type", "message": "Order type set to Take Away", "data": { "orderType": "Take Away" } }
+{
+  "success": true,
+  "action": "set_order_type",
+  "message": "Order type set to Take Away",
+  "data": { "orderType": "Take Away" }
+}
 ```
 
 ---
@@ -254,17 +277,19 @@ Each tool is a **function** that Vapi calls during conversation.
 **Frontend/Backend:** Backend (PostgreSQL read)
 
 **Parameters:**
-| Parameter     | Type   | Required | Description                                     |
+| Parameter | Type | Required | Description |
 |---------------|--------|----------|-------------------------------------------------|
-| query         | string | No       | Text to search in item names/descriptions       |
-| category_name | string | No       | Filter by category name (e.g. "Breakfast")      |
+| query | string | No | Text to search in item names/descriptions |
+| category_name | string | No | Filter by category name (e.g. "Breakfast") |
 
 **Example call:**
+
 ```json
 { "query": "masala dosa" }
 ```
 
 **Expected result:**
+
 ```json
 {
   "success": true,
@@ -294,14 +319,15 @@ Each tool is a **function** that Vapi calls during conversation.
 **Frontend/Backend:** Frontend (Zustand cart store)
 
 **Parameters:**
-| Parameter   | Type    | Required | Description                                               |
+| Parameter | Type | Required | Description |
 |-------------|---------|----------|-----------------------------------------------------------|
-| sub_action  | string  | Yes      | One of: add, remove, increment, decrement, set_quantity, clear, show |
-| item_id     | integer | Cond.    | Required for: add, remove, increment, decrement, set_quantity       |
-| quantity    | integer | Cond.    | Required for: add, set_quantity                                     |
-| item        | object  | Cond.    | Required for: add — must contain id, name, price, category         |
+| sub_action | string | Yes | One of: add, remove, increment, decrement, set_quantity, clear, show |
+| item_id | integer | Cond. | Required for: add, remove, increment, decrement, set_quantity |
+| quantity | integer | Cond. | Required for: add, set_quantity |
+| item | object | Cond. | Required for: add — must contain id, name, price, category |
 
 **`item` object schema (for add):**
+
 ```json
 {
   "id": 5,
@@ -317,6 +343,7 @@ Each tool is a **function** that Vapi calls during conversation.
 > Never fabricate the item object.
 
 **Example — Add 2 Masala Dosa:**
+
 ```json
 {
   "sub_action": "add",
@@ -334,18 +361,26 @@ Each tool is a **function** that Vapi calls during conversation.
 ```
 
 **Example — Remove item:**
+
 ```json
 { "sub_action": "remove", "item_id": 5 }
 ```
 
 **Example — Clear cart:**
+
 ```json
 { "sub_action": "clear" }
 ```
 
 **Expected result:**
+
 ```json
-{ "success": true, "action": "add_to_cart", "message": "Added 2x Masala Dosa to cart.", "data": { "item_id": 5, "name": "Masala Dosa", "quantity": 2 } }
+{
+  "success": true,
+  "action": "add_to_cart",
+  "message": "Added 2x Masala Dosa to cart.",
+  "data": { "item_id": 5, "name": "Masala Dosa", "quantity": 2 }
+}
 ```
 
 ---
@@ -361,6 +396,7 @@ Each tool is a **function** that Vapi calls during conversation.
 **Example call:** `{}`
 
 **Expected result:**
+
 ```json
 {
   "success": true,
@@ -388,6 +424,7 @@ Each tool is a **function** that Vapi calls during conversation.
 **Example call:** `{}`
 
 **Expected result:**
+
 ```json
 {
   "success": true,
@@ -409,16 +446,18 @@ Each tool is a **function** that Vapi calls during conversation.
 **Frontend/Backend:** Backend (PostgreSQL read, ownership-validated)
 
 **Parameters:**
-| Parameter | Type    | Required | Description                         |
+| Parameter | Type | Required | Description |
 |-----------|---------|----------|-------------------------------------|
-| limit     | integer | No       | Number of orders to return (max 20) |
+| limit | integer | No | Number of orders to return (max 20) |
 
 **Example call:**
+
 ```json
 { "limit": 5 }
 ```
 
 **Expected result:**
+
 ```json
 {
   "success": true,
@@ -447,11 +486,12 @@ Each tool is a **function** that Vapi calls during conversation.
 **Frontend/Backend:** Backend (PostgreSQL read, ownership-validated)
 
 **Parameters:**
-| Parameter | Type   | Required | Description                    |
+| Parameter | Type | Required | Description |
 |-----------|--------|----------|--------------------------------|
-| order_id  | string | Yes      | The DB order ID or order_id    |
+| order_id | string | Yes | The DB order ID or order_id |
 
 **Example call:**
+
 ```json
 { "order_id": "101" }
 ```
@@ -465,16 +505,18 @@ Each tool is a **function** that Vapi calls during conversation.
 **Frontend/Backend:** Backend (PostgreSQL read, ownership-validated)
 
 **Parameters:**
-| Parameter | Type   | Required | Description          |
+| Parameter | Type | Required | Description |
 |-----------|--------|----------|----------------------|
-| order_id  | string | Yes      | The DB order ID      |
+| order_id | string | Yes | The DB order ID |
 
 **Example call:**
+
 ```json
 { "order_id": "101" }
 ```
 
 **Expected result:**
+
 ```json
 {
   "success": true,
@@ -501,17 +543,19 @@ Each tool is a **function** that Vapi calls during conversation.
 **Frontend/Backend:** Backend (PostgreSQL read from `CateringOrderMenu` / `CateringOrder`)
 
 **Parameters:**
-| Parameter          | Type    | Required | Description                                              |
+| Parameter | Type | Required | Description |
 |--------------------|---------|----------|----------------------------------------------------------|
-| data_type          | string  | Yes      | One of: `packages`, `customer_orders`, `single_order`   |
-| catering_order_id  | integer | Cond.    | Required when data_type = `single_order`                 |
+| data_type | string | Yes | One of: `packages`, `customer_orders`, `single_order` |
+| catering_order_id | integer | Cond. | Required when data_type = `single_order` |
 
 **Example — Get all available packages:**
+
 ```json
 { "data_type": "packages" }
 ```
 
 **Example — Get customer's catering orders & balances:**
+
 ```json
 { "data_type": "customer_orders" }
 ```
@@ -525,18 +569,25 @@ Each tool is a **function** that Vapi calls during conversation.
 **Frontend/Backend:** Frontend (Expo Router)
 
 **Parameters:**
-| Parameter     | Type   | Required | Description                                                    |
+| Parameter | Type | Required | Description |
 |---------------|--------|----------|----------------------------------------------------------------|
-| category_name | string | Yes      | The name of the category (e.g. "Rice Varieties", "Dosa Varieties", "Hot Beverages", "Breakfast & Dinner", "Lunch", "Soups", "Tandoori Starters", "Noodles") |
+| category_name | string | Yes | The name of the category (e.g. "Rice Varieties", "Dosa Varieties", "Hot Beverages", "Breakfast & Dinner", "Lunch", "Soups", "Tandoori Starters", "Noodles") |
 
 **Example call:**
+
 ```json
 { "category_name": "Rice Varieties" }
 ```
 
 **Expected result:**
+
 ```json
-{ "success": true, "action": "open_category", "message": "Opened menu category: Rice Varieties.", "data": { "categoryName": "Rice Varieties" } }
+{
+  "success": true,
+  "action": "open_category",
+  "message": "Opened menu category: Rice Varieties.",
+  "data": { "categoryName": "Rice Varieties" }
+}
 ```
 
 ---
@@ -548,21 +599,24 @@ Each tool is a **function** that Vapi calls during conversation.
 **Frontend/Backend:** Frontend (Expo Router + DineInSessionStore)
 
 **Parameters:**
-| Parameter   | Type   | Required | Description                                                   |
+| Parameter | Type | Required | Description |
 |-------------|--------|----------|---------------------------------------------------------------|
-| action_type | string | Yes      | One of: `pay_later`, `pay_bill`, `order_more`                 |
+| action_type | string | Yes | One of: `pay_later`, `pay_bill`, `order_more` |
 
 **Flow Details:**
+
 - `pay_later`: Sets order mode to "Dine In" and opens checkout screen with Pay Later pre-selected. Customer places order and pays after dining.
 - `pay_bill`: For an active table dining session, opens the meal completion and bill payment screen.
 - `order_more`: Navigates to `/menu` in Dine In mode for the table.
 
 **Example call — Pay Later:**
+
 ```json
 { "action_type": "pay_later" }
 ```
 
 **Example call — Pay Bill:**
+
 ```json
 { "action_type": "pay_bill" }
 ```
@@ -576,13 +630,14 @@ Each tool is a **function** that Vapi calls during conversation.
 **Frontend/Backend:** Frontend (Expo Router)
 
 **Parameters:**
-| Parameter    | Type    | Required | Description                                           |
+| Parameter | Type | Required | Description |
 |--------------|---------|----------|-------------------------------------------------------|
-| package_code | string  | No       | Code of package to select (e.g. "MENU 3", "V-RICE MENU 3") |
-| package_name | string  | No       | Display name (e.g. "Grand Breakfast", "Regular Lunch") |
-| guest_count  | integer | No       | Estimated number of guests (default: 50)             |
+| package_code | string | No | Code of package to select (e.g. "MENU 3", "V-RICE MENU 3") |
+| package_name | string | No | Display name (e.g. "Grand Breakfast", "Regular Lunch") |
+| guest_count | integer | No | Estimated number of guests (default: 50) |
 
 **Example call:**
+
 ```json
 { "package_code": "MENU 3", "guest_count": 50 }
 ```
@@ -596,19 +651,20 @@ Each tool is a **function** that Vapi calls during conversation.
 **Frontend/Backend:** Frontend (Zustand cateringSessionStore + Expo Router)
 
 **Parameters:**
-| Parameter            | Type    | Required | Description                                                    |
+| Parameter | Type | Required | Description |
 |----------------------|---------|----------|----------------------------------------------------------------|
-| event_name           | string  | Yes      | Name of the event (e.g., "Priya Birthday Party", "Anand Wedding Reception") |
-| date                 | string  | Yes      | Date of event (e.g., "15 Dec 2026", "Tomorrow")                 |
-| time                 | string  | Yes      | Serving time (e.g., "1:00 PM", "7:30 PM")                      |
-| occasion             | string  | Yes      | Occasion (e.g., "Birthday", "Wedding", "Housewarming")         |
-| guest_count          | integer | Yes      | Number of guests (minimum 50)                                  |
-| address              | string  | Yes      | Delivery address or venue location                             |
-| service_type         | string  | No       | "Delivery Only" (default) or "Full Service"                   |
-| order_type           | string  | No       | "Catering Order" (default) or "Party Order"                    |
-| proceed_to_packages  | boolean | No       | Whether to navigate immediately to package selection (default: true) |
+| event_name | string | Yes | Name of the event (e.g., "Priya Birthday Party", "Anand Wedding Reception") |
+| date | string | Yes | Date of event (e.g., "15 Dec 2026", "Tomorrow") |
+| time | string | Yes | Serving time (e.g., "1:00 PM", "7:30 PM") |
+| occasion | string | Yes | Occasion (e.g., "Birthday", "Wedding", "Housewarming") |
+| guest_count | integer | Yes | Number of guests (minimum 50) |
+| address | string | Yes | Delivery address or venue location |
+| service_type | string | No | "Delivery Only" (default) or "Full Service" |
+| order_type | string | No | "Catering Order" (default) or "Party Order" |
+| proceed_to_packages | boolean | No | Whether to navigate immediately to package selection (default: true) |
 
 **Example call:**
+
 ```json
 {
   "event_name": "Rohan Birthday Party",
@@ -631,13 +687,14 @@ Each tool is a **function** that Vapi calls during conversation.
 **Frontend/Backend:** Frontend (Expo Router + DeviceEventEmitter)
 
 **Parameters:**
-| Parameter     | Type   | Required | Description                                              |
+| Parameter | Type | Required | Description |
 |---------------|--------|----------|----------------------------------------------------------|
-| action_type   | string | Yes      | One of: `ADD`, `REMOVE`, `REPLACE`                       |
-| item_name     | string | Cond.    | Name of item to remove or replace (required for REMOVE/REPLACE) |
-| new_item_name | string | Cond.    | Replacement dish name (optional for REPLACE)             |
+| action_type | string | Yes | One of: `ADD`, `REMOVE`, `REPLACE` |
+| item_name | string | Cond. | Name of item to remove or replace (required for REMOVE/REPLACE) |
+| new_item_name | string | Cond. | Replacement dish name (optional for REPLACE) |
 
 **Example call — Remove dish:**
+
 ```json
 {
   "action_type": "REMOVE",
@@ -646,6 +703,7 @@ Each tool is a **function** that Vapi calls during conversation.
 ```
 
 **Example call — Swap dish:**
+
 ```json
 {
   "action_type": "REPLACE",
@@ -663,11 +721,12 @@ Each tool is a **function** that Vapi calls during conversation.
 **Frontend/Backend:** Frontend (Expo Router)
 
 **Parameters:**
-| Parameter | Type   | Required | Description                                                         |
+| Parameter | Type | Required | Description |
 |-----------|--------|----------|---------------------------------------------------------------------|
-| step      | string | Yes      | One of: `event_details`, `packages`, `customise_menu`, `extras`, `review_quote`, `payment`, `orders`, `hub` |
+| step | string | Yes | One of: `event_details`, `packages`, `customise_menu`, `extras`, `review_quote`, `payment`, `orders`, `hub` |
 
 **Example call:**
+
 ```json
 {
   "step": "customise_menu"
@@ -690,26 +749,32 @@ The LLM handles the conversation turn; this tool is used for tracking state.
 ## Vapi Dashboard — Tool Configuration Steps
 
 ### Step 1 — Create a New Assistant
+
 1. Go to https://dashboard.vapi.ai
 2. Click **New Assistant**
 3. Name: `Data Udipi Customer Assistant`
 
 ### Step 2 — Configure the Model
+
 1. Provider: `Anthropic`
 2. Model: `claude-sonnet-4-5`
 3. Paste the system prompt from `mobile_customer_agent.py → MOBILE_CUSTOMER_AGENT_PROMPT`
 
 ### Step 3 — Configure Voice
+
 1. Provider: `11Labs` (or `deepgram`, `azure`)
 2. Select a warm, natural Indian-English voice
 
 ### Step 4 — Set First Message
+
 ```
 Vanakkam! Welcome to Data Udipi Veg Restaurant. I am your dining assistant. How may I help you today?
 ```
 
 ### Step 5 — Add Tools
+
 For each tool above:
+
 1. Click **Add Tool** → **Function**
 2. Set **Name** to the exact `snake_case` name (e.g. `app_navigate`)
 3. Set **Description** matching the purpose above
@@ -730,15 +795,19 @@ For each tool above:
 > catering_get_data) must point to the backend server URL above.
 
 ### Step 6 — Get the Assistant ID
+
 After saving, copy the **Assistant ID** from the dashboard.
 Set in `.env`:
+
 ```
 EXPO_PUBLIC_VAPI_ASSISTANT_ID=<your-assistant-id>
 ```
 
 ### Step 7 — Get the Public Key
+
 Copy the **Public Key** (NOT the private key!) from Vapi Dashboard → API Keys.
 Set in `.env`:
+
 ```
 EXPO_PUBLIC_VAPI_PUBLIC_KEY=<your-public-key>
 ```
@@ -761,18 +830,18 @@ EXPO_PUBLIC_API_BASE_URL=https://your-backend-domain.com
 
 ## Data Flow Summary
 
-| User Says | Tool Called | Where Executed | Action |
-|-----------|-------------|----------------|--------|
-| "Go to profile" | app_navigate | Frontend | router.push('/profile') |
-| "Go back" | app_go_back | Frontend | router.back() |
-| "What's in my cart?" | app_get_context | Frontend | Read Zustand state |
-| "I want takeaway" | set_order_type | Frontend | useCartStore.setOrderType('Take Away') |
-| "Add 2 masala dosa" | menu_search + cart_update | Backend + Frontend | Fetch real ID, then addItem() |
-| "How many points do I have?" | customer_get_rewards | Backend | PostgreSQL read → speak real value |
-| "Show my orders" | customer_get_orders | Backend | PostgreSQL read → speak recent orders |
-| "Where is my delivery?" | order_get_tracking | Backend | PostgreSQL read → speak status |
-| "Show catering packages" | catering_get_data | Backend | PostgreSQL read + navigate |
-| "What's my catering balance?" | catering_get_data | Backend | PostgreSQL read → speak balance |
+| User Says                     | Tool Called               | Where Executed     | Action                                 |
+| ----------------------------- | ------------------------- | ------------------ | -------------------------------------- |
+| "Go to profile"               | app_navigate              | Frontend           | router.push('/profile')                |
+| "Go back"                     | app_go_back               | Frontend           | router.back()                          |
+| "What's in my cart?"          | app_get_context           | Frontend           | Read Zustand state                     |
+| "I want takeaway"             | set_order_type            | Frontend           | useCartStore.setOrderType('Take Away') |
+| "Add 2 masala dosa"           | menu_search + cart_update | Backend + Frontend | Fetch real ID, then addItem()          |
+| "How many points do I have?"  | customer_get_rewards      | Backend            | PostgreSQL read → speak real value     |
+| "Show my orders"              | customer_get_orders       | Backend            | PostgreSQL read → speak recent orders  |
+| "Where is my delivery?"       | order_get_tracking        | Backend            | PostgreSQL read → speak status         |
+| "Show catering packages"      | catering_get_data         | Backend            | PostgreSQL read + navigate             |
+| "What's my catering balance?" | catering_get_data         | Backend            | PostgreSQL read → speak balance        |
 
 ---
 

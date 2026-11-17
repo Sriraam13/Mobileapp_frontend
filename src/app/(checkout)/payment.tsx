@@ -23,7 +23,7 @@ import { resolveOutletLocation, getDistanceInKm, calculateDeliveryFee } from '..
 
 WebBrowser.maybeCompleteAuthSession();
 
-type PaymentMethod = 'UPI' | 'Cash';
+type PaymentMethod = 'UPI' | 'Cash' | 'Pay at Counter';
 
 function generateTempOrderId(): string {
   return 'ORD-' + Math.floor(100000 + Math.random() * 900000);
@@ -65,8 +65,10 @@ export default function PaymentScreen() {
   const { setCurrentOrder, addPastOrder } = useOrderStore();
   const { selectedDeliveryAddress, addresses, selectedAddressId } = useAddressStore();
 
-  // Delivery orders support both Cash on Delivery (for easy testing) and UPI / Online payment
-  const [selectedMethod, setSelectedMethod] = useState<PaymentMethod>(orderType === 'Delivery' ? 'Cash' : 'UPI');
+  // Delivery orders support COD and UPI. Dine-In and Takeaway support Pay at Counter and UPI.
+  const [selectedMethod, setSelectedMethod] = useState<PaymentMethod>(
+    orderType === 'Delivery' ? 'Cash' : 'Pay at Counter'
+  );
   const [loading, setLoading] = useState(false);
   const [paymentFailedReason, setPaymentFailedReason] = useState('');
 
@@ -352,6 +354,223 @@ export default function PaymentScreen() {
       }
     }
 
+    if (selectedMethod === 'Pay at Counter') {
+      try {
+        setLoading(true);
+        setPaymentMethod('Pay at Counter');
+
+        let restId = 1;
+        if (selectedOutlet?.restaurant_id) {
+          restId = Number(selectedOutlet.restaurant_id);
+        }
+
+        // Sub-case 1: Dine-In Bill Settlement
+        if (isDineInSettlement) {
+          const dbId = settlementDbOrderId || settlementOrderId;
+          try {
+            await orderApi.settleDineInPayment(dbId, {
+              payment_method: 'Pay at Counter',
+              amount_paid: effectiveTotalVal,
+            });
+          } catch (e) {
+            console.warn('[PaymentScreen] Settle payment API warning, proceeding with counter settlement:', e);
+          }
+
+          useDineInSessionStore.getState().completeDineInSession();
+          setLoading(false);
+          setPaymentSuccess('COUNTER');
+
+          router.replace({
+            pathname: '/order-completed',
+            params: {
+              orderId: settlementOrderId || dbId,
+              dbOrderId: settlementDbOrderId || dbId,
+              tableNumber: effectiveTable,
+              totalAmount: String(effectiveTotalVal),
+              paymentMethod: 'Pay at Counter',
+              cartItems: JSON.stringify(settlementCartItems || []),
+              orderType: 'Dine In',
+              date: new Date().toISOString(),
+            }
+          });
+          return;
+        }
+
+        const formattedCart = Object.values(items).map(item => ({
+          id: Number(item.id || (item as any).menu_item_id),
+          name: item.name,
+          image: item.image,
+          quantity: Number(item.quantity || 1),
+          price: Number(item.price || 0),
+          title: item.name,
+          itemName: item.name,
+          image_url: item.image,
+          note: item.note || ''
+        }));
+
+        // Sub-case 2: Initial Dine-In Order with Pay at Counter
+        if (orderType === 'Dine In') {
+          const orderData = {
+            restaurant_id: restId,
+            table_number: effectiveTable,
+            order_type: 'DINE_IN',
+            delivery_address: null,
+            delivery_address_id: null,
+            delivery_fee: 0,
+            packaging_fee: 0,
+            tip_amount: 0,
+            payment_method: 'Pay at Counter',
+            phone: userPhone,
+            cart: formattedCart,
+            subtotal,
+            gst,
+            service_charge: serviceCharge,
+            discount_amount: discountAmount,
+            discount_code: discountCode || null,
+            total_amount: effectiveTotalVal
+          };
+
+          let generatedOrderId = generateTempOrderId();
+          let dbOrderId = '';
+          try {
+            const resultData = await orderApi.createOrder(orderData);
+            if (resultData && (resultData.success || resultData.orderId || resultData.dbOrderId)) {
+              if (resultData.orderId) generatedOrderId = resultData.orderId;
+              if (resultData.dbOrderId) dbOrderId = resultData.dbOrderId.toString();
+            }
+          } catch (e: any) {
+            console.error('Failed to post Dine-In Pay at Counter order', e);
+            Alert.alert('Order Placement Failed', e?.message || 'Failed to place dine-in order.');
+            setLoading(false);
+            return;
+          }
+
+          setLoading(false);
+          setPaymentSuccess('COUNTER');
+
+          const finalOrder = {
+            orderId: generatedOrderId,
+            dbOrderId,
+            total: effectiveTotalVal.toString(),
+            paymentMethod: 'Pay at Counter',
+            phone: userPhone,
+            tableNumber: effectiveTable,
+            itemCount: getItemCount().toString(),
+            cart: JSON.stringify(formattedCart),
+            orderType: 'Dine In',
+            subtotal: subtotal.toString(),
+            discountAmount: discountAmount.toString(),
+            discountCode: discountCode || ''
+          };
+
+          setCurrentOrder(finalOrder as any);
+          addPastOrder({
+            orderId: generatedOrderId,
+            dbOrderId,
+            date: new Date().toISOString(),
+            total: effectiveTotalVal,
+            itemsCount: getItemCount(),
+            status: 'Preparing',
+            customer_phone: userPhone || '',
+            order_type: 'Dine In',
+            table_number: effectiveTable,
+          });
+          setLiveOrder('Dine In', generatedOrderId, dbOrderId, 'Preparing');
+          clearCart();
+
+          router.replace({
+            pathname: '/order-completed',
+            params: {
+              orderId: generatedOrderId,
+              dbOrderId,
+              tableNumber: effectiveTable,
+              totalAmount: String(effectiveTotalVal),
+              paymentMethod: 'Pay at Counter',
+              cartItems: JSON.stringify(formattedCart),
+              orderType: 'Dine In',
+              date: new Date().toISOString(),
+            }
+          });
+          return;
+        }
+
+        // Sub-case 3: Take Away Order with Pay at Counter
+        const orderData = {
+          restaurant_id: restId,
+          table_number: null,
+          order_type: 'TAKEAWAY',
+          delivery_address: null,
+          delivery_address_id: null,
+          delivery_fee: 0,
+          packaging_fee: 0,
+          tip_amount: 0,
+          payment_method: 'Pay at Counter',
+          phone: userPhone,
+          cart: formattedCart,
+          subtotal,
+          gst,
+          service_charge: 0,
+          discount_amount: discountAmount,
+          discount_code: discountCode || null,
+          total_amount: effectiveTotalVal
+        };
+
+        let generatedOrderId = generateTempOrderId();
+        let dbOrderId = '';
+        try {
+          const resultData = await orderApi.createOrder(orderData);
+          if (resultData && (resultData.success || resultData.orderId || resultData.dbOrderId)) {
+            if (resultData.orderId) generatedOrderId = resultData.orderId;
+            if (resultData.dbOrderId) dbOrderId = resultData.dbOrderId.toString();
+          }
+        } catch (e: any) {
+          console.error('Failed to post Takeaway Pay at Counter order', e);
+          Alert.alert('Order Placement Failed', e?.message || 'Failed to place takeaway order.');
+          setLoading(false);
+          return;
+        }
+
+        setLoading(false);
+        setPaymentSuccess('COUNTER');
+
+        const finalOrder = {
+          orderId: generatedOrderId,
+          dbOrderId,
+          total: effectiveTotalVal.toString(),
+          paymentMethod: 'Pay at Counter',
+          phone: userPhone,
+          tableNumber: '',
+          itemCount: getItemCount().toString(),
+          cart: JSON.stringify(formattedCart),
+          orderType: 'Take Away',
+          subtotal: subtotal.toString(),
+          discountAmount: discountAmount.toString(),
+          discountCode: discountCode || ''
+        };
+
+        setCurrentOrder(finalOrder as any);
+        addPastOrder({
+          orderId: generatedOrderId,
+          dbOrderId,
+          date: new Date().toISOString(),
+          total: effectiveTotalVal,
+          itemsCount: getItemCount(),
+          status: 'Preparing',
+          customer_phone: userPhone || '',
+          order_type: 'Take Away',
+        });
+        setLiveOrder('Take Away', generatedOrderId, dbOrderId, 'Preparing');
+        clearCart();
+        router.replace({ pathname: '/order-success', params: finalOrder });
+        return;
+      } catch (err: any) {
+        setLoading(false);
+        console.error('Error in Pay at Counter:', err);
+        Alert.alert('Payment Error', err?.message || 'Something went wrong while confirming Pay at Counter.');
+        return;
+      }
+    }
+
     setLoading(true);
     setPaymentMethod('UPI');
 
@@ -582,27 +801,71 @@ export default function PaymentScreen() {
           <Text style={styles.subtitle}>Choose a payment method to complete your order.</Text>
 
           <View style={styles.methodsContainer}>
-            {/* UPI Option */}
-            <View>
-              <View style={[styles.methodCard, styles.methodSelected]}>
-                <View style={[styles.methodIconWrap, styles.iconBgOrange]}>
-                  <Ionicons name="phone-portrait-outline" size={20} color="#fff" />
-                </View>
-                <View style={styles.methodTextContainer}>
-                  <Text style={styles.methodName}>UPI / Online Payment</Text>
-                  <Text style={styles.methodDesc}>GPay, PhonePe, Paytm, Card & Netbanking</Text>
-                </View>
-                <View style={[styles.radioCircle, styles.radioSelected]}>
-                  <Ionicons name="checkmark" size={14} color="#fff" />
-                </View>
+            {/* Pay at Counter Option */}
+            <TouchableOpacity
+              style={[
+                styles.methodCard,
+                selectedMethod === 'Pay at Counter' ? styles.methodSelected : styles.methodUnselected
+              ]}
+              onPress={() => setSelectedMethod('Pay at Counter')}
+              activeOpacity={0.8}
+            >
+              <View style={[styles.methodIconWrap, { backgroundColor: '#00a01d' }]}>
+                <Ionicons name="storefront-outline" size={20} color="#fff" />
               </View>
-
-              <View style={styles.paymentInfoBox}>
-                <Ionicons name="information-circle-outline" size={20} color="#00a01d" />
-                <Text style={styles.paymentInfoText}>
-                  You will be securely redirected to complete payment via Google Pay, PhonePe, Paytm, Cards, or Netbanking.
+              <View style={styles.methodTextContainer}>
+                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                  <Text style={styles.methodName}>Pay at Counter</Text>
+                  <View style={styles.counterBadge}>
+                    <Text style={styles.counterBadgeText}>CASH / CARD / UPI</Text>
+                  </View>
+                </View>
+                <Text style={styles.methodDesc}>
+                  {isDineInSettlement || orderType === 'Dine In'
+                    ? 'Pay cashier directly at billing counter to settle table bill'
+                    : 'Pay at restaurant counter when picking up your takeaway parcel'}
                 </Text>
               </View>
+              <View style={[styles.radioCircle, selectedMethod === 'Pay at Counter' ? styles.radioSelected : styles.radioUnselected]}>
+                {selectedMethod === 'Pay at Counter' && <Ionicons name="checkmark" size={14} color="#fff" />}
+              </View>
+            </TouchableOpacity>
+
+            {/* UPI Option */}
+            <TouchableOpacity
+              style={[
+                styles.methodCard,
+                selectedMethod === 'UPI' ? styles.methodSelected : styles.methodUnselected,
+                { marginTop: 10 }
+              ]}
+              onPress={() => setSelectedMethod('UPI')}
+              activeOpacity={0.8}
+            >
+              <View style={[styles.methodIconWrap, styles.iconBgOrange]}>
+                <Ionicons name="phone-portrait-outline" size={20} color="#fff" />
+              </View>
+              <View style={styles.methodTextContainer}>
+                <Text style={styles.methodName}>UPI / Online Payment</Text>
+                <Text style={styles.methodDesc}>GPay, PhonePe, Paytm, Card & Netbanking</Text>
+              </View>
+              <View style={[styles.radioCircle, selectedMethod === 'UPI' ? styles.radioSelected : styles.radioUnselected]}>
+                {selectedMethod === 'UPI' && <Ionicons name="checkmark" size={14} color="#fff" />}
+              </View>
+            </TouchableOpacity>
+
+            <View style={styles.paymentInfoBox}>
+              <Ionicons
+                name={selectedMethod === 'Pay at Counter' ? 'storefront-outline' : 'information-circle-outline'}
+                size={20}
+                color={selectedMethod === 'Pay at Counter' ? '#00a01d' : '#ff3400'}
+              />
+              <Text style={styles.paymentInfoText}>
+                {selectedMethod === 'Pay at Counter'
+                  ? (isDineInSettlement || orderType === 'Dine In'
+                      ? `Show your Table No. (${effectiveTable.replace('T-', '')}) at the cashier billing counter to settle your bill via Cash, Card, or UPI.`
+                      : 'Your takeaway order will be prepared immediately. Pay at the billing counter when picking up your parcel.')
+                  : 'You will be securely redirected to complete payment via Google Pay, PhonePe, Paytm, Cards, or Netbanking.'}
+              </Text>
             </View>
           </View>
         </View>
@@ -648,7 +911,7 @@ export default function PaymentScreen() {
         >
           <View style={styles.payBtnContent}>
             <Ionicons
-              name="lock-closed"
+              name={selectedMethod === 'Pay at Counter' ? 'storefront-outline' : 'lock-closed'}
               size={16}
               color="#fff"
               style={styles.payBtnIcon}
@@ -656,6 +919,8 @@ export default function PaymentScreen() {
             <Text style={styles.payBtnText}>
               {loading
                 ? 'Processing...'
+                : selectedMethod === 'Pay at Counter'
+                ? `Confirm Pay at Counter (Rs. ${effectiveTotalVal.toFixed(2)})`
                 : `Pay Rs. ${effectiveTotalVal.toFixed(2)} via UPI / Online`}
             </Text>
           </View>
@@ -801,6 +1066,18 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     color: '#000',
     marginBottom: 2,
+  },
+  counterBadge: {
+    backgroundColor: '#e6f7ec',
+    borderRadius: 6,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    marginLeft: 8,
+  },
+  counterBadgeText: {
+    color: '#00a01d',
+    fontSize: 9,
+    fontWeight: '700',
   },
   methodDesc: {
     fontSize: 11,

@@ -214,6 +214,11 @@ export const ROUTE_ALIASES: Record<string, string> = {
   'paylater': '/checkout',
   'pay later dine in': '/checkout',
   'dine in pay later': '/checkout',
+  'pay at counter': '/payment',
+  'pay counter': '/payment',
+  'counter pay': '/payment',
+  'counter': '/payment',
+  'settle at counter': '/payment',
 
   // Regions
   'north indian': '/menu',
@@ -412,6 +417,7 @@ export const SUPPORTED_ACTIONS = new Set([
   // Dine-In
   'dine_in_pay_later',
   'dine_in_pay_bill',
+  'dine_in_pay_counter',
 ]);
 
 // ─── Supported Vapi Tool Names ────────────────────────────────────────────
@@ -433,8 +439,11 @@ export const SUPPORTED_VAPI_TOOLS = new Set([
   'dine_in_action',
   'dine_in_pay_later',
   'dine_in_pay_bill',
+  'dine_in_pay_counter',
   'pay_bill',
   'pay_later',
+  'pay_counter',
+  'pay_at_counter',
   'catering_choose_package',
   'catering_select_package',
   'catering_set_event_details',

@@ -131,14 +131,22 @@ export function normalizeName(value: unknown): string {
     .replace(/\b(filter coffee|degree coffee|kumbakonam degree coffee|hot coffee|coffee)\b/g, 'mini coffee')
     .replace(/\b(filter tea|hot tea|tea|chai)\b/g, 'mini tea')
     .replace(/\brava kesari\b/g, 'kesari')
-    .replace(/\b(ragi dosa|ragi dosai|onion dosa|onion dosai|ghee roast|ghee dosa|kal dosa|podi dosa|podie dosa|plain dosa|dosa|dosai)\b/g, 'veg dosai')
-    .replace(/\b(masala dosa|masala dosai|rava dosa|rava dosai)\b/g, 'rava masala dosai')
+    // Distinct dosa varieties: NEVER replace missing varieties (like ragi dosa or masala dosa) with random items
+    .replace(/\b(rava dosa|rava dosai)\b/g, 'rava masala dosai')
+    .replace(/\b(spl masala dosa|spl masala dosai|special masala dosa)\b/g, 'special masala dosai')
     .replace(/\b(paneer biryani|paneer briyani)\b/g, 'paneer biriyani')
-    .replace(/\b(veg biryani|vegetable biryani|biryani)\b/g, 'veg. biryani / onion raitha')
-    .replace(/\b(mini idli|mini idly|idlis|idly|idli|steamed idli)\b/g, 'mini idly(14)')
-    .replace(/\b(spl vadai|special vadai|vadais|medu vada|sambar vada|vadai|vada)\b/g, 'spl vadai')
+    .replace(/\b(veg biryani|vegetable biryani)\b/g, 'veg. biryani / onion raitha')
+    // Idly mapping: "idly" alone means "Idly (2)". Only "mini idly" is "Mini Idly(14)". Single piece is "Idly single piece".
+    .replace(/\b(mini idli|mini idly|mini idlies)\b/g, 'mini idly(14)')
+    .replace(/\b(single idly|single idli|1 idly|1 idli|one idli|one idly|single piece idly|single piece idli|idly single piece)\b/g, 'idly single piece')
+    .replace(/\b(2 idly|2 idli|2 idlis|two idly|two idlis|two idli|plate idly|plate idli|idlis|idly|idli|steamed idli)\b/g, 'idly (2)')
+    // Sambar: keep pure sambar distinct from sambar vadai / sambar idly
+    .replace(/\b(sambar vadai|sambar vada)\b/g, 'sambar vadai')
+    .replace(/\b(sambar idly|sambar idli)\b/g, 'sambar idly')
+    .replace(/\b(tiffin sambar|extra sambar)\b/g, 'tiffin sambar')
+    .replace(/\b(spl vadai|special vadai|vadais|medu vada|medu vadai)\b/g, 'spl vadai')
     .replace(/\b(poori masala|poori bhaji|poori|puri)\b/g, 'poori masala')
-    .replace(/\b(veg fried rice|fried rice)\b/g, 'veg fried rice mini')
+    .replace(/\b(veg fried rice)\b/g, 'veg fried rice mini')
     .replace(/\b(gobi fried rice)\b/g, 'gobi fried rice mini')
     .replace(/\b(aloo paneer)\b/g, 'aloo paneer mini')
     .replace(/\b(gobi masala)\b/g, 'gobi masala mini')
@@ -257,6 +265,68 @@ export function matchMenuItem(
   const queryTokens = tokenize(query);
   const queryJoined = queryTokens.join('');
 
+  // 0. Strict availability & disambiguation guards based on user requirements:
+  const isExplicitRava = /\brava\b/i.test(query);
+  const isMasalaDosa = /\bmasala\s*dosa/i.test(query);
+  const isRagiDosa = /\bragi\s*dosa/i.test(query);
+  const isPureSambar = /\bsambar\b/i.test(query) && !/\b(vadai|vada|idly|idli|rice)\b/i.test(query);
+  const isMiniIdly = /\bmini\b/i.test(query);
+  const isIdly = !isMiniIdly && /\b(idli|idly|idlis)\b/i.test(query);
+  const isSingleIdly = /\b(single|one|1)\b/i.test(query);
+
+  // If user specifically asked for "Masala Dosa" without "rava", do NOT substitute with "Rava Masala Dosai"
+  if (isMasalaDosa && !isExplicitRava) {
+    const exactMasala = pool.find((i) => {
+      const n = normalizeName(i.name);
+      return (n === 'masala dosa' || n === 'masala dosai') && !n.includes('rava');
+    });
+    if (!exactMasala) {
+      return empty;
+    }
+  }
+
+  // If user asked for Ragi Dosa, it is not on the menu
+  if (isRagiDosa) {
+    return empty;
+  }
+
+  // If user asked for pure Sambar, do NOT match Sambar Vadai or Sambar Idly
+  if (isPureSambar) {
+    const sambarItem = pool.find((i) => {
+      const n = normalizeName(i.name);
+      return (n === 'sambar' || n === 'tiffin sambar') && !/\b(vadai|vada|idly|idli|rice)\b/i.test(n);
+    });
+    if (sambarItem) {
+      return { status: 'exact', item: sambarItem, candidates: [sambarItem], confidence: 1 };
+    }
+    return empty;
+  }
+
+  // If user asked for Idly (without saying mini), pick Idly (2) or Idly single piece, NEVER Mini Idly
+  if (isIdly) {
+    if (isSingleIdly) {
+      const singleItem = pool.find((i) => /single piece|idly\(1\)/i.test(i.name));
+      if (singleItem) return { status: 'exact', item: singleItem, candidates: [singleItem], confidence: 1 };
+    } else {
+      const twoItem = pool.find((i) => /idly\s*\(2\)|idly\(2\)/i.test(i.name));
+      if (twoItem) return { status: 'exact', item: twoItem, candidates: [twoItem], confidence: 1 };
+    }
+  }
+
+  // STRICT GUARD: Standalone Paneer Butter Masala curry without pulkha/phulka/naan combo
+  const isExplicitCombo = /\b(pulkha|phulka|nan\s*with|naan\s*with|combo|roti\s*with)\b/i.test(query);
+  const isPaneerButter = /\bpaneer\s*butter(\s*masala)?\b/i.test(query) || /\bpaneer\s*masala\b/i.test(query);
+  if (isPaneerButter && !isExplicitCombo) {
+    const standalone = pool.find((i) => {
+      const n = normalizeName(i.name);
+      return (n === 'paneer butter masala' || n === 'paneer butter' || n === 'paneer masala') && !/\b(pulkha|phulka|naan|nan|roti|combo)\b/i.test(n);
+    });
+    if (!standalone) {
+      // Do NOT silently substitute combo dishes like "Pulkha with Paneer Butter Masala"!
+      return empty;
+    }
+  }
+
   // 1. Exact match on the normalized / token-folded name.
   const exact = pool.filter((item) => {
     const itemTokens = tokenize(item.name);
@@ -281,8 +351,21 @@ export function matchMenuItem(
   }
 
   // 2 + 3. Score everything, then decide between confident pick vs. clarification.
+  const STAPLE_CARRIERS = ['pulkha', 'phulka', 'roti', 'chapati', 'paratha', 'parotta', 'combo', 'meals', 'thali'];
+  const queryLower = query.toLowerCase();
+
   const scored = pool
-    .map((item) => ({ item, score: scoreMatch(queryTokens, tokenize(item.name)) }))
+    .map((item) => {
+      const itemLower = item.name.toLowerCase();
+      // If item has a major staple/carrier (e.g. "pulkha with...") that query did not ask for, do NOT allow fuzzy match!
+      const hasUnrequestedCarrier = STAPLE_CARRIERS.some(
+        (c) => itemLower.includes(c) && !queryLower.includes(c)
+      );
+      if (hasUnrequestedCarrier) {
+        return { item, score: 0 };
+      }
+      return { item, score: scoreMatch(queryTokens, tokenize(item.name)) };
+    })
     .filter((entry) => entry.score >= FUZZY_ACCEPT_THRESHOLD)
     .sort((a, b) => b.score - a.score);
 

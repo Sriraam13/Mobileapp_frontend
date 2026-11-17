@@ -1030,7 +1030,7 @@ export default function Home() {
             style={[styles.tabBtn, activeTab === 'Bulk' && styles.activeTabBtn]}
             onPress={() => {
               setActiveTab('Bulk');
-              router.push('/(main)/catering-choose-package');
+              router.push('/(main)/bulk-catering');
             }}
           >
             <Text style={[styles.tabText, activeTab === 'Bulk' && styles.activeTabText]}>Catering</Text>

@@ -40,6 +40,8 @@ export default function ChoosePackage() {
   const initialPkg = (params.selectedPackage as string) || (params.packageCode as string) || cateringStore.selectedPackage || null;
   const [selectedPackage, setSelectedPackage] = useState<string | null>(initialPkg);
   const [creatingSession, setCreatingSession] = useState(false);
+  const currentGuests = parseInt((params.guestCount as string) || cateringStore.guestCount || '50', 10);
+  const displayGuests = isNaN(currentGuests) || currentGuests < 50 ? 50 : currentGuests;
 
   // Show more / Items modal states
   const [expandedPackages, setExpandedPackages] = useState<Record<string, boolean>>({});
@@ -326,7 +328,7 @@ export default function ChoosePackage() {
       {renderTabs()}
 
       <View style={styles.minOrderContainer}>
-        <Text style={styles.minOrderText}>Minimum order: 50 guests</Text>
+        <Text style={styles.minOrderText}>Ordering for {displayGuests} guests • Min. 50 guests</Text>
       </View>
 
       {loading ? (

@@ -31,7 +31,7 @@ import {
 } from 'react-native';
 import { useRouter, usePathname } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useVapiStore } from '../store/vapiStore';
+import { useVapiStore, sanitizeTranscript } from '../store/vapiStore';
 import { Ionicons, FontAwesome5 } from '@expo/vector-icons';
 import { useVoiceAgentStore } from '../store/useVoiceAgentStore';
 import { useCartStore } from '../store/useCartStore';
@@ -477,60 +477,89 @@ export default function VoiceAgentModal() {
                 </View>
               ) : (
                 <View style={styles.messageList}>
-                  {messages.map((msg, idx) => (
-                    <View
-                      key={idx}
-                      style={[
-                        styles.messageWrapper,
-                        msg.role === 'user' ? styles.messageWrapperUser : styles.messageWrapperAgent,
-                      ]}
-                    >
-                      {msg.role !== 'user' && (
-                        <View style={styles.smallAvatar}>
-                          <Image source={require('../../assets/images/agent_waiter.png')} style={styles.tinyChef} />
-                        </View>
-                      )}
+                  {messages.map((msg, idx) => {
+                    const isLast = idx === messages.length - 1;
+                    const isAgent = msg.role !== 'user';
+                    let bubbleText = sanitizeTranscript(msg.text, isAgent ? 'assistant' : 'user');
+
+                    // If this is the active speaker and streaming partial transcript is live,
+                    // render inside this same bubble so it never splits into two separate bubbles!
+                    if (isLast && isAgent && partialAgentTranscript) {
+                      const cleanPartial = sanitizeTranscript(partialAgentTranscript, 'assistant').trim();
+                      if (cleanPartial) {
+                        if (cleanPartial.startsWith(bubbleText)) {
+                          bubbleText = cleanPartial;
+                        } else if (!bubbleText.endsWith(cleanPartial)) {
+                          bubbleText = `${bubbleText} ${cleanPartial}`;
+                        }
+                      }
+                    } else if (isLast && !isAgent && partialUserTranscript) {
+                      const cleanPartialUser = sanitizeTranscript(partialUserTranscript, 'user').trim();
+                      if (cleanPartialUser) {
+                        if (cleanPartialUser.startsWith(bubbleText)) {
+                          bubbleText = cleanPartialUser;
+                        } else if (!bubbleText.endsWith(cleanPartialUser)) {
+                          bubbleText = `${bubbleText} ${cleanPartialUser}`;
+                        }
+                      }
+                    }
+
+                    return (
                       <View
+                        key={idx}
                         style={[
-                          styles.messageBubble,
-                          msg.role === 'user' ? styles.messageBubbleUser : styles.messageBubbleAgent,
+                          styles.messageWrapper,
+                          msg.role === 'user' ? styles.messageWrapperUser : styles.messageWrapperAgent,
                         ]}
                       >
-                        <Text
+                        {isAgent && (
+                          <View style={styles.smallAvatar}>
+                            <Image source={require('../../assets/images/agent_waiter.png')} style={styles.tinyChef} />
+                          </View>
+                        )}
+                        <View
                           style={[
-                            styles.messageText,
-                            msg.role === 'user' ? styles.messageTextUser : styles.messageTextAgent,
+                            styles.messageBubble,
+                            msg.role === 'user' ? styles.messageBubbleUser : styles.messageBubbleAgent,
                           ]}
                         >
-                          {msg.text}
-                        </Text>
-                      </View>
-                      {msg.role === 'user' && (
-                        <View style={styles.wfUserAvatar}>
-                          <Ionicons name="person" size={20} color="#fff" />
+                          <Text
+                            style={[
+                              styles.messageText,
+                              msg.role === 'user' ? styles.messageTextUser : styles.messageTextAgent,
+                            ]}
+                          >
+                            {bubbleText}
+                          </Text>
                         </View>
-                      )}
-                    </View>
-                  ))}
+                        {msg.role === 'user' && (
+                          <View style={styles.wfUserAvatar}>
+                            <Ionicons name="person" size={20} color="#fff" />
+                          </View>
+                        )}
+                      </View>
+                    );
+                  })}
 
-                  {partialAgentTranscript ? (
+                  {/* Standalone streaming bubble ONLY if there are no prior messages from this speaker */}
+                  {partialAgentTranscript && (messages.length === 0 || messages[messages.length - 1].role === 'user') ? (
                     <View style={[styles.messageWrapper, styles.messageWrapperAgent]}>
                       <View style={styles.smallAvatar}>
                         <Image source={require('../../assets/images/agent_waiter.png')} style={styles.tinyChef} />
                       </View>
                       <View style={[styles.messageBubble, styles.messageBubbleAgent]}>
-                        <Text style={[styles.messageText, styles.messageTextAgent, { opacity: 0.75 }]}>
-                          {partialAgentTranscript}
+                        <Text style={[styles.messageText, styles.messageTextAgent, { opacity: 0.85 }]}>
+                          {sanitizeTranscript(partialAgentTranscript, 'assistant')}
                         </Text>
                       </View>
                     </View>
                   ) : null}
 
-                  {partialUserTranscript ? (
+                  {partialUserTranscript && (messages.length === 0 || messages[messages.length - 1].role !== 'user') ? (
                     <View style={[styles.messageWrapper, styles.messageWrapperUser]}>
                       <View style={[styles.messageBubble, styles.messageBubbleUser]}>
-                        <Text style={[styles.messageText, styles.messageTextUser, { opacity: 0.75 }]}>
-                          {partialUserTranscript}
+                        <Text style={[styles.messageText, styles.messageTextUser, { opacity: 0.85 }]}>
+                          {sanitizeTranscript(partialUserTranscript, 'user')}
                         </Text>
                       </View>
                       <View style={styles.wfUserAvatar}>

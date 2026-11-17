@@ -191,6 +191,11 @@ export default function CheckoutScreen() {
     }
 
     if (orderType === 'Dine In') {
+      if (!dineInPayLater && !dineInSession.isActive) {
+        router.push('/payment');
+        return;
+      }
+
       setSubmitting(true);
       try {
         const formattedCart = cartItems.map(item => ({
@@ -461,10 +466,10 @@ export default function CheckoutScreen() {
                   />
                   <View style={{ flex: 1, marginLeft: 8 }}>
                     <Text style={[styles.dineInChoiceText, !dineInPayLater && styles.dineInChoiceTextActive]}>
-                      Pay Now (UPI / Cards)
+                      Pay Now (Counter / UPI)
                     </Text>
                     <Text style={styles.dineInChoiceDesc}>
-                      Pay upfront before kitchen preparation starts.
+                      Pay at counter or online before kitchen preparation starts.
                     </Text>
                   </View>
                 </TouchableOpacity>
